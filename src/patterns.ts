@@ -98,17 +98,34 @@ export function generateRound(opts: GenerateOptions): PatternRound {
 
   const unitItems = shuffle(opts.pool.slice(), rng).slice(0, needed);
 
-  // Show enough cells that the repetition is obvious without the row
-  // wrapping on a phone screen. For period-2 patterns we want 3 full reps
-  // so AB doesn't look like a one-off pair. Period-3 and 4 are clearer at
-  // 2 reps already.
+  // Show enough cells that the repetition is obvious. For period-2
+  // patterns we want 3 full reps so AB doesn't look like a one-off
+  // pair. Period-3 and 4 are clearer at 2 reps already.
   const period = template.length;
   const fullReps = period === 2 ? 3 : 2;
-  // Partial tail (cells beyond the full reps) lets the answer land
-  // mid-cycle; only allow this from level 2 onward.
-  const tailMax = period === 2 ? 1 : period === 3 ? 2 : 0;
+
+  // Partial tail (cells beyond the last full rep) lets the missing
+  // slot land *mid-cycle* — pedagogically this is the harder and more
+  // useful case: instead of always answering "the cycle starts over",
+  // the child has to figure out where in the cycle the gap falls.
+  //
+  // tailMax = period - 1 covers every non-zero offset into the cycle.
+  // At level 1 we keep tailMax = 0 (always whole cycles) so the very
+  // first patterns are maximally obvious. From level 2 onward, bias
+  // strongly toward showing *some* partial: only 1 in 5 rounds shows a
+  // clean cycle break, the rest end mid-cycle.
+  const tailMax = period - 1;
   const allowPartial = opts.level >= 2 ? tailMax : 0;
-  const partialLen = allowPartial > 0 ? Math.floor(rng() * (allowPartial + 1)) : 0;
+  let partialLen: number;
+  if (allowPartial <= 0) {
+    partialLen = 0;
+  } else if (rng() < 0.2) {
+    // Occasionally fall back to a clean cycle break for variety.
+    partialLen = 0;
+  } else {
+    // Pick a partial length in [1, allowPartial] uniformly.
+    partialLen = 1 + Math.floor(rng() * allowPartial);
+  }
 
   const visible: Item[] = [];
   for (let r = 0; r < fullReps; r++) {

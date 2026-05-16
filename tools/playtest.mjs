@@ -48,7 +48,9 @@ const url = `http://127.0.0.1:${port}/`;
 const execPath = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const browser = await chromium.launch({ executablePath: execPath });
 const ctx = await browser.newContext({
-  viewport: { width: 390, height: 844 },
+  // Landscape: that's the play orientation; a rotate-me overlay hides
+  // the game in portrait.
+  viewport: { width: 844, height: 390 },
   deviceScaleFactor: 2,
 });
 // Deterministic PRNG so runs are repeatable.
