@@ -51,7 +51,10 @@ console.log('Serving', dist, 'at', url);
 const execPath = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const browser = await chromium.launch({ executablePath: execPath });
 const ctx = await browser.newContext({
-  viewport: { width: 390, height: 844 }, // iPhone 14-ish
+  // Default to landscape since that's how the game is meant to be played
+  // (a rotate-me overlay covers the UI when the viewport is portrait on a
+  // phone-sized screen).
+  viewport: { width: 844, height: 390 },
   deviceScaleFactor: 2,
 });
 const page = await ctx.newPage();
@@ -162,15 +165,16 @@ await page.evaluate(() => {
 // generator is unit-testable directly.)
 await snap('08-level1-fruit');
 
-// Tablet viewport.
+// Tablet viewport (portrait shouldn't trigger the rotate overlay because
+// the width is > 540px).
 await page.setViewportSize({ width: 820, height: 1180 });
 await page.waitForTimeout(80);
-await snap('09-tablet');
+await snap('09-tablet-portrait');
 
-// Phone in landscape.
-await page.setViewportSize({ width: 844, height: 390 });
+// Phone in portrait should show the rotate overlay.
+await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(80);
-await snap('10-landscape');
+await snap('11-rotate-overlay');
 
 await browser.close();
 server.close();

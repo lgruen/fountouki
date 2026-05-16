@@ -282,6 +282,81 @@ body {
 .footer-note { font-size: 12px; color: var(--muted); margin: 12px 0 0; text-align: center; }
 .footer-note a { color: var(--muted); }
 
+/* Rotate-to-landscape overlay. Hidden by default; shown only when the
+   viewport is in portrait orientation AND small enough to be a phone
+   (so tablets and desktops never see it). The CSS does all the work —
+   no JS needed. */
+.rotate-hint {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 50;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+@media (orientation: portrait) and (max-width: 540px) {
+  .rotate-hint { display: flex; }
+  /* Hide gameplay while the overlay is up so audio doesn't fire from a
+     stray accidental tap. */
+  #app { visibility: hidden; }
+}
+.rotate-card {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+.rotate-phone {
+  width: 120px;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: rotate-bounce 2.2s ease-in-out infinite;
+  transform-origin: center;
+}
+.rotate-phone-body {
+  width: 70px;
+  height: 130px;
+  background: var(--card);
+  border: 4px solid var(--ink);
+  border-radius: 14px;
+  position: relative;
+  box-shadow: var(--shadow);
+}
+.rotate-phone-body::before {
+  content: "";
+  position: absolute;
+  top: 8px; left: 50%;
+  width: 22px; height: 4px;
+  background: var(--ink);
+  border-radius: 2px;
+  transform: translateX(-50%);
+}
+.rotate-phone-body::after {
+  content: "";
+  position: absolute;
+  bottom: 6px; left: 50%;
+  width: 14px; height: 14px;
+  border: 3px solid var(--ink);
+  border-radius: 50%;
+  transform: translateX(-50%);
+}
+@keyframes rotate-bounce {
+  0%, 100% { transform: rotate(0deg); }
+  40%      { transform: rotate(-90deg); }
+  60%      { transform: rotate(-90deg); }
+}
+.rotate-text {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+}
+
 /* In "find the repeating piece" mode, cells become tappable. */
 .cell.selectable { cursor: pointer; }
 .cell.unit-pick { box-shadow: inset 0 0 0 3px var(--accent); background: var(--accent-soft); }
