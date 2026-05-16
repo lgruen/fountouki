@@ -18,7 +18,22 @@ npm run build       # one-shot build into dist/
 npm run typecheck   # tsc --noEmit (strict)
 npm run check       # typecheck + build
 npm run screenshots # render screenshots/*.png for visual review (uses Playwright)
+npm run icons       # regenerate PWA icons from public/icon.svg
 ```
+
+## Fullscreen on a phone
+
+The site is a small installable web app (PWA): adding it to the home
+screen launches it without browser chrome.
+
+- **iPhone / iPad (Safari)**: open the site → tap the **Share** button →
+  **Add to Home Screen** → tap the new "Pattern Play" icon to launch
+  fullscreen.
+- **Android (Chrome)**: open the site → menu (⋮) → **Add to Home
+  screen** (or **Install app**) → launch from the new icon.
+
+If you change `public/icon.svg`, regenerate the PNG variants with
+`npm run icons`.
 
 ## How it works
 

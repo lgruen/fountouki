@@ -105,8 +105,11 @@ web app — see `README.md` for the basics.
   settings field) — useful when a child has progressed in past sessions.
 - **Auto-advance speed slider** — currently 1100ms between rounds.
 - **"Hide score" mode** for parents who want zero competitive pressure.
-- **Install to home screen / PWA**: add `public/manifest.webmanifest`
-  and a minimal service worker that caches `dist/` for offline use.
+- **PWA — offline support**: manifest + iOS meta tags + icons are
+  already wired (`public/manifest.webmanifest`, `public/icon.svg`,
+  `tools/icons.mjs`); "Add to Home Screen" launches in standalone
+  mode. Still missing: a service worker that caches `dist/` so it
+  plays without network after first load.
 - **Print mode**: render a PDF of patterns for paper practice
   (useful on trips without a phone).
 - **Sharable seeds**: encode the round/level into the URL so a parent

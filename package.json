@@ -10,7 +10,8 @@
     "dev": "node build.mjs --watch --serve",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build",
-    "screenshots": "node tools/screenshots.mjs"
+    "screenshots": "node tools/screenshots.mjs",
+    "icons": "node tools/icons.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
