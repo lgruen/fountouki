@@ -33,18 +33,22 @@ export interface GenerateOptions {
 }
 
 const TEMPLATES_BY_LEVEL: string[][] = [
-  // Level 1: simplest — two items alternating.
+  // Each level mixes templates of multiple periods so unit-mode actually
+  // requires looking at each pattern — otherwise the kid would learn
+  // "the answer for level N is always length K" and stop reading the row.
+  // Level 1: foundation — period 2, 2 distinct items.
   ['AB'],
-  // Level 2: still 2 items, but with a doubled element.
-  ['AB', 'AAB'],
-  // Level 3: 3 items, period 3.
-  ['AAB', 'ABB', 'ABC'],
-  // Level 4: period 3 with 3 items, plus a slight twist.
-  ['ABC', 'AAB', 'ABB'],
-  // Level 5: period 4 mostly.
-  ['AABB', 'ABAC', 'ABCB'],
-  // Level 6+: longer / trickier.
-  ['ABBC', 'AABC', 'ABCD'],
+  // Level 2: keep AB in the mix and introduce period 3 (still 2 items).
+  ['AB', 'AAB', 'ABB'],
+  // Level 3: add 3-item patterns; period 2 still appears occasionally.
+  ['AB', 'AAB', 'ABB', 'ABC'],
+  // Level 4: introduce period 4, keep some period 3.
+  ['AAB', 'ABB', 'ABC', 'AABB'],
+  // Level 5: period 4 dominates, with 3-item variants.
+  ['ABC', 'AABB', 'AABC', 'ABBC', 'ABCB'],
+  // Level 6: everything goes — 4-distinct ABCD appears, but the easier
+  // templates still come up so it doesn't feel relentlessly hard.
+  ['AB', 'AAB', 'ABC', 'AABB', 'AABC', 'ABBC', 'ABCB', 'ABCD'],
 ];
 
 function pickRng<T>(arr: readonly T[], rng: () => number): T {
