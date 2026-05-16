@@ -51,10 +51,8 @@ function el<T extends HTMLElement>(id: string): T {
 
 const seqEl = el<HTMLElement>('sequence');
 const choicesEl = el<HTMLElement>('choices');
-const feedbackEl = el<HTMLElement>('feedback');
-const starCountEl = el<HTMLElement>('star-count');
-const levelNumEl = el<HTMLElement>('level-num');
-const promptEl = el<HTMLElement>('prompt-text');
+const starsRowEl = el<HTMLElement>('stars-row');
+const levelPipsEl = el<HTMLElement>('level-pips');
 const muteBtn = el<HTMLButtonElement>('mute-btn');
 const settingsBtn = el<HTMLButtonElement>('settings-btn');
 const settingsPanel = el<HTMLElement>('settings-panel');
@@ -120,15 +118,36 @@ function renderChoices(round: PatternRound, pool: Item[]): void {
   }
 }
 
-function renderHud(): void {
-  starCountEl.textContent = String(state.stars);
-  levelNumEl.textContent = String(state.level);
-}
+const MAX_LEVEL = 6;
+const MAX_STARS_SHOWN = 10;
 
-function setFeedback(text: string, kind: 'ok' | 'bad' | 'none' = 'none'): void {
-  feedbackEl.textContent = text;
-  feedbackEl.style.color =
-    kind === 'ok' ? 'var(--ok-strong)' : kind === 'bad' ? '#c0392b' : 'var(--muted)';
+/** Re-render the HUD. If `justEarnedStar` is true, animate the newest star
+ *  and clear the animation class on a timer. If `justLeveledUp` is true,
+ *  pulse the newly-filled level pip. */
+function renderHud(justEarnedStar = false, justLeveledUp = false): void {
+  // Level pips.
+  levelPipsEl.innerHTML = '';
+  for (let i = 1; i <= MAX_LEVEL; i++) {
+    const pip = document.createElement('span');
+    pip.className = 'level-pip';
+    if (i <= state.level) pip.classList.add('filled');
+    if (justLeveledUp && i === state.level) pip.classList.add('just-filled');
+    levelPipsEl.append(pip);
+  }
+  // Stars row: render up to MAX_STARS_SHOWN slots. Filled = earned, empty
+  // = not yet. Past the cap we just keep the row full and animate a brief
+  // pulse on the cap star for each extra correct (handled by the caller
+  // setting justEarnedStar).
+  starsRowEl.innerHTML = '';
+  const filled = Math.min(state.stars, MAX_STARS_SHOWN);
+  for (let i = 0; i < MAX_STARS_SHOWN; i++) {
+    const s = document.createElement('span');
+    s.className = 'star';
+    s.textContent = '★';
+    if (i >= filled) s.classList.add('empty');
+    if (justEarnedStar && i === filled - 1) s.classList.add('new');
+    starsRowEl.append(s);
+  }
 }
 
 // ---------- Round flow ----------
@@ -137,17 +156,12 @@ function nextRound(): void {
   const theme = pickTheme();
   state.activeTheme = theme;
   state.locked = false;
-  setFeedback('');
-  promptEl.textContent =
-    state.mode === 'next' ? 'What comes next?' : 'Tap the repeating piece';
+  const round = generateRound({ pool: theme.items, level: state.level });
+  state.round = round;
   if (state.mode === 'next') {
-    const round = generateRound({ pool: theme.items, level: state.level });
-    state.round = round;
     renderSequence(round);
     renderChoices(round, theme.items);
   } else {
-    const round = generateRound({ pool: theme.items, level: state.level });
-    state.round = round;
     renderUnitMode(round);
   }
   exposeDebug();
@@ -189,21 +203,21 @@ function onChoice(btn: HTMLButtonElement, item: Item): void {
   if (item.id === state.round.answer.id) {
     state.locked = true;
     btn.classList.add('correct');
-    setFeedback('Yes! 🎉', 'ok');
     state.stars += 1;
     state.streak += 1;
-    renderHud();
+    renderHud(true /* justEarnedStar */);
     playCorrect();
     burst(70);
     // Level up every 4 correct in a row, max level 6.
-    if (state.streak >= 4 && state.level < 6) {
+    if (state.streak >= 4 && state.level < MAX_LEVEL) {
       state.level += 1;
       state.streak = 0;
-      renderHud();
+      // Slight delay so the star animation finishes first.
       setTimeout(() => {
+        renderHud(false, true /* justLeveledUp */);
         playLevelUp();
-        setFeedback(`Level ${state.level}! ⭐`, 'ok');
-      }, 500);
+        burst(50);
+      }, 480);
     }
     // Disable remaining choices.
     choicesEl.querySelectorAll<HTMLButtonElement>('.choice').forEach((b) => {
@@ -214,75 +228,131 @@ function onChoice(btn: HTMLButtonElement, item: Item): void {
     btn.classList.add('wrong');
     playIncorrect();
     state.streak = 0;
-    setFeedback('Try again 💛', 'bad');
     setTimeout(() => btn.classList.remove('wrong'), 350);
   }
 }
 
 // ---------- "Find the repeating piece" mode ----------
 
+/**
+ * Unit-mode interaction:
+ *  - Every cell starts tappable.
+ *  - First tap selects that single cell.
+ *  - Subsequent taps:
+ *      • adjacent to the left/right edge of the selection -> extend
+ *      • on the current left or right edge cell -> shrink that end
+ *      • on any other cell -> ignore (cell wiggles "no")
+ *  - A pulsing green ✓ appears under the row as soon as at least one
+ *    cell is selected. Tapping it submits.
+ *  - Correctness check is *length only*: did the kid pick a contiguous
+ *    span equal to the period? Starting position doesn't matter.
+ */
 function renderUnitMode(round: PatternRound): void {
   seqEl.innerHTML = '';
+  choicesEl.innerHTML = '';
   const unitLen = round.template.length;
-  let firstPick: number | null = null;
+
+  // Selection is the contiguous half-open range [start, end). end = start
+  // means "nothing selected".
+  let start = 0;
+  let end = 0;
 
   const cells: HTMLDivElement[] = [];
   round.visible.forEach((item, i) => {
     const cell = makeCell(item, { classes: ['selectable'] });
     cell.setAttribute('role', 'button');
     cell.tabIndex = 0;
-    cell.addEventListener('click', () => handleUnitTap(i, cell));
+    cell.addEventListener('click', () => handleTap(i, cell));
     seqEl.append(cell);
     cells.push(cell);
   });
-  // Disable the choices row in unit mode by clearing it.
-  choicesEl.innerHTML = '';
-  const hint = document.createElement('div');
-  hint.className = 'feedback';
-  hint.style.color = 'var(--muted)';
-  hint.style.fontWeight = '600';
-  hint.style.fontSize = '15px';
-  hint.textContent = 'Tap the first picture, then the last picture of the smallest piece that repeats.';
-  choicesEl.append(hint);
 
-  function handleUnitTap(idx: number, cell: HTMLDivElement): void {
+  const submit = document.createElement('button');
+  submit.id = 'unit-submit';
+  submit.className = 'unit-submit';
+  submit.setAttribute('aria-label', 'Check my answer');
+  submit.textContent = '✓';
+  submit.hidden = true;
+  submit.addEventListener('click', onSubmit);
+  choicesEl.append(submit);
+
+  function paint(): void {
+    cells.forEach((c, i) => {
+      const selected = i >= start && i < end;
+      c.classList.toggle('unit-pick', selected);
+    });
+    submit.hidden = end <= start;
+  }
+
+  function bounceNo(cell: HTMLDivElement): void {
+    cell.classList.add('bounce-no');
+    setTimeout(() => cell.classList.remove('bounce-no'), 300);
+  }
+
+  function handleTap(idx: number, cell: HTMLDivElement): void {
     if (state.locked) return;
     playTap();
-    if (firstPick === null) {
-      firstPick = idx;
-      cell.classList.add('unit-pick');
+    if (end <= start) {
+      // Nothing selected yet — start fresh at this cell.
+      start = idx;
+      end = idx + 1;
+      paint();
       return;
     }
-    if (idx <= firstPick) {
-      // Reset selection if they pick the same or earlier.
-      cells.forEach((c) => c.classList.remove('unit-pick'));
-      firstPick = idx;
-      cell.classList.add('unit-pick');
-      return;
-    }
-    const start = firstPick;
-    const end = idx;
-    const len = end - start + 1;
-    const correct = start === 0 && len === unitLen;
-    if (correct) {
+    // Extend left.
+    if (idx === start - 1) { start -= 1; paint(); return; }
+    // Extend right.
+    if (idx === end)       { end   += 1; paint(); return; }
+    // Shrink from left edge if they tap the leftmost selected cell.
+    if (idx === start)     { start += 1; paint(); return; }
+    // Shrink from right edge.
+    if (idx === end - 1)   { end   -= 1; paint(); return; }
+    // Non-adjacent: bounce that cell so the tap registers visually but
+    // selection is unchanged.
+    bounceNo(cell);
+  }
+
+  function onSubmit(): void {
+    if (state.locked) return;
+    const len = end - start;
+    if (len <= 0) return;
+    if (len === unitLen) {
       state.locked = true;
-      for (let k = start; k <= end; k++) cells[k]?.classList.add('unit-correct');
-      setFeedback('Yes! That is the piece that repeats. 🎉', 'ok');
+      for (let k = start; k < end; k++) {
+        cells[k]?.classList.remove('unit-pick');
+        cells[k]?.classList.add('unit-correct');
+      }
+      submit.hidden = true;
       state.stars += 1;
-      renderHud();
+      state.streak += 1;
+      renderHud(true);
       playCorrect();
       burst(70);
+      // Unit mode shares the same level progression as 'next' mode so
+      // pattern difficulty escalates regardless of which game type the
+      // kid plays.
+      if (state.streak >= 4 && state.level < MAX_LEVEL) {
+        state.level += 1;
+        state.streak = 0;
+        setTimeout(() => {
+          renderHud(false, true);
+          playLevelUp();
+          burst(50);
+        }, 480);
+      }
       setTimeout(nextRound, 1300);
     } else {
-      for (let k = start; k <= end; k++) cells[k]?.classList.add('unit-wrong');
+      // Wrong length: red flash on the selection, then reset.
+      for (let k = start; k < end; k++) cells[k]?.classList.add('unit-wrong');
       playIncorrect();
-      setFeedback('Not quite — the piece must start at the first picture.', 'bad');
+      state.streak = 0;
       setTimeout(() => {
         cells.forEach((c) =>
           c.classList.remove('unit-wrong', 'unit-pick', 'unit-correct'),
         );
-        firstPick = null;
-      }, 700);
+        start = end = 0;
+        paint();
+      }, 600);
     }
   }
 }

@@ -55,7 +55,7 @@ const ctx = await browser.newContext({
   // (a rotate-me overlay covers the UI when the viewport is portrait on a
   // phone-sized screen).
   viewport: { width: 844, height: 390 },
-  deviceScaleFactor: 2,
+  deviceScaleFactor: 1,
 });
 const page = await ctx.newPage();
 

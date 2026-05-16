@@ -27,14 +27,8 @@
 
   <main id="app">
     <header class="topbar">
-      <div class="stars" aria-label="Stars this session">
-        <span class="star">★</span>
-        <span id="star-count">0</span>
-      </div>
-      <div class="level" aria-label="Level">
-        <span class="level-label">Level</span>
-        <span id="level-num">1</span>
-      </div>
+      <div id="stars-row" class="stars-row" aria-label="Stars"></div>
+      <div id="level-pips" class="level-pips" aria-label="Level"></div>
       <button id="mute-btn" class="icon-btn" aria-pressed="false" aria-label="Mute sounds">
         <span class="icon-sound">🔊</span>
         <span class="icon-muted" hidden>🔇</span>
@@ -42,15 +36,9 @@
       <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙️</button>
     </header>
 
-    <section class="prompt" aria-live="polite">
-      <span id="prompt-text">What comes next?</span>
-    </section>
-
     <section id="sequence" class="sequence" aria-label="Pattern sequence"></section>
 
     <section id="choices" class="choices" aria-label="Answer choices"></section>
-
-    <div id="feedback" class="feedback" aria-live="polite"></div>
 
     <canvas id="confetti" aria-hidden="true"></canvas>
 
