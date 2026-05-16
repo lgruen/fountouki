@@ -167,6 +167,11 @@ await page.setViewportSize({ width: 820, height: 1180 });
 await page.waitForTimeout(80);
 await snap('09-tablet');
 
+// Phone in landscape.
+await page.setViewportSize({ width: 844, height: 390 });
+await page.waitForTimeout(80);
+await snap('10-landscape');
+
 await browser.close();
 server.close();
 console.log('done');

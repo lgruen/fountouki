@@ -141,6 +141,17 @@ web app — see `README.md` for the basics.
 - **CodeQL / Dependabot**: tiny dep tree so probably not worth it, but
   free if added.
 
+## PWA reinstall caveats
+
+When `public/manifest.webmanifest` changes orientation, icons, name, or
+theme/background colors, an already-installed PWA may keep using the old
+values until it's removed from the home screen and re-added. Android
+Chrome usually picks up most changes on its own after a few launches;
+iOS is the stricter one — it caches the manifest aggressively and needs
+a manual remove + Add to Home Screen for the new values to take effect.
+In-app code/asset changes do not have this restriction — the service
+worker picks those up automatically.
+
 ## Known minor visual things
 
 - Tablet layout has the app capped at 560px so cells don't get tiny

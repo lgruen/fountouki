@@ -457,12 +457,36 @@ function registerServiceWorker(): void {
   });
 }
 
+// ---------- Orientation lock (best effort) ----------
+
+/**
+ * When launched as a standalone PWA, try to lock the screen to
+ * landscape. The manifest declares orientation:"landscape" already; this
+ * is a runtime belt-and-braces for browsers that respect screen.orientation
+ * (Android Chrome) and a no-op on browsers that don't (iOS Safari).
+ */
+function tryLockLandscape(): void {
+  const standalone =
+    window.matchMedia?.('(display-mode: standalone)').matches ??
+    (window.navigator as unknown as { standalone?: boolean }).standalone ??
+    false;
+  if (!standalone) return;
+  const orient = (screen as unknown as { orientation?: { lock?: (o: string) => Promise<void> } })
+    .orientation;
+  if (orient?.lock) {
+    void orient.lock('landscape').catch(() => {
+      /* lock can be rejected on iOS or when no fullscreen — that's fine */
+    });
+  }
+}
+
 // ---------- Boot ----------
 
 loadSettings();
 applySettingsToControls();
 renderHud();
 nextRound();
+tryLockLandscape();
 registerServiceWorker();
 // Surface the build id on window for quick debugging.
 (window as unknown as { __patternplay_build?: string }).__patternplay_build = __BUILD_ID__;
