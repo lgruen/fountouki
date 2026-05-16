@@ -1,0 +1,413 @@
+// Main game loop and UI wiring.
+
+import { ALL_THEME_IDS, getTheme, type ThemeId, type Item, type Theme } from './themes.js';
+import { generateRound, buildChoices, type PatternRound } from './patterns.js';
+import { playCorrect, playIncorrect, playLevelUp, playTap, setMuted } from './sounds.js';
+import { burst } from './confetti.js';
+import { makeCell, makeChoiceButton } from './render.js';
+
+type ThemeChoice = ThemeId | 'mix';
+type Difficulty = 'easy' | 'hard' | 'auto';
+type GameMode = 'next' | 'unit';
+
+interface State {
+  level: number;
+  stars: number;
+  /** Consecutive correct answers since last level change. */
+  streak: number;
+  themeChoice: ThemeChoice;
+  difficulty: Difficulty;
+  mode: GameMode;
+  /** Highlight the repeating unit visually. */
+  showHint: boolean;
+  /** Active round; null only before first generation. */
+  round: PatternRound | null;
+  /** Active theme used for the current round. */
+  activeTheme: Theme | null;
+  /** Whether the player has already answered the current round. */
+  locked: boolean;
+}
+
+const state: State = {
+  level: 1,
+  stars: 0,
+  streak: 0,
+  themeChoice: 'mix',
+  difficulty: 'auto',
+  mode: 'next',
+  showHint: true,
+  round: null,
+  activeTheme: null,
+  locked: false,
+};
+
+// ---------- DOM lookups ----------
+
+function el<T extends HTMLElement>(id: string): T {
+  const node = document.getElementById(id);
+  if (!node) throw new Error(`missing element #${id}`);
+  return node as T;
+}
+
+const seqEl = el<HTMLElement>('sequence');
+const choicesEl = el<HTMLElement>('choices');
+const feedbackEl = el<HTMLElement>('feedback');
+const starCountEl = el<HTMLElement>('star-count');
+const levelNumEl = el<HTMLElement>('level-num');
+const promptEl = el<HTMLElement>('prompt-text');
+const muteBtn = el<HTMLButtonElement>('mute-btn');
+const settingsBtn = el<HTMLButtonElement>('settings-btn');
+const settingsPanel = el<HTMLElement>('settings-panel');
+const closeSettingsBtn = el<HTMLButtonElement>('close-settings');
+const resetBtn = el<HTMLButtonElement>('reset-btn');
+const themeSelect = el<HTMLSelectElement>('theme-select');
+const difficultySelect = el<HTMLSelectElement>('difficulty-select');
+const modeSelect = el<HTMLSelectElement>('mode-select');
+const hintToggle = el<HTMLInputElement>('hint-toggle');
+
+// ---------- Theme picking ----------
+
+function pickTheme(): Theme {
+  if (state.themeChoice === 'mix') {
+    const idx = Math.floor(Math.random() * ALL_THEME_IDS.length);
+    const id = ALL_THEME_IDS[idx] ?? 'emoji-animals';
+    return getTheme(id);
+  }
+  return getTheme(state.themeChoice);
+}
+
+// ---------- Difficulty resolution ----------
+
+function effectiveAnswerMode(): 'easy' | 'hard' {
+  if (state.difficulty === 'easy') return 'easy';
+  if (state.difficulty === 'hard') return 'hard';
+  // Auto: keep choices pulled from the visible row through level 4 so the
+  // choice count grows naturally (2 for AB, 3 for ABC). Switch to the full
+  // palette of distractors from level 5 once the player is solid.
+  return state.level >= 5 ? 'hard' : 'easy';
+}
+
+// ---------- Rendering ----------
+
+function renderSequence(round: PatternRound): void {
+  seqEl.innerHTML = '';
+  const unitLen = round.template.length;
+  const showHint = state.showHint && state.mode === 'next';
+
+  round.visible.forEach((item, i) => {
+    const groupIdx = Math.floor(i / unitLen);
+    const classes: string[] = [];
+    if (showHint) {
+      classes.push(groupIdx % 2 === 0 ? 'group-a' : 'group-b');
+    }
+    seqEl.append(makeCell(item, { classes }));
+  });
+
+  // The missing-slot cell at the end.
+  const slot = makeCell(null, { classes: ['slot'], text: '?' });
+  slot.setAttribute('aria-label', 'missing item');
+  seqEl.append(slot);
+}
+
+function renderChoices(round: PatternRound, pool: Item[]): void {
+  choicesEl.innerHTML = '';
+  const mode = effectiveAnswerMode();
+  const choices = buildChoices(round, mode, pool);
+  for (const item of choices) {
+    const btn = makeChoiceButton(item);
+    btn.addEventListener('click', () => onChoice(btn, item));
+    choicesEl.append(btn);
+  }
+}
+
+function renderHud(): void {
+  starCountEl.textContent = String(state.stars);
+  levelNumEl.textContent = String(state.level);
+}
+
+function setFeedback(text: string, kind: 'ok' | 'bad' | 'none' = 'none'): void {
+  feedbackEl.textContent = text;
+  feedbackEl.style.color =
+    kind === 'ok' ? 'var(--ok-strong)' : kind === 'bad' ? '#c0392b' : 'var(--muted)';
+}
+
+// ---------- Round flow ----------
+
+function nextRound(): void {
+  const theme = pickTheme();
+  state.activeTheme = theme;
+  state.locked = false;
+  setFeedback('');
+  promptEl.textContent =
+    state.mode === 'next' ? 'What comes next?' : 'Tap the repeating piece';
+  if (state.mode === 'next') {
+    const round = generateRound({ pool: theme.items, level: state.level });
+    state.round = round;
+    renderSequence(round);
+    renderChoices(round, theme.items);
+  } else {
+    const round = generateRound({ pool: theme.items, level: state.level });
+    state.round = round;
+    renderUnitMode(round);
+  }
+  exposeDebug();
+}
+
+// Expose a small read-only snapshot for automated play-testing. No PII,
+// no scores, just the round shape + level so tests can pick a choice.
+interface DebugView {
+  level: number;
+  stars: number;
+  streak: number;
+  mode: GameMode;
+  themeId: string | null;
+  answerId: string | null;
+  template: string | null;
+  visibleIds: string[];
+}
+declare global {
+  interface Window {
+    __patternplay?: DebugView;
+  }
+}
+function exposeDebug(): void {
+  window.__patternplay = {
+    level: state.level,
+    stars: state.stars,
+    streak: state.streak,
+    mode: state.mode,
+    themeId: state.activeTheme?.id ?? null,
+    answerId: state.round?.answer.id ?? null,
+    template: state.round?.template ?? null,
+    visibleIds: state.round?.visible.map((it) => it.id) ?? [],
+  };
+}
+
+function onChoice(btn: HTMLButtonElement, item: Item): void {
+  if (state.locked || !state.round) return;
+  playTap();
+  if (item.id === state.round.answer.id) {
+    state.locked = true;
+    btn.classList.add('correct');
+    setFeedback('Yes! 🎉', 'ok');
+    state.stars += 1;
+    state.streak += 1;
+    renderHud();
+    playCorrect();
+    burst(70);
+    // Level up every 4 correct in a row, max level 6.
+    if (state.streak >= 4 && state.level < 6) {
+      state.level += 1;
+      state.streak = 0;
+      renderHud();
+      setTimeout(() => {
+        playLevelUp();
+        setFeedback(`Level ${state.level}! ⭐`, 'ok');
+      }, 500);
+    }
+    // Disable remaining choices.
+    choicesEl.querySelectorAll<HTMLButtonElement>('.choice').forEach((b) => {
+      b.disabled = true;
+    });
+    setTimeout(nextRound, 1100);
+  } else {
+    btn.classList.add('wrong');
+    playIncorrect();
+    state.streak = 0;
+    setFeedback('Try again 💛', 'bad');
+    setTimeout(() => btn.classList.remove('wrong'), 350);
+  }
+}
+
+// ---------- "Find the repeating piece" mode ----------
+
+function renderUnitMode(round: PatternRound): void {
+  seqEl.innerHTML = '';
+  const unitLen = round.template.length;
+  let firstPick: number | null = null;
+
+  const cells: HTMLDivElement[] = [];
+  round.visible.forEach((item, i) => {
+    const cell = makeCell(item, { classes: ['selectable'] });
+    cell.setAttribute('role', 'button');
+    cell.tabIndex = 0;
+    cell.addEventListener('click', () => handleUnitTap(i, cell));
+    seqEl.append(cell);
+    cells.push(cell);
+  });
+  // Disable the choices row in unit mode by clearing it.
+  choicesEl.innerHTML = '';
+  const hint = document.createElement('div');
+  hint.className = 'feedback';
+  hint.style.color = 'var(--muted)';
+  hint.style.fontWeight = '600';
+  hint.style.fontSize = '15px';
+  hint.textContent = 'Tap the first picture, then the last picture of the smallest piece that repeats.';
+  choicesEl.append(hint);
+
+  function handleUnitTap(idx: number, cell: HTMLDivElement): void {
+    if (state.locked) return;
+    playTap();
+    if (firstPick === null) {
+      firstPick = idx;
+      cell.classList.add('unit-pick');
+      return;
+    }
+    if (idx <= firstPick) {
+      // Reset selection if they pick the same or earlier.
+      cells.forEach((c) => c.classList.remove('unit-pick'));
+      firstPick = idx;
+      cell.classList.add('unit-pick');
+      return;
+    }
+    const start = firstPick;
+    const end = idx;
+    const len = end - start + 1;
+    const correct = start === 0 && len === unitLen;
+    if (correct) {
+      state.locked = true;
+      for (let k = start; k <= end; k++) cells[k]?.classList.add('unit-correct');
+      setFeedback('Yes! That is the piece that repeats. 🎉', 'ok');
+      state.stars += 1;
+      renderHud();
+      playCorrect();
+      burst(70);
+      setTimeout(nextRound, 1300);
+    } else {
+      for (let k = start; k <= end; k++) cells[k]?.classList.add('unit-wrong');
+      playIncorrect();
+      setFeedback('Not quite — the piece must start at the first picture.', 'bad');
+      setTimeout(() => {
+        cells.forEach((c) =>
+          c.classList.remove('unit-wrong', 'unit-pick', 'unit-correct'),
+        );
+        firstPick = null;
+      }, 700);
+    }
+  }
+}
+
+// ---------- Settings + persistence (settings only, no scores) ----------
+
+const SETTINGS_KEY = 'patternplay.settings.v1';
+
+interface PersistedSettings {
+  themeChoice?: ThemeChoice;
+  difficulty?: Difficulty;
+  mode?: GameMode;
+  showHint?: boolean;
+  muted?: boolean;
+}
+
+function loadSettings(): void {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw) as PersistedSettings;
+    if (data.themeChoice) state.themeChoice = data.themeChoice;
+    if (data.difficulty) state.difficulty = data.difficulty;
+    if (data.mode) state.mode = data.mode;
+    if (typeof data.showHint === 'boolean') state.showHint = data.showHint;
+    if (data.muted) {
+      setMuted(true);
+      muteBtn.setAttribute('aria-pressed', 'true');
+      muteBtn.querySelector<HTMLElement>('.icon-sound')?.setAttribute('hidden', '');
+      muteBtn.querySelector<HTMLElement>('.icon-muted')?.removeAttribute('hidden');
+    }
+  } catch {
+    /* ignore corrupted settings */
+  }
+}
+
+function saveSettings(): void {
+  const data: PersistedSettings = {
+    themeChoice: state.themeChoice,
+    difficulty: state.difficulty,
+    mode: state.mode,
+    showHint: state.showHint,
+    muted: muteBtn.getAttribute('aria-pressed') === 'true',
+  };
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+  } catch {
+    /* storage might be blocked; fine */
+  }
+}
+
+function applySettingsToControls(): void {
+  themeSelect.value = state.themeChoice;
+  difficultySelect.value = state.difficulty;
+  modeSelect.value = state.mode;
+  hintToggle.checked = state.showHint;
+}
+
+function openSettings(): void {
+  applySettingsToControls();
+  settingsPanel.hidden = false;
+}
+function closeSettings(): void {
+  settingsPanel.hidden = true;
+}
+
+// ---------- Wire up ----------
+
+muteBtn.addEventListener('click', () => {
+  const pressed = muteBtn.getAttribute('aria-pressed') === 'true';
+  const next = !pressed;
+  muteBtn.setAttribute('aria-pressed', String(next));
+  setMuted(next);
+  muteBtn.querySelector<HTMLElement>('.icon-sound')?.toggleAttribute('hidden', next);
+  muteBtn.querySelector<HTMLElement>('.icon-muted')?.toggleAttribute('hidden', !next);
+  saveSettings();
+});
+
+settingsBtn.addEventListener('click', openSettings);
+closeSettingsBtn.addEventListener('click', () => {
+  closeSettings();
+  saveSettings();
+});
+settingsPanel.addEventListener('click', (e) => {
+  if (e.target === settingsPanel) closeSettings();
+});
+
+themeSelect.addEventListener('change', () => {
+  state.themeChoice = themeSelect.value as ThemeChoice;
+  saveSettings();
+  nextRound();
+});
+difficultySelect.addEventListener('change', () => {
+  state.difficulty = difficultySelect.value as Difficulty;
+  saveSettings();
+  nextRound();
+});
+modeSelect.addEventListener('change', () => {
+  state.mode = modeSelect.value as GameMode;
+  saveSettings();
+  nextRound();
+});
+hintToggle.addEventListener('change', () => {
+  state.showHint = hintToggle.checked;
+  saveSettings();
+  if (state.round) renderSequence(state.round);
+});
+
+resetBtn.addEventListener('click', () => {
+  state.level = 1;
+  state.stars = 0;
+  state.streak = 0;
+  renderHud();
+  closeSettings();
+  nextRound();
+});
+
+// Keyboard convenience: Esc closes settings.
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSettings();
+});
+
+// ---------- Boot ----------
+
+loadSettings();
+applySettingsToControls();
+renderHud();
+nextRound();

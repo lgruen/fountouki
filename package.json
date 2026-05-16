@@ -1,0 +1,20 @@
+{
+  "name": "pattern-game",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A tiny sequence-pattern game for preschoolers.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch --serve",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build",
+    "screenshots": "node tools/screenshots.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.3",
+    "playwright": "^1.56.1"
+  }
+}

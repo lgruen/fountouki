@@ -1,0 +1,271 @@
+:root {
+  --bg: #fef6e4;
+  --card: #fffdf6;
+  --ink: #2b2c34;
+  --muted: #6f6e77;
+  --accent: #f582ae;
+  --accent-soft: #ffd6e6;
+  --ok: #8bd3a6;
+  --ok-strong: #2b9d5f;
+  --bad: #f6b3a2;
+  --shadow: 0 6px 16px rgba(43, 44, 52, 0.10);
+  --radius: 18px;
+  --tap: 72px;
+  --gap: 10px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Comic Sans MS", "Comic Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior: contain;
+  user-select: none;
+}
+
+#app {
+  max-width: 560px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  padding: max(12px, env(safe-area-inset-top)) 14px max(12px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.stars, .level {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card);
+  padding: 8px 12px;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+.stars .star { color: #f6b800; font-size: 22px; line-height: 1; }
+.level-label { color: var(--muted); font-weight: 600; font-size: 14px; }
+.topbar > .level { margin-right: auto; }
+
+.icon-btn {
+  border: 0;
+  background: var(--card);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  font-size: 22px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-btn:active { transform: scale(0.96); }
+
+.prompt {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 4px;
+}
+
+.sequence {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px 10px;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  min-height: 80px;
+}
+.cell {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 56px;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(20px, 6.5vw, 32px);
+  line-height: 1;
+  box-shadow: inset 0 0 0 2px rgba(0,0,0,0.04);
+  position: relative;
+  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+.cell.shape { font-size: 0; }
+.cell.shape::after {
+  content: "";
+  width: 65%;
+  height: 65%;
+  background: var(--shape-color, #888);
+  border-radius: var(--shape-radius, 50%);
+  display: block;
+  clip-path: var(--shape-clip, none);
+}
+.cell.slot {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 34px;
+  animation: pulse 1.6s ease-in-out infinite;
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+.cell.group-a { background: #fff4e6; box-shadow: inset 0 0 0 2px #ffd9a8; }
+.cell.group-b { background: #e9f4ff; box-shadow: inset 0 0 0 2px #b4d6ff; }
+.cell.group-edge { border-top-left-radius: 14px; border-bottom-left-radius: 14px; }
+.cell.group-edge-end { border-top-right-radius: 14px; border-bottom-right-radius: 14px; }
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+.choice {
+  border: 0;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  min-height: var(--tap);
+  font-size: 38px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 80ms ease, box-shadow 80ms ease, background 120ms ease;
+}
+.choice:active { transform: scale(0.97); }
+.choice.shape { font-size: 0; }
+.choice.shape::after {
+  content: "";
+  width: 48px;
+  height: 48px;
+  background: var(--shape-color, #888);
+  border-radius: var(--shape-radius, 50%);
+  display: block;
+  clip-path: var(--shape-clip, none);
+}
+.choice.correct { background: var(--ok); animation: pop 360ms ease; }
+.choice.wrong   { background: var(--bad); animation: shake 320ms ease; }
+.choice[disabled] { opacity: 0.85; cursor: default; }
+@keyframes pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.feedback {
+  text-align: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ok-strong);
+  min-height: 28px;
+}
+
+#confetti {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  width: 100vw;
+  height: 100vh;
+  z-index: 5;
+}
+
+.settings-panel {
+  position: fixed;
+  inset: 0;
+  background: rgba(43, 44, 52, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: 16px;
+}
+.settings-panel[hidden] { display: none; }
+.settings-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 18px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: var(--shadow);
+}
+.settings-card h2 { margin: 0 0 12px; font-size: 20px; }
+.setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.setting-row label { font-size: 14px; color: var(--muted); }
+.setting-row select {
+  font: inherit;
+  font-size: 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #e6e1d3;
+  background: #fff;
+}
+.checkbox-row label {
+  flex-direction: row;
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  font-size: 16px;
+  color: var(--ink);
+}
+.setting-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.setting-actions button {
+  font: inherit;
+  font-weight: 700;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 0;
+  cursor: pointer;
+}
+.primary { background: var(--accent); color: white; }
+.secondary { background: transparent; color: var(--muted); }
+.footer-note { font-size: 12px; color: var(--muted); margin: 12px 0 0; text-align: center; }
+.footer-note a { color: var(--muted); }
+
+/* In "find the repeating piece" mode, cells become tappable. */
+.cell.selectable { cursor: pointer; }
+.cell.unit-pick { box-shadow: inset 0 0 0 3px var(--accent); background: var(--accent-soft); }
+.cell.unit-correct { background: var(--ok); }
+.cell.unit-wrong { background: var(--bad); }
