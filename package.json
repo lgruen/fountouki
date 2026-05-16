@@ -13,7 +13,7 @@
     "screenshots": "node tools/screenshots.mjs"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.25.0",
     "typescript": "^5.6.3",
     "playwright": "^1.56.1"
   }
