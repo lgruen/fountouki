@@ -51,7 +51,8 @@ function el<T extends HTMLElement>(id: string): T {
 
 const seqEl = el<HTMLElement>('sequence');
 const choicesEl = el<HTMLElement>('choices');
-const starsRowEl = el<HTMLElement>('stars-row');
+const starsEl = el<HTMLElement>('stars');
+const starCountEl = el<HTMLElement>('star-count');
 const levelPipsEl = el<HTMLElement>('level-pips');
 const muteBtn = el<HTMLButtonElement>('mute-btn');
 const settingsBtn = el<HTMLButtonElement>('settings-btn');
@@ -119,13 +120,11 @@ function renderChoices(round: PatternRound, pool: Item[]): void {
 }
 
 const MAX_LEVEL = 6;
-const MAX_STARS_SHOWN = 10;
 
-/** Re-render the HUD. If `justEarnedStar` is true, animate the newest star
- *  and clear the animation class on a timer. If `justLeveledUp` is true,
- *  pulse the newly-filled level pip. */
+/** Re-render the HUD. If `justEarnedStar` is true, pop the star count
+ *  briefly. If `justLeveledUp` is true, pulse the newly-filled pip. */
 function renderHud(justEarnedStar = false, justLeveledUp = false): void {
-  // Level pips.
+  // Level pips: rainbow, one color per slot, lit per current level.
   levelPipsEl.innerHTML = '';
   for (let i = 1; i <= MAX_LEVEL; i++) {
     const pip = document.createElement('span');
@@ -134,19 +133,15 @@ function renderHud(justEarnedStar = false, justLeveledUp = false): void {
     if (justLeveledUp && i === state.level) pip.classList.add('just-filled');
     levelPipsEl.append(pip);
   }
-  // Stars row: render up to MAX_STARS_SHOWN slots. Filled = earned, empty
-  // = not yet. Past the cap we just keep the row full and animate a brief
-  // pulse on the cap star for each extra correct (handled by the caller
-  // setting justEarnedStar).
-  starsRowEl.innerHTML = '';
-  const filled = Math.min(state.stars, MAX_STARS_SHOWN);
-  for (let i = 0; i < MAX_STARS_SHOWN; i++) {
-    const s = document.createElement('span');
-    s.className = 'star';
-    s.textContent = '★';
-    if (i >= filled) s.classList.add('empty');
-    if (justEarnedStar && i === filled - 1) s.classList.add('new');
-    starsRowEl.append(s);
+  // Numeric star count, brief bump on each new star.
+  starCountEl.textContent = String(state.stars);
+  if (justEarnedStar) {
+    // Toggle the animation class off then on so it can replay.
+    starsEl.classList.remove('bump');
+    // Force a reflow so the next add re-triggers the animation.
+    void starsEl.offsetWidth;
+    starsEl.classList.add('bump');
+    setTimeout(() => starsEl.classList.remove('bump'), 500);
   }
 }
 
