@@ -106,6 +106,20 @@ await page.click('#close-settings');
 await page.waitForTimeout(50);
 await snap('05-numbers');
 
+// Construction.
+await page.click('#settings-btn');
+await page.selectOption('#theme-select', 'emoji-construction');
+await page.click('#close-settings');
+await page.waitForSelector('.cell');
+await snap('05a-construction');
+
+// Dinosaurs.
+await page.click('#settings-btn');
+await page.selectOption('#theme-select', 'emoji-dinosaurs');
+await page.click('#close-settings');
+await page.waitForSelector('.cell');
+await snap('05b-dinosaurs');
+
 // Pick a wrong answer to see the "try again" state.
 await page.click('#settings-btn');
 await page.selectOption('#theme-select', 'emoji-animals');

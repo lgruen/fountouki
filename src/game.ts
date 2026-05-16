@@ -405,9 +405,64 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeSettings();
 });
 
+// ---------- Service worker (offline / faster cold-starts) ----------
+
+declare const __BUILD_ID__: string;
+
+function registerServiceWorker(): void {
+  if (!('serviceWorker' in navigator)) return;
+
+  const params = new URLSearchParams(location.search);
+  // Escape hatch: ?nosw unregisters any installed worker and reloads.
+  if (params.has('nosw')) {
+    void navigator.serviceWorker.getRegistrations().then(async (regs) => {
+      await Promise.all(regs.map((r) => r.unregister()));
+      const cs = await caches.keys();
+      await Promise.all(cs.map((k) => caches.delete(k)));
+      location.replace(location.pathname);
+    });
+    return;
+  }
+  // Skip on localhost so dev iteration isn't fighting a stale cache. Use
+  // ?sw=force to opt in (e.g. for offline-mode tests against a local
+  // server).
+  const host = location.hostname;
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '';
+  if (isLocal && params.get('sw') !== 'force') return;
+
+  window.addEventListener('load', () => {
+    // Capture controller state before registration. If a controller was
+    // already present, this is an existing-install boot; any subsequent
+    // controllerchange means an update was just activated, so reload to
+    // pick up the new assets. On first install controller flips
+    // null → non-null and the page is already running fine — no reload.
+    const hadController = navigator.serviceWorker.controller !== null;
+    let reloaded = false;
+    if (hadController) {
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloaded) return;
+        reloaded = true;
+        location.reload();
+      });
+    }
+    void navigator.serviceWorker
+      .register('./sw.js')
+      .then((reg) => {
+        // Nudge the worker to check for updates on every visit.
+        void reg.update();
+      })
+      .catch(() => {
+        /* registration failed; site still works online */
+      });
+  });
+}
+
 // ---------- Boot ----------
 
 loadSettings();
 applySettingsToControls();
 renderHud();
 nextRound();
+registerServiceWorker();
+// Surface the build id on window for quick debugging.
+(window as unknown as { __patternplay_build?: string }).__patternplay_build = __BUILD_ID__;

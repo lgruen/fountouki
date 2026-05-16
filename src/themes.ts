@@ -20,6 +20,8 @@ export type ThemeId =
   | 'emoji-animals'
   | 'emoji-fruit'
   | 'emoji-vehicles'
+  | 'emoji-construction'
+  | 'emoji-dinosaurs'
   | 'shapes'
   | 'letters-upper'
   | 'letters-lower'
@@ -93,6 +95,34 @@ export const THEMES: Record<ThemeId, Theme> = {
       glyph('bike', '🚲', 'bike'),
       glyph('boat', '⛵', 'boat'),
       glyph('tractor', '🚜', 'tractor'),
+    ],
+  },
+  'emoji-construction': {
+    id: 'emoji-construction',
+    label: 'Construction',
+    items: [
+      glyph('crane', '🏗️', 'crane'),
+      glyph('truck', '🚛', 'truck'),
+      glyph('digger', '🚜', 'digger'),
+      glyph('cone', '🚧', 'traffic cone'),
+      glyph('hammer', '🔨', 'hammer'),
+      glyph('wrench', '🔧', 'wrench'),
+      glyph('saw', '🪚', 'saw'),
+      glyph('toolbox', '🧰', 'toolbox'),
+    ],
+  },
+  'emoji-dinosaurs': {
+    id: 'emoji-dinosaurs',
+    label: 'Dinosaurs',
+    items: [
+      glyph('trex', '🦖', 'T-rex'),
+      glyph('sauropod', '🦕', 'long-neck dino'),
+      glyph('croc', '🐊', 'crocodile'),
+      glyph('turtle', '🐢', 'turtle'),
+      glyph('lizard', '🦎', 'lizard'),
+      glyph('dragon', '🐉', 'dragon'),
+      glyph('egg', '🥚', 'egg'),
+      glyph('bone', '🦴', 'bone'),
     ],
   },
   shapes: {

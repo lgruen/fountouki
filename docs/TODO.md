@@ -105,11 +105,14 @@ web app — see `README.md` for the basics.
   settings field) — useful when a child has progressed in past sessions.
 - **Auto-advance speed slider** — currently 1100ms between rounds.
 - **"Hide score" mode** for parents who want zero competitive pressure.
-- **PWA — offline support**: manifest + iOS meta tags + icons are
-  already wired (`public/manifest.webmanifest`, `public/icon.svg`,
-  `tools/icons.mjs`); "Add to Home Screen" launches in standalone
-  mode. Still missing: a service worker that caches `dist/` so it
-  plays without network after first load.
+- **PWA — done**: manifest + iOS meta tags + icons + service worker
+  (`public/sw.js`, stamped at build time with the file list and a build
+  id). Offline play verified by `tools/sw-offline-test.mjs`.
+  `?nosw` unregisters the worker; `?sw=force` opts in on localhost
+  (skipped by default so dev iteration isn't fighting a stale cache).
+  Update story: silent — `controllerchange` triggers a single reload on
+  a true update, no UI prompt. If you ever want a "new version, tap
+  here" banner instead, it's ~15 lines in `src/game.ts`.
 - **Print mode**: render a PDF of patterns for paper practice
   (useful on trips without a phone).
 - **Sharable seeds**: encode the round/level into the URL so a parent

@@ -19,6 +19,7 @@ npm run typecheck   # tsc --noEmit (strict)
 npm run check       # typecheck + build
 npm run screenshots # render screenshots/*.png for visual review (uses Playwright)
 npm run icons       # regenerate PWA icons from public/icon.svg
+node tools/sw-offline-test.mjs   # smoke-test the offline service worker
 ```
 
 ## Fullscreen on a phone
