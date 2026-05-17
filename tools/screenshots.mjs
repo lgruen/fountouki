@@ -171,6 +171,40 @@ await page.setViewportSize({ width: 820, height: 1180 });
 await page.waitForTimeout(80);
 await snap('09-tablet-portrait');
 
+// Tablet landscape (e.g. iPad in landscape, ~1180x820).
+await page.setViewportSize({ width: 1180, height: 820 });
+await page.waitForTimeout(80);
+await snap('10-tablet-landscape');
+
+// Confetti positioning check: trigger a burst on tablet portrait and
+// capture a frame mid-animation so we can eyeball whether particles
+// land near the play area instead of off-screen / in wrong half.
+async function clickCorrectThenSnap(name) {
+  // Wait long enough for any previous round's lockout (1100ms in game.ts)
+  // to clear so the click actually fires and the burst is fresh.
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => {
+    const w = window;
+    const ans = w.__patternplay?.answerId;
+    if (!ans) return;
+    const btn = document.querySelector(`.choice[data-id="${ans}"]`);
+    if (btn) btn.click();
+  });
+  // Sample mid-animation (particles fly up then fall; ~200ms in they're
+  // still clustered near the emit point).
+  await page.waitForTimeout(220);
+  await snap(name);
+}
+
+await page.setViewportSize({ width: 820, height: 1180 });
+await clickCorrectThenSnap('10b-confetti-tablet-portrait');
+
+await page.setViewportSize({ width: 1180, height: 820 });
+await clickCorrectThenSnap('10d-confetti-tablet-landscape');
+
+await page.setViewportSize({ width: 844, height: 390 });
+await clickCorrectThenSnap('10c-confetti-phone-landscape');
+
 // Phone in portrait should show the rotate overlay.
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(80);
