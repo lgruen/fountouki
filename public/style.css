@@ -43,22 +43,30 @@ body {
   gap: clamp(12px, 2.5vh, 24px);
 }
 
-/* When there's extra vertical room (tablets, especially in portrait),
-   center the play area in the leftover space instead of letting it
-   stack at the top with a huge empty band underneath. Topbar still
-   pins to the top; sequence + choices float together. */
-.sequence { margin-top: auto; }
-.choices  { margin-bottom: auto; }
+/* When there's extra vertical room (tablets, especially in portrait,
+   and phones in landscape with safe-area insets), center the play
+   area in the leftover space below the topbar so empty space sits
+   *evenly* above and below — not piled on top. */
+.play-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(12px, 2.5vh, 24px);
+}
 
 /* Phone landscape: small height, plenty of width. Tighten vertical
-   padding/gap so everything still fits on a ~390px-tall viewport. */
+   padding/gap so everything still fits on a ~390px-tall viewport, but
+   keep enough room below the choices for the iOS home indicator and
+   visual breathing room. */
 @media (orientation: landscape) and (max-height: 540px) {
   #app {
     gap: 10px;
     padding-top: max(6px, env(safe-area-inset-top));
-    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
   }
   .sequence { padding: 8px 10px; min-height: 0; }
+  .play-area { gap: 10px; }
 }
 
 .topbar {
