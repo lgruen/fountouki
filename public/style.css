@@ -28,36 +28,44 @@ body {
 }
 
 #app {
-  max-width: 560px;
+  /* Tablets: let the app breathe up to ~960px instead of the previous
+     560px cap (which left huge unused gutters on iPad portrait). Phones
+     keep behaving as before because 100% wins on a narrow viewport. */
+  max-width: min(960px, 100%);
   margin: 0 auto;
   min-height: 100dvh;
-  padding: max(12px, env(safe-area-inset-top)) 14px max(12px, env(safe-area-inset-bottom));
+  padding:
+    max(clamp(14px, 3vh, 32px), env(safe-area-inset-top))
+    clamp(14px, 3vw, 32px)
+    max(clamp(14px, 3vh, 32px), env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: clamp(12px, 2.5vh, 24px);
 }
 
-/* Landscape on a phone: short height, lots of width. Use more of the
-   horizontal space, tighten vertical gaps, and let cells / buttons grow
-   bigger for chunkier tap targets. */
+/* When there's extra vertical room (tablets, especially in portrait),
+   center the play area in the leftover space instead of letting it
+   stack at the top with a huge empty band underneath. Topbar still
+   pins to the top; sequence + choices float together. */
+.sequence { margin-top: auto; }
+.choices  { margin-bottom: auto; }
+
+/* Phone landscape: small height, plenty of width. Tighten vertical
+   padding/gap so everything still fits on a ~390px-tall viewport. */
 @media (orientation: landscape) and (max-height: 540px) {
   #app {
-    max-width: 920px;
-    gap: 8px;
+    gap: 10px;
     padding-top: max(6px, env(safe-area-inset-top));
     padding-bottom: max(6px, env(safe-area-inset-bottom));
   }
   .sequence { padding: 8px 10px; min-height: 0; }
-  .cell { max-width: 72px; }
-  .choices { gap: 10px; }
-  .choice { min-height: 64px; font-size: 34px; padding: 10px; }
 }
 
 .topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 18px;
+  gap: clamp(10px, 1.5vw, 16px);
+  font-size: clamp(18px, 2.2vw, 24px);
   font-weight: 700;
 }
 .stars, .level-pips {
@@ -69,13 +77,13 @@ body {
 }
 .stars {
   gap: 6px;
-  padding: 8px 14px;
-  font-size: 20px;
+  padding: clamp(8px, 1.2vw, 12px) clamp(14px, 2vw, 20px);
+  font-size: clamp(20px, 2.5vw, 28px);
   font-weight: 700;
 }
 .stars .star {
   color: #f6b800;
-  font-size: 22px;
+  font-size: clamp(22px, 2.8vw, 30px);
   line-height: 1;
 }
 .stars #star-count {
@@ -95,13 +103,13 @@ body {
 }
 
 .level-pips {
-  gap: 7px;
-  padding: 10px 12px;
+  gap: clamp(7px, 1vw, 12px);
+  padding: clamp(10px, 1.4vw, 14px) clamp(12px, 1.8vw, 18px);
 }
 /* Six rainbow colors, one per slot. */
 .level-pip {
-  width: 12px;
-  height: 12px;
+  width: clamp(12px, 1.6vw, 18px);
+  height: clamp(12px, 1.6vw, 18px);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.10);
   transition: background 0.4s ease, transform 0.4s ease;
@@ -125,10 +133,10 @@ body {
 .icon-btn {
   border: 0;
   background: var(--card);
-  width: 44px;
-  height: 44px;
+  width: clamp(44px, 5.2vw, 56px);
+  height: clamp(44px, 5.2vw, 56px);
   border-radius: 50%;
-  font-size: 22px;
+  font-size: clamp(22px, 2.6vw, 28px);
   box-shadow: var(--shadow);
   cursor: pointer;
   display: inline-flex;
@@ -141,25 +149,25 @@ body {
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 12px 10px;
+  padding: clamp(10px, 1.8vh, 18px) clamp(8px, 1.6vw, 16px);
   display: flex;
   flex-wrap: nowrap;
   justify-content: center;
   align-items: center;
-  gap: 6px;
-  min-height: 80px;
+  gap: clamp(6px, 1vw, 12px);
+  min-height: clamp(80px, 12vh, 140px);
 }
 .cell {
   flex: 1 1 0;
   min-width: 0;
-  max-width: 56px;
+  max-width: clamp(56px, 9.5vw, 104px);
   aspect-ratio: 1 / 1;
-  border-radius: 12px;
+  border-radius: clamp(12px, 1.6vw, 18px);
   background: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: clamp(20px, 6.5vw, 32px);
+  font-size: clamp(20px, 6.5vw, 60px);
   line-height: 1;
   box-shadow: inset 0 0 0 2px rgba(0,0,0,0.04);
   position: relative;
@@ -179,7 +187,7 @@ body {
 .cell.slot {
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 34px;
+  font-size: clamp(34px, 7vw, 68px);
   animation: pulse 1.6s ease-in-out infinite;
   box-shadow: inset 0 0 0 3px var(--accent);
 }
@@ -195,18 +203,17 @@ body {
 
 .choices {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 12px;
-  margin-top: 4px;
+  grid-template-columns: repeat(auto-fit, minmax(clamp(110px, 18vw, 200px), 1fr));
+  gap: clamp(10px, 1.8vw, 20px);
 }
 .choice {
   border: 0;
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 14px;
-  min-height: var(--tap);
-  font-size: 38px;
+  padding: clamp(12px, 2vw, 20px);
+  min-height: clamp(var(--tap), 13vh, 140px);
+  font-size: clamp(38px, 5.5vw, 72px);
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
@@ -219,8 +226,8 @@ body {
 .choice.shape { font-size: 0; }
 .choice.shape::after {
   content: "";
-  width: 48px;
-  height: 48px;
+  width: clamp(48px, 6.5vw, 84px);
+  height: clamp(48px, 6.5vw, 84px);
   background: var(--shape-color, #888);
   border-radius: var(--shape-radius, 50%);
   display: block;
@@ -408,13 +415,13 @@ body {
   align-items: center;
   justify-content: center;
   margin: 0 auto;
-  width: 84px;
-  height: 84px;
+  width: clamp(84px, 11vw, 130px);
+  height: clamp(84px, 11vw, 130px);
   border-radius: 50%;
   border: 0;
   background: var(--ok);
   color: white;
-  font-size: 48px;
+  font-size: clamp(48px, 6vw, 78px);
   font-weight: 900;
   line-height: 1;
   cursor: pointer;

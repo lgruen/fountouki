@@ -40,23 +40,41 @@ function resize(): void {
   canvas.style.width = `${window.innerWidth}px`;
   canvas.style.height = `${window.innerHeight}px`;
   if (ctx2d) ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // Drop any in-flight particles so a viewport change (e.g. orientation
+  // flip) doesn't leave a cloud of confetti stranded at coordinates that
+  // were computed for the previous layout.
+  particles = [];
 }
 
 function rand(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
-/** Trigger a confetti burst rising from below the prompt area. */
+/** Trigger a confetti burst rising from the sequence row. */
 export function burst(count = 80): void {
   if (!ensureCanvas() || !ctx2d) return;
-  // Emit from the area just above the sequence card so the prompt stays
-  // readable, with particles spreading upward then falling.
-  const cx = window.innerWidth / 2;
-  const emitY = Math.min(window.innerHeight * 0.55, 380);
+  // Anchor the burst to the live sequence card so the celebration lands
+  // where the kid is actually looking, regardless of where the play area
+  // ends up sitting on screen (phone landscape vs. tablet portrait vs.
+  // tablet landscape — different vertical positions in each).
+  let cx = window.innerWidth / 2;
+  let emitY = Math.min(window.innerHeight * 0.55, 380);
+  let spreadX = 60;
+  const seq = document.getElementById('sequence');
+  if (seq) {
+    const r = seq.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      cx = r.left + r.width / 2;
+      // Just below the sequence card so particles rise up *through* it
+      // (past the answer the kid just placed) before falling away.
+      emitY = r.bottom;
+      spreadX = Math.min(r.width / 3, 140);
+    }
+  }
   for (let i = 0; i < count; i++) {
     particles.push({
-      x: cx + rand(-60, 60),
-      y: emitY + rand(-20, 20),
+      x: cx + rand(-spreadX, spreadX),
+      y: emitY + rand(-10, 10),
       vx: rand(-220, 220),
       vy: rand(-360, -180),
       size: rand(6, 10),

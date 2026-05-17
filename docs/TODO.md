@@ -154,11 +154,20 @@ worker picks those up automatically.
 
 ## Known minor visual things
 
-- Tablet layout has the app capped at 560px so cells don't get tiny
-  islands of whitespace — fine, but means tablets don't fully use the
-  screen. Acceptable for a one-handed game.
-- Confetti emits from ~55% screen height upward; on very short viewports
-  it might fall mostly off-screen. Not a practical issue on phones.
 - The speaker icon (🔊) renders inconsistently across platforms; some
   systems show a stylized loudspeaker that looks busy. A custom SVG
   would be cleaner but adds bytes.
+
+## Layout / responsive
+
+The CSS scales cells, choices, topbar pieces, and paddings with `clamp()`
+keyed off `vw` / `vh`, and the play area (sequence + choices) is
+vertically centered in leftover space using `margin-top: auto` on
+`.sequence` and `margin-bottom: auto` on `.choices`. Result: phones in
+landscape stay snug, tablets get larger touch targets and don't leave
+huge unused gutters. The app caps at 960px wide so very large displays
+don't stretch absurdly.
+
+Confetti emits from the live `#sequence` bounding rect (anchored to the
+actual play area), and the canvas drops in-flight particles on resize
+so an orientation flip doesn't strand them at stale coordinates.
