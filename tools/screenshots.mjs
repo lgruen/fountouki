@@ -207,6 +207,13 @@ await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(80);
 await snap('11-rotate-overlay');
 
+// iPhone Pro Max in landscape — taller status bar / safe-area, slightly
+// taller viewport. Confirms the play area still has breathing room
+// above the home indicator.
+await page.setViewportSize({ width: 932, height: 430 });
+await page.waitForTimeout(80);
+await snap('12-iphone-promax-landscape');
+
 await browser.close();
 server.close();
 console.log('done');
