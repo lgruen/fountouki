@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { chromium } from 'playwright';
+import { launchChromium } from './_chrome.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -46,9 +46,10 @@ await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
 const url = `http://127.0.0.1:${port}/`;
 
-const execPath = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const browser = await chromium.launch({ executablePath: execPath });
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+const browser = await launchChromium();
+// Landscape viewport — the rotate-to-landscape overlay hides the game
+// in portrait orientation.
+const ctx = await browser.newContext({ viewport: { width: 844, height: 390 } });
 const page = await ctx.newPage();
 // The registration code skips SW install on localhost so dev iteration
 // isn't blocked by cached assets. Opt in for this test with ?sw=force.
