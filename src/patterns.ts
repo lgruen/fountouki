@@ -36,19 +36,20 @@ const TEMPLATES_BY_LEVEL: string[][] = [
   // Each level mixes templates of multiple periods so unit-mode actually
   // requires looking at each pattern — otherwise the kid would learn
   // "the answer for level N is always length K" and stop reading the row.
-  // Level 1: foundation — period 2, 2 distinct items.
-  ['AB'],
-  // Level 2: keep AB in the mix and introduce period 3 (still 2 items).
+  // Level 1: foundation — period 2 + 3, 2 distinct items.
   ['AB', 'AAB', 'ABB'],
-  // Level 3: add 3-item patterns; period 2 still appears occasionally.
+  // Level 2: add 3-item patterns; period 2 still appears occasionally.
   ['AB', 'AAB', 'ABB', 'ABC'],
-  // Level 4: introduce period 4, keep some period 3.
+  // Level 3: introduce period 4, keep some period 3.
   ['AAB', 'ABB', 'ABC', 'AABB'],
-  // Level 5: period 4 dominates, with 3-item variants.
+  // Level 4: period 4 dominates, with 3-item variants.
   ['ABC', 'AABB', 'AABC', 'ABBC', 'ABCB'],
-  // Level 6: everything goes — 4-distinct ABCD appears, but the easier
-  // templates still come up so it doesn't feel relentlessly hard.
+  // Level 5: 4-distinct ABCD appears, with easier templates still in the
+  // mix so it doesn't feel relentlessly hard.
   ['AB', 'AAB', 'ABC', 'AABB', 'AABC', 'ABBC', 'ABCB', 'ABCD'],
+  // Level 6: hardest tier — only period 4-5 with mostly 4+ distinct
+  // items. Introduces period 5 (ABCDE = 5 distinct items in a row).
+  ['ABCD', 'AABCD', 'ABCBD', 'ABCDE'],
 ];
 
 function pickRng<T>(arr: readonly T[], rng: () => number): T {
@@ -112,23 +113,14 @@ export function generateRound(opts: GenerateOptions): PatternRound {
   // slot land *mid-cycle* — pedagogically this is the harder and more
   // useful case: instead of always answering "the cycle starts over",
   // the child has to figure out where in the cycle the gap falls.
-  //
-  // tailMax = period - 1 covers every non-zero offset into the cycle.
-  // At level 1 we keep tailMax = 0 (always whole cycles) so the very
-  // first patterns are maximally obvious. From level 2 onward, bias
-  // strongly toward showing *some* partial: only 1 in 5 rounds shows a
-  // clean cycle break, the rest end mid-cycle.
+  // Bias strongly toward showing *some* partial: only 1 in 5 rounds
+  // shows a clean cycle break, the rest end mid-cycle.
   const tailMax = period - 1;
-  const allowPartial = opts.level >= 2 ? tailMax : 0;
   let partialLen: number;
-  if (allowPartial <= 0) {
-    partialLen = 0;
-  } else if (rng() < 0.2) {
-    // Occasionally fall back to a clean cycle break for variety.
+  if (tailMax <= 0 || rng() < 0.2) {
     partialLen = 0;
   } else {
-    // Pick a partial length in [1, allowPartial] uniformly.
-    partialLen = 1 + Math.floor(rng() * allowPartial);
+    partialLen = 1 + Math.floor(rng() * tailMax);
   }
 
   const visible: Item[] = [];
@@ -157,7 +149,10 @@ export function generateRound(opts: GenerateOptions): PatternRound {
   return { template, unitItems, visible, answer, fullReps, partialLen };
 }
 
-/** Pick 2–3 choices that always include the correct answer. */
+/** Build the choice buttons. Every distinct item from the visible
+ *  sequence is always included so the kid sees all the building blocks
+ *  on the row as tappable options. In hard mode the choice list is
+ *  padded to at least 4 with distractors from the wider theme pool. */
 export function buildChoices(
   round: PatternRound,
   mode: 'easy' | 'hard',
@@ -165,13 +160,16 @@ export function buildChoices(
   rng: () => number = Math.random,
 ): Item[] {
   const correct = round.answer;
-  const count = mode === 'easy' ? Math.min(3, round.unitItems.length) : 4;
-
-  const distractorSource =
-    mode === 'easy'
-      ? round.unitItems.filter((it) => it.id !== correct.id)
-      : pool.filter((it) => it.id !== correct.id);
-
-  const distractors = shuffle(distractorSource, rng).slice(0, count - 1);
-  return shuffle([correct, ...distractors], rng);
+  const fromUnit = round.unitItems.filter((it) => it.id !== correct.id);
+  if (mode === 'easy') {
+    return shuffle([correct, ...fromUnit], rng);
+  }
+  const targetCount = Math.max(4, round.unitItems.length);
+  const needed = targetCount - 1 - fromUnit.length;
+  const unitIds = new Set(round.unitItems.map((it) => it.id));
+  const extras = shuffle(
+    pool.filter((it) => !unitIds.has(it.id)),
+    rng,
+  ).slice(0, Math.max(0, needed));
+  return shuffle([correct, ...fromUnit, ...extras], rng);
 }

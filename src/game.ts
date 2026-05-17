@@ -35,7 +35,7 @@ const state: State = {
   themeChoice: 'mix',
   difficulty: 'auto',
   mode: 'next',
-  showHint: true,
+  showHint: false,
   round: null,
   activeTheme: null,
   locked: false,
@@ -80,10 +80,11 @@ function pickTheme(): Theme {
 function effectiveAnswerMode(): 'easy' | 'hard' {
   if (state.difficulty === 'easy') return 'easy';
   if (state.difficulty === 'hard') return 'hard';
-  // Auto: keep choices pulled from the visible row through level 4 so the
-  // choice count grows naturally (2 for AB, 3 for ABC). Switch to the full
-  // palette of distractors from level 5 once the player is solid.
-  return state.level >= 5 ? 'hard' : 'easy';
+  // Auto: keep choices pulled from the visible row through level 3 so the
+  // choice count grows naturally with the template (2 for AB, 3 for ABC).
+  // Switch to the full palette of distractors from level 4 once the player
+  // is solid.
+  return state.level >= 4 ? 'hard' : 'easy';
 }
 
 // ---------- Rendering ----------

@@ -7,7 +7,10 @@
   to be asked. Use a concise PR title, a short summary, and a test plan.
 - Develop on the branch the session was started on; never push directly
   to `main`.
-- Run `npm run check` (typecheck + build) before pushing. If the change
+- Run `npm run check` (typecheck + build) and `npm test` (Playwright
+  smoke tests) before pushing. Tests gate the deploy in CI, so a red
+  test means a blocked release — fix it before pushing, even if the
+  failure was preexisting and unrelated to your change. If the change
   touches layout or visuals, also run `npm run screenshots` and eyeball
   the result.
 

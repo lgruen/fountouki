@@ -9,7 +9,7 @@ import { mkdir } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { chromium } from 'playwright';
+import { launchChromium } from './_chrome.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -45,8 +45,7 @@ await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
 const url = `http://127.0.0.1:${port}/`;
 
-const execPath = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const browser = await chromium.launch({ executablePath: execPath });
+const browser = await launchChromium();
 const ctx = await browser.newContext({
   // Landscape: that's the play orientation; a rotate-me overlay hides
   // the game in portrait.
@@ -65,7 +64,11 @@ await ctx.addInitScript(() => {
   };
 });
 const page = await ctx.newPage();
-page.on('pageerror', (err) => console.error('PAGE ERROR:', err.message));
+let pageErrors = 0;
+page.on('pageerror', (err) => {
+  pageErrors += 1;
+  console.error('PAGE ERROR:', err.message);
+});
 
 await page.goto(url);
 await page.waitForFunction(() => Boolean(window.__patternplay?.answerId));
@@ -75,10 +78,12 @@ let lastLevel = 0;
 const levelChanges = []; // { atRound, fromLevel, toLevel }
 const screenshotsTaken = new Set();
 
+let failed = false;
 for (let r = 1; r <= ROUNDS; r++) {
   const snap = await page.evaluate(() => window.__patternplay);
   if (!snap?.answerId) {
     console.error(`round ${r}: no answer exposed`);
+    failed = true;
     break;
   }
   // Count rendered choices.
@@ -166,3 +171,8 @@ for (const [level, lvlRows] of [...byLevel.entries()].sort((a, b) => a[0] - b[0]
   lines.push(`    visible   : ${vl}`);
 }
 console.log(lines.join('\n'));
+
+if (failed || pageErrors > 0) {
+  console.error(`\nFAIL: pageErrors=${pageErrors} failed=${failed}`);
+  process.exit(1);
+}

@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
-import { chromium } from 'playwright';
+import { launchChromium } from './_chrome.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -46,10 +46,7 @@ const port = server.address().port;
 const url = `http://127.0.0.1:${port}/`;
 console.log('Serving', dist, 'at', url);
 
-// Use a pre-installed Chromium if Playwright's own download is unavailable
-// (the case in this sandboxed environment).
-const execPath = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const browser = await chromium.launch({ executablePath: execPath });
+const browser = await launchChromium();
 const ctx = await browser.newContext({
   // Default to landscape since that's how the game is meant to be played
   // (a rotate-me overlay covers the UI when the viewport is portrait on a
