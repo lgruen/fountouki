@@ -39,9 +39,11 @@
       <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙️</button>
     </header>
 
-    <section id="sequence" class="sequence" aria-label="Pattern sequence"></section>
+    <div class="play-area">
+      <section id="sequence" class="sequence" aria-label="Pattern sequence"></section>
 
-    <section id="choices" class="choices" aria-label="Answer choices"></section>
+      <section id="choices" class="choices" aria-label="Answer choices"></section>
+    </div>
 
     <canvas id="confetti" aria-hidden="true"></canvas>
 
@@ -83,7 +85,7 @@
         </div>
 
         <div class="setting-row checkbox-row">
-          <label><input type="checkbox" id="hint-toggle" checked /> Highlight the repeating piece</label>
+          <label><input type="checkbox" id="hint-toggle" /> Highlight the repeating piece</label>
         </div>
 
         <div class="setting-actions">
