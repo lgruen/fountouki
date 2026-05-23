@@ -1,7 +1,7 @@
 {
-  "name": "Pattern Play",
-  "short_name": "Patterns",
-  "description": "Spot the pattern, tap the missing piece.",
+  "name": "fountouki",
+  "short_name": "fountouki",
+  "description": "Tiny games for preschoolers.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
