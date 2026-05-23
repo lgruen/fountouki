@@ -56,8 +56,11 @@ await page.goto(url);
 await page.waitForSelector('.picker-card');
 const cards = await page.locator('.picker-card').count();
 assert(cards >= 1, 'expected at least one game card');
-const brand = await page.locator('.picker-brand').textContent();
-assert.equal(brand, '🌰', 'expected hazelnut brand');
+// No in-app hazelnut (launcher icon only).
+const noBrand = await page.locator('.picker-brand').count();
+assert.equal(noBrand, 0, 'no hazelnut brand in-app');
+const homeBtnOnPicker = await page.locator('.picker .home-btn').count();
+assert.equal(homeBtnOnPicker, 0, 'no home button on the picker itself');
 
 console.log('2) tap patterns card → patterns mounts');
 await page.click('.picker-card[data-game="patterns"]');

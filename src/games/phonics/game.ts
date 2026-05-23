@@ -21,11 +21,24 @@ import type { MountOpts } from '../registry.js';
 
 const GAME_ID = 'phonics';
 const STORAGE_NAME = 'state';
-const SESSION_GOAL = 7; // full rainbow — keep in sync with .phonics-rainbow .seg-N rules in style.css.
+const SESSION_GOAL = 7; // full rainbow — keep in sync with .arc-N CSS in style.css.
 const REQUEUE_GAP = 2; // how many cards after a miss before the same card re-appears.
 const ADVANCE_DELAY_MS = 700; // delay between "got it" and the next card.
-const BURST_PER_CARD = 25;
+const BURST_PER_CARD = 22;
 const BURST_AT_DONE = 110;
+
+// SVG geometry for the rainbow arcs. Each arc is a 150° chord (75° each
+// side from top), all sharing the chord baseline y=yHorizon so they fan
+// out like a real rainbow seen from the ground. Arc-0 is the outermost,
+// arc-(SESSION_GOAL-1) is the innermost (and the first to light up).
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ARC_CX = 120;
+const ARC_Y_HORIZON = 70;
+const ARC_HALF_ANGLE = (75 * Math.PI) / 180;
+const ARC_SIN = Math.sin(ARC_HALF_ANGLE); // ≈ 0.966
+const ARC_COS = Math.cos(ARC_HALF_ANGLE); // ≈ 0.259
+const ARC_SAGITTA_OUTER = 65;
+const ARC_SAGITTA_INNER = 25;
 
 interface DebugView {
   letter: string | null;
@@ -71,14 +84,8 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
   const topbar = document.createElement('header');
   topbar.className = 'topbar phonics-topbar';
   const home = makeHomeButton({ onHome: opts.onHome });
-  const rainbow = document.createElement('div');
-  rainbow.className = 'phonics-rainbow';
-  rainbow.setAttribute('aria-label', 'Rainbow progress');
-  for (let i = 0; i < SESSION_GOAL; i++) {
-    const seg = document.createElement('span');
-    seg.className = `phonics-rainbow-seg seg-${i}`;
-    rainbow.append(seg);
-  }
+  const topSpacer = document.createElement('div');
+  topSpacer.className = 'phonics-topbar-spacer';
   const starsEl = document.createElement('div');
   starsEl.className = 'phonics-stars';
   starsEl.setAttribute('aria-label', 'Stars');
@@ -90,7 +97,7 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
   starN.textContent = '0';
   starsEl.append(starGlyph, starN);
   const mute = makeMuteButton();
-  topbar.append(home, rainbow, starsEl, mute);
+  topbar.append(home, topSpacer, starsEl, mute);
   root.append(topbar);
 
   const play = document.createElement('div');
@@ -98,6 +105,32 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
 
   const card = document.createElement('div');
   card.className = 'phonics-card';
+
+  // Rainbow arcs (SVG) — visual hero, grow from inner-out as stars accumulate.
+  const arcSvg = document.createElementNS(SVG_NS, 'svg');
+  arcSvg.setAttribute('viewBox', '0 0 240 80');
+  arcSvg.setAttribute('class', 'phonics-arcs');
+  arcSvg.setAttribute('aria-label', 'Rainbow progress');
+  const arcPaths: SVGPathElement[] = [];
+  for (let i = 0; i < SESSION_GOAL; i++) {
+    const t = i / (SESSION_GOAL - 1);
+    const sagitta = ARC_SAGITTA_OUTER - t * (ARC_SAGITTA_OUTER - ARC_SAGITTA_INNER);
+    const r = sagitta / (1 - ARC_COS);
+    const w = r * ARC_SIN;
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute(
+      'd',
+      `M ${(ARC_CX - w).toFixed(2)} ${ARC_Y_HORIZON} A ${r.toFixed(2)} ${r.toFixed(2)} 0 0 1 ${(ARC_CX + w).toFixed(2)} ${ARC_Y_HORIZON}`,
+    );
+    path.setAttribute('stroke-width', '8');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('class', `phonics-arc-path arc-${i}`);
+    arcSvg.append(path);
+    arcPaths.push(path);
+  }
+  card.append(arcSvg);
+
   const letterEl = document.createElement('div');
   letterEl.className = 'phonics-letter';
   card.append(letterEl);
@@ -149,11 +182,23 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
   root.append(done);
 
   // ---------- helpers ----------
-  function paintRainbow(): void {
-    rainbow.querySelectorAll('.phonics-rainbow-seg').forEach((s, i) => {
-      s.classList.toggle('filled', i < stars);
+  function paintRainbow(justFilledIndex?: number): void {
+    // Stars fill inner-to-outer: star 1 lights arc-(GOAL-1) (innermost),
+    // star GOAL lights arc-0 (outermost). Visually the rainbow grows.
+    arcPaths.forEach((p, i) => {
+      const isFilled = i >= SESSION_GOAL - stars;
+      p.classList.toggle('filled', isFilled);
+      p.classList.toggle('just-filled', justFilledIndex === i);
     });
     starN.textContent = String(stars);
+  }
+
+  function hopLetter(): void {
+    letterEl.classList.remove('hop');
+    // Force reflow so the animation re-fires.
+    void letterEl.offsetWidth;
+    letterEl.classList.add('hop');
+    setT(() => letterEl.classList.remove('hop'), 650);
   }
 
   function exposeDebug(): void {
@@ -199,10 +244,14 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     gotIt(state, currentLetter);
     persist();
     stars += 1;
-    paintRainbow();
+    const newlyLitArcIndex = SESSION_GOAL - stars; // the arc that just got filled
+    paintRainbow(newlyLitArcIndex);
+    hopLetter();
     playCorrect();
     burst(BURST_PER_CARD);
     setT(() => {
+      // Clear the just-filled marker so the same arc doesn't re-animate.
+      arcPaths.forEach((p) => p.classList.remove('just-filled'));
       if (stars >= SESSION_GOAL) showDone();
       else showNextCard();
     }, ADVANCE_DELAY_MS);
