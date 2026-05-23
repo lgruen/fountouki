@@ -70,8 +70,12 @@ await stampServiceWorker();
 /**
  * Rewrite dist/sw.js, replacing __BUILD_ID__ with a fresh stamp and
  * __PRECACHE__ with a JSON array of every same-origin asset to cache.
- * The sw file itself is excluded from the precache list — the browser
- * never caches a SW via the cache API.
+ * Also stamp ?v=<id> onto the main.js and style.css references in
+ * dist/index.html so the URL itself changes per build — that way the
+ * previous SW's cache misses on a redeploy and a fresh bundle is
+ * fetched on the very next reload, instead of waiting for the new SW
+ * to install + activate first. The sw file itself is excluded from
+ * precache — the browser never caches a SW via the cache API.
  */
 async function stampServiceWorker() {
   const swPath = join(outDir, 'sw.js');
@@ -82,16 +86,29 @@ async function stampServiceWorker() {
     return; // no sw.js, skip silently
   }
   const id = buildId();
+  const versioned = new Set(['main.js', 'style.css']);
   const files = await listDist(outDir);
   const precache = files
     .filter((f) => f !== 'sw.js' && !f.endsWith('.map') && f !== '.nojekyll')
-    .map((f) => `./${f}`);
+    .map((f) => (versioned.has(f) ? `./${f}?v=${id}` : `./${f}`));
   // Ensure the HTML root is reachable both as "./" and as "./index.html".
   if (precache.includes('./index.html') && !precache.includes('./')) precache.push('./');
   const stamped = sw
     .replaceAll('__BUILD_ID__', id)
     .replaceAll('__PRECACHE__', JSON.stringify(precache));
   await writeFile(swPath, stamped);
+
+  // Stamp the same id onto the asset URLs in index.html.
+  const htmlPath = join(outDir, 'index.html');
+  try {
+    const html = await fsReadFile(htmlPath, 'utf8');
+    const stampedHtml = html
+      .replace(/(src=")main\.js(")/g, `$1main.js?v=${id}$2`)
+      .replace(/(href=")style\.css(")/g, `$1style.css?v=${id}$2`);
+    await writeFile(htmlPath, stampedHtml);
+  } catch {
+    /* index.html missing — non-fatal for partial copies */
+  }
 }
 
 async function listDist(dir, prefix = '') {
