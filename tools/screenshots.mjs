@@ -236,6 +236,7 @@ await snap('20b-phonics-mid-rainbow');
 // Trigger a miss to show the hint cue.
 await page.click('.phonics-miss');
 await page.waitForSelector('.phonics-hint:not([hidden])');
+await page.waitForTimeout(320); // let hint-in animation complete
 await snap('21-phonics-miss-hint');
 
 // "Got it now" to clear miss state, then drive to a "session done" splash.
@@ -270,6 +271,7 @@ await snap('25-phonics-iphone-promax-landscape');
 
 await page.click('.phonics-miss');
 await page.waitForSelector('.phonics-hint:not([hidden])');
+await page.waitForTimeout(320); // let hint-in animation complete
 await snap('26-phonics-miss-promax');
 
 // Parent settings panel with mastery stats — long-press the in-game ←.

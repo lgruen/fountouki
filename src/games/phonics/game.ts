@@ -208,12 +208,12 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     arcSvg.style.visibility = stars === 0 ? 'hidden' : 'visible';
   }
 
-  function hopLetter(): void {
-    letterEl.classList.remove('hop');
-    // Force reflow so the animation re-fires.
+  function hopLetter(hot: boolean): void {
+    letterEl.classList.remove('hop', 'hop-hot');
     void letterEl.offsetWidth;
     letterEl.classList.add('hop');
-    setT(() => letterEl.classList.remove('hop'), 650);
+    if (hot) letterEl.classList.add('hop-hot');
+    setT(() => letterEl.classList.remove('hop', 'hop-hot'), 700);
   }
 
   function exposeDebug(): void {
@@ -261,7 +261,7 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     streak += 1;
     const newlyLitArcIndex = stars - 1; // outer-to-inner: stars=1 → arc-0
     paintRainbow(newlyLitArcIndex);
-    hopLetter();
+    hopLetter(streak >= 3); // hot streak: bigger / tilted hop
     // Pulse the whole rainbow on each fill — the prize itself reacts,
     // not just one arc.
     arcSvg.classList.remove('pulsing');

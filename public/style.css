@@ -653,6 +653,9 @@ body {
 .phonics-letter.hop {
   animation: letter-hop 650ms cubic-bezier(0.34, 1.6, 0.64, 1);
 }
+.phonics-letter.hop.hop-hot {
+  animation: letter-hop-hot 700ms cubic-bezier(0.34, 1.6, 0.64, 1);
+}
 @keyframes letter-idle {
   0%, 100% { transform: rotate(0deg); }
   35%      { transform: rotate(-1.5deg); }
@@ -663,6 +666,13 @@ body {
   30%  { transform: translateY(-16px) scale(1.10); }
   55%  { transform: translateY(2px) scale(0.96); }
   100% { transform: translateY(0) scale(1); }
+}
+@keyframes letter-hop-hot {
+  0%   { transform: translateY(0)   scale(1)    rotate(0deg); }
+  25%  { transform: translateY(-26px) scale(1.18) rotate(-7deg); }
+  45%  { transform: translateY(-10px) scale(1.10) rotate(5deg); }
+  65%  { transform: translateY(4px)  scale(0.94) rotate(-2deg); }
+  100% { transform: translateY(0)   scale(1)    rotate(0deg); }
 }
 .phonics-hint {
   display: flex;
@@ -723,13 +733,22 @@ body {
 @media (orientation: landscape) and (max-height: 540px) {
   .phonics-arcs { width: clamp(200px, 36vw, 300px); margin-bottom: 0; }
   .phonics-letter { font-size: clamp(56px, 22vh, 110px); }
-  .phonics-letter.faded { font-size: clamp(36px, 14vh, 76px); }
   .phonics-card { padding: clamp(8px, 1.6vh, 14px) clamp(22px, 6vw, 60px); gap: 4px; }
   .phonics-hint-emoji { font-size: clamp(28px, 10vh, 52px); }
   .phonics-action { width: clamp(52px, 13vh, 82px); height: clamp(52px, 13vh, 82px); font-size: clamp(28px, 7vh, 48px); }
   .phonics-miss { width: clamp(40px, 9vh, 56px); height: clamp(40px, 9vh, 56px); font-size: clamp(20px, 5vh, 32px); }
   .phonics-play { gap: clamp(8px, 1.8vh, 20px); }
   .phonics-topbar { gap: clamp(8px, 1vw, 12px); }
+}
+
+/* Tablet portrait: the card was floating small at the top half. Grow
+   it so the play area actually fills the viewport. */
+@media (orientation: portrait) and (min-width: 540px) {
+  .phonics-arcs { width: clamp(280px, 60vw, 460px); }
+  .phonics-letter { font-size: clamp(140px, 30vw, 280px); }
+  .phonics-card { padding: clamp(28px, 5vw, 56px) clamp(36px, 8vw, 96px); }
+  .phonics-action { width: clamp(96px, 12vw, 140px); height: clamp(96px, 12vw, 140px); font-size: clamp(48px, 7vw, 80px); }
+  .phonics-miss { width: clamp(68px, 8vw, 96px); height: clamp(68px, 8vw, 96px); font-size: clamp(32px, 4vw, 48px); }
 }
 
 .phonics-done {
@@ -759,6 +778,11 @@ body {
 .phonics-done-rainbow {
   font-size: clamp(72px, 11vw, 110px);
   line-height: 1;
+  animation: rainbow-bounce 1.6s ease-in-out infinite;
+}
+@keyframes rainbow-bounce {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-8px) rotate(2deg); }
 }
 .phonics-done-actions {
   display: flex;
@@ -779,15 +803,20 @@ body {
   box-shadow: inset 0 0 0 2px #e6e1d3;
 }
 
-/* Per-letter mastery dots on the rainbow-done splash. */
+/* Per-letter mastery dots on the rainbow-done splash. Bigger than the
+   parent-panel dots — this is a celebratory display, not a status bar. */
 .phonics-mastery {
   display: grid;
   grid-template-columns: repeat(13, 1fr);
-  gap: 4px;
+  gap: 6px;
   justify-items: center;
-  margin: 4px 0 16px;
-  max-width: 320px;
+  margin: 8px auto 18px;
+  max-width: 360px;
   width: 100%;
+}
+.phonics-mastery .mastery-dot {
+  width: clamp(14px, 1.8vw, 18px);
+  height: clamp(14px, 1.8vw, 18px);
 }
 .mastery-dot {
   width: clamp(10px, 1.4vw, 14px);
