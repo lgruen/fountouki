@@ -70,8 +70,8 @@ page.on('pageerror', (err) => {
   console.error('PAGE ERROR:', err.message);
 });
 
-await page.goto(url);
-await page.waitForFunction(() => Boolean(window.__patternplay?.answerId));
+await page.goto(`${url}#/patterns`);
+await page.waitForFunction(() => Boolean(window.__patterns?.answerId));
 
 const rows = []; // { round, level, stars, template, themeId, answerId, choiceCount }
 let lastLevel = 0;
@@ -80,7 +80,7 @@ const screenshotsTaken = new Set();
 
 let failed = false;
 for (let r = 1; r <= ROUNDS; r++) {
-  const snap = await page.evaluate(() => window.__patternplay);
+  const snap = await page.evaluate(() => window.__patterns);
   if (!snap?.answerId) {
     console.error(`round ${r}: no answer exposed`);
     failed = true;
@@ -118,7 +118,7 @@ for (let r = 1; r <= ROUNDS; r++) {
   try {
     await page.waitForFunction(
       ([prev, _round]) => {
-        const s = window.__patternplay;
+        const s = window.__patterns;
         return Boolean(s && s.answerId && s.answerId !== prev);
       },
       [prevAnswer, prevRound],

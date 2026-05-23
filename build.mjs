@@ -24,13 +24,13 @@ await mkdir(outDir, { recursive: true });
 await cp(publicDir, outDir, { recursive: true });
 
 const buildOptions = {
-  entryPoints: [join(srcDir, 'game.ts')],
+  entryPoints: [join(srcDir, 'main.ts')],
   bundle: true,
   format: 'esm',
   target: ['es2022'],
   sourcemap: true,
   minify: !watch,
-  outfile: join(outDir, 'game.js'),
+  outfile: join(outDir, 'main.js'),
   logLevel: 'info',
   // Stamp the build id into the bundle so the registration code can
   // reference it for diagnostics if needed.

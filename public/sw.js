@@ -9,8 +9,9 @@
 /* eslint-disable no-undef */
 
 const BUILD_ID = '__BUILD_ID__';
-const CACHE_NAME = `patternplay-${BUILD_ID}`;
+const CACHE_NAME = `fountouki-${BUILD_ID}`;
 const PRECACHE = __PRECACHE__;
+const LEGACY_PREFIXES = ['patternplay-', 'fountouki-'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -23,7 +24,9 @@ self.addEventListener('activate', (event) => {
     (async () => {
       const names = await caches.keys();
       await Promise.all(
-        names.filter((n) => n.startsWith('patternplay-') && n !== CACHE_NAME).map((n) => caches.delete(n)),
+        names
+          .filter((n) => LEGACY_PREFIXES.some((p) => n.startsWith(p)) && n !== CACHE_NAME)
+          .map((n) => caches.delete(n)),
       );
       await self.clients.claim();
     })(),

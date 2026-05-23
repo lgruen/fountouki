@@ -64,15 +64,15 @@ const page = await ctx.newPage();
 page.on('pageerror', (err) => console.error('PAGE ERROR:', err.message));
 
 console.log('1) load and switch to unit mode');
-await page.goto(url);
+await page.goto(`${url}#/patterns`);
 await page.waitForSelector('.cell');
-await page.click('#settings-btn');
-await page.selectOption('#mode-select', 'unit');
-await page.click('#close-settings');
+await page.click('.settings-btn');
+await page.selectOption('#ptn-mode', 'unit');
+await page.click('.ptn-close');
 await page.waitForSelector('.cell.selectable');
 
-const period = await page.evaluate(() => window.__patternplay?.template?.length);
-const visible = await page.evaluate(() => window.__patternplay?.visibleIds?.length);
+const period = await page.evaluate(() => window.__patterns?.template?.length);
+const visible = await page.evaluate(() => window.__patterns?.visibleIds?.length);
 console.log(`   period=${period}, visible=${visible}`);
 assert(typeof period === 'number' && period >= 2, 'period missing');
 assert(typeof visible === 'number' && visible > period, 'no visible cells');
@@ -106,10 +106,10 @@ selCount = await page.locator('.cell.unit-pick').count();
 assert.equal(selCount, 1, 'selection should shrink back to 1');
 
 console.log('6) submit a length-1 selection (wrong unless period === 1)');
-const startStars = await page.evaluate(() => window.__patternplay?.stars ?? 0);
+const startStars = await page.evaluate(() => window.__patterns?.stars ?? 0);
 await page.locator('.unit-submit').click({ force: true });
 await page.waitForTimeout(800);
-const afterWrong = await page.evaluate(() => window.__patternplay?.stars ?? 0);
+const afterWrong = await page.evaluate(() => window.__patterns?.stars ?? 0);
 if (period === 1) {
   assert.equal(afterWrong, startStars + 1, 'period 1 means length 1 is correct');
 } else {
@@ -129,14 +129,14 @@ for (let i = 0; i < period - 1; i++) {
 selCount = await page.locator('.cell.unit-pick').count();
 assert.equal(selCount, period, 'should have `period` cells selected');
 
-const prevAnswerId = await page.evaluate(() => window.__patternplay?.answerId);
+const prevAnswerId = await page.evaluate(() => window.__patterns?.answerId);
 await page.locator('.unit-submit').click({ force: true });
 await page.waitForFunction(
-  (prev) => window.__patternplay?.answerId && window.__patternplay.answerId !== prev,
+  (prev) => window.__patterns?.answerId && window.__patterns.answerId !== prev,
   prevAnswerId,
   { timeout: 4000 },
 );
-const finalStars = await page.evaluate(() => window.__patternplay?.stars ?? 0);
+const finalStars = await page.evaluate(() => window.__patterns?.stars ?? 0);
 assert(finalStars > startStars, 'correct-length submission should earn a star');
 
 await browser.close();

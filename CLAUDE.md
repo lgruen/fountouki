@@ -1,28 +1,68 @@
-# Working agreements for Claude in this repo
+# Working agreements
 
 ## Workflow
+- Open a PR against `main` at the end of any code-changing task. Concise
+  title + short summary. No test plan needed.
+- Develop on the branch the session was started on; never push to `main`.
+- Before pushing: `npm run check` (typecheck + build), `npm test`
+  (Playwright). Visuals: also `npm run screenshots` and eyeball the
+  output. Red tests block deploy — fix them even if unrelated.
 
-- At the end of every task that introduces or modifies code on a feature
-  branch, create a pull request against `main` automatically — don't wait to be
-  asked. Use a concise PR title and a short summary. No need for a test plan.
-- Develop on the branch the session was started on; never push directly
-  to `main`.
-- Run `npm run check` (typecheck + build) and `npm test` (Playwright
-  smoke tests) before pushing. Tests gate the deploy in CI, so a red
-  test means a blocked release — fix it before pushing, even if the
-  failure was preexisting and unrelated to your change. If the change
-  touches layout or visuals, also run `npm run screenshots` and eyeball
-  the result.
+## Working style
 
-## Project quick facts
+### Self-verify in a real browser before claiming done
+- For new UI / gameplay: add a Playwright spec under `tools/` covering
+  golden path + at least one edge case (wrong answer, reload mid-flow,
+  empty state).
+- Visual changes: run `npm run screenshots` and eyeball at phone
+  landscape / tablet portrait / tablet landscape; consider iPhone Pro
+  Max landscape (932×430) for safe-area edge cases.
+- Tokens are cheap; bug reports are not.
 
-See `docs/TODO.md` for the full orientation. The shortest version:
+### Delegate noisy work to subagents
+- Use the Agent tool (Explore / general-purpose) for heavy Playwright
+  runs, screenshot review, log scraping. Tell them what to report and
+  how short (concise pass/fail + paths, not verbose output).
+- Main thread stays for code, decisions, commits.
 
+### Tight docs
+- Audience for every doc here (CLAUDE.md / README / TODO / IDEAS /
+  code comments) is primarily a future Claude. Bullets over prose,
+  sentences over paragraphs. Drop motivation unless the *why* is
+  unrecoverable.
+
+## No personal details in commits
+- Repo is public; the audience is the maintainer's kids only.
+- Keep kid names, ages, current-mastery state, or
+  "for the user's son" framing out of every committed file. Generic
+  preferences (themes, mechanics) are fine. Personal context lives in
+  Claude's local memory, not the repo.
+
+## Project shape
 - TypeScript → esbuild → `dist/`. No runtime deps. Strict tsconfig.
-- Core files: `src/game.ts` (UI + state), `src/patterns.ts` (pure
-  generator), `src/themes.ts`, `src/render.ts`, `src/sounds.ts`,
-  `src/confetti.ts`. Static: `public/index.html`, `public/style.css`.
-- Target audience: a 4-year-old. Bias toward big tap targets, clear
-  visual grouping, and minimal text.
-- Settings persist in `localStorage`; scores are session-only by design
-  — never persist them.
+- `src/main.ts` is the bundle entry. Hash routing: `#/` → picker,
+  `#/<game-id>` → that game.
+- `src/shared/` — `sounds`, `confetti`, `storage` (namespaced
+  localStorage), `settings` (shared mute + sync token), `chrome` (home
+  / mute buttons), `pwa` (SW + orientation lock), `sync` (cross-device
+  client talking to the CF Worker in `server/`).
+- `src/games/<id>/` — per-game code. Each game exports
+  `mount(container, opts) -> unmount`.
+- `src/games/registry.ts` — list of games. Add a game = import + entry.
+- `server/` — CF Worker for sync. See `server/README.md` for live URL.
+- Static: `public/index.html` (just the shell), `public/style.css`,
+  `public/sw.js`.
+
+## Settings model
+- Mute is shared across all games (one toggle).
+- Everything else is per-game under `fountouki.<game>.<key>.v1`.
+- Sync state is per-game under one family-level token.
+- Scores are session-only — never persist them.
+
+## Audience & pedagogy baseline
+- Preschoolers; big tap targets, minimal text, visual-first navigation.
+- Word labels are optional reading practice, never required.
+- Every game: errorless learning (never sit in "I don't know"),
+  monotonic progress (stars / bars never decrement), no time pressure,
+  theme as wrapper around the stimulus not embedded clutter, ~5-minute
+  soft sessions.
