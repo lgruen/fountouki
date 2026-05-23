@@ -10,7 +10,7 @@
     "dev": "node build.mjs --watch --serve",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build",
-    "test": "node tools/picker-test.mjs && node tools/unit-mode-test.mjs && node tools/sw-offline-test.mjs && node tools/playtest.mjs 30",
+    "test": "node tools/picker-test.mjs && node tools/parent-settings-test.mjs && node tools/unit-mode-test.mjs && node tools/sw-offline-test.mjs && node tools/playtest.mjs 30",
     "screenshots": "node tools/screenshots.mjs",
     "icons": "node tools/icons.mjs"
   },

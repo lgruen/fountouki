@@ -1,12 +1,13 @@
 // Shared header buttons. Each game builds its own topbar but reuses these.
 
 import { loadShared, toggleMuted } from './settings.js';
+import { openParentSettings } from './parent-settings.js';
 
 const LONG_PRESS_MS = 500;
 
 export interface HomeOpts {
   onHome: () => void;
-  /** Long-press handler (parent settings). Optional. */
+  /** Long-press handler; defaults to opening parent settings. */
   onLongPress?: () => void;
 }
 
@@ -19,14 +20,13 @@ export function makeHomeButton(opts: HomeOpts): HTMLButtonElement {
   let pressTimer: number | null = null;
   let longFired = false;
 
+  const longPress = opts.onLongPress ?? openParentSettings;
   const start = () => {
     longFired = false;
-    if (opts.onLongPress) {
-      pressTimer = window.setTimeout(() => {
-        longFired = true;
-        opts.onLongPress!();
-      }, LONG_PRESS_MS);
-    }
+    pressTimer = window.setTimeout(() => {
+      longFired = true;
+      longPress();
+    }, LONG_PRESS_MS);
   };
   const end = () => {
     if (pressTimer !== null) {
