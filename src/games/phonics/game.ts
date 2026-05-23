@@ -22,10 +22,11 @@ import type { MountOpts } from '../registry.js';
 const GAME_ID = 'phonics';
 const STORAGE_NAME = 'state';
 const SESSION_GOAL = 7; // full rainbow — keep in sync with .arc-N CSS in style.css.
-const REQUEUE_GAP = 2; // how many cards after a miss before the same card re-appears.
+const REQUEUE_GAP = 4; // how many cards after a miss before the same card re-appears.
 const ADVANCE_DELAY_MS = 700; // delay between "got it" and the next card.
-const BURST_PER_CARD = 22;
-const BURST_AT_DONE = 110;
+const BURST_BASE = 22;
+const BURST_STREAK_STEP = 8; // extra particles per consecutive correct
+const BURST_AT_DONE = 140;
 
 // SVG geometry for the rainbow arcs. Each arc is a 150° chord (75° each
 // side from top), all sharing the chord baseline y=yHorizon so they fan
@@ -60,6 +61,7 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
   save(GAME_ID, STORAGE_NAME, state);
 
   let stars = 0;
+  let streak = 0;
   let queue: string[] = buildQueue(state);
   let currentLetter: string | null = null;
   let inMissReveal = false;
@@ -174,12 +176,29 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     <div class="phonics-done-card">
       <div class="phonics-done-rainbow">🌈</div>
       <h2>Rainbow!</h2>
+      <div class="phonics-mastery" aria-label="Letter mastery"></div>
       <div class="phonics-done-actions">
         <button class="primary phonics-done-again">Play again</button>
         <button class="secondary phonics-done-home">Home</button>
       </div>
     </div>`;
   root.append(done);
+
+  const masteryEl = done.querySelector<HTMLDivElement>('.phonics-mastery')!;
+  function paintMastery(): void {
+    masteryEl.innerHTML = '';
+    // 26 dots, one per letter, colored by Leitner box (0 = gray, 4 = gold).
+    // Gives a visible long-term arc across sessions — "look how much
+    // you've grown."
+    const letters = Object.keys(state.letters).sort();
+    for (const l of letters) {
+      const s = state.letters[l];
+      const dot = document.createElement('span');
+      dot.className = `phonics-mastery-dot box-${s?.box ?? 0}`;
+      dot.setAttribute('aria-label', `${l}: box ${s?.box ?? 0}`);
+      masteryEl.append(dot);
+    }
+  }
 
   // ---------- helpers ----------
   function paintRainbow(justFilledIndex?: number): void {
@@ -244,13 +263,21 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     gotIt(state, currentLetter);
     persist();
     stars += 1;
+    streak += 1;
     const newlyLitArcIndex = SESSION_GOAL - stars; // the arc that just got filled
     paintRainbow(newlyLitArcIndex);
     hopLetter();
-    playCorrect();
-    burst(BURST_PER_CARD);
+    // Pulse the whole rainbow on each fill — the prize itself reacts,
+    // not just one arc.
+    arcSvg.classList.remove('pulsing');
+    void arcSvg.getBoundingClientRect();
+    arcSvg.classList.add('pulsing');
+    setT(() => arcSvg.classList.remove('pulsing'), 480);
+    // Streak-aware reward: more confetti + higher pitch as the kid runs hot.
+    const streakBoost = Math.min(streak - 1, 5);
+    playCorrect(streakBoost);
+    burst(BURST_BASE + streakBoost * BURST_STREAK_STEP);
     setT(() => {
-      // Clear the just-filled marker so the same arc doesn't re-animate.
       arcPaths.forEach((p) => p.classList.remove('just-filled'));
       if (stars >= SESSION_GOAL) showDone();
       else showNextCard();
@@ -262,6 +289,7 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     playTap();
     missed(state, currentLetter);
     persist();
+    streak = 0;
     inMissReveal = true;
     // Canonical exemplar — clean anchor, even if the letter has graduated
     // to its variety set in normal play.
@@ -269,7 +297,9 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     hintEmoji.textContent = ex.emoji;
     hintWord.textContent = `like ${ex.word}`;
     hint.hidden = false;
-    letterEl.classList.add('faded');
+    // Note: do NOT fade the letter. The original treatment read as "you
+    // failed" — the opposite of errorless learning. Letter stays full
+    // strength; the canonical exemplar simply joins it on screen.
     missBtn.hidden = true;
     gotBtn.hidden = true;
     advanceBtn.hidden = false;
@@ -283,11 +313,22 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
   }
 
   function showDone(): void {
+    paintMastery();
     done.hidden = false;
+    // Stagger the arcs as the splash opens so the rainbow visibly
+    // "draws itself" rather than just sitting there.
+    arcPaths.forEach((p, i) => {
+      p.classList.remove('just-filled');
+      setT(() => {
+        p.classList.add('just-filled');
+        setT(() => p.classList.remove('just-filled'), 700);
+      }, i * 120);
+    });
     playLevelUp();
     burst(BURST_AT_DONE);
-    setT(() => burst(80), 400);
-    setT(() => burst(60), 900);
+    setT(() => burst(90), 350);
+    setT(() => burst(70), 800);
+    setT(() => burst(50), 1400);
     void sync.flush();
     exposeDebug();
   }

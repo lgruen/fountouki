@@ -65,12 +65,15 @@ function playNotes(notes: NoteSpec[]): void {
   }
 }
 
-/** Pleasant ascending triad — "you got it!". */
-export function playCorrect(): void {
+/** Pleasant ascending triad — "you got it!". Optional streak (0+)
+ *  pitches the chime up a semitone per step (capped at +5) so a hot
+ *  streak feels like it's building. */
+export function playCorrect(streak = 0): void {
+  const shift = Math.pow(2, Math.min(streak, 5) / 12);
   playNotes([
-    { freq: 523.25, start: 0.0, dur: 0.18 }, // C5
-    { freq: 659.25, start: 0.09, dur: 0.18 }, // E5
-    { freq: 783.99, start: 0.18, dur: 0.28 }, // G5
+    { freq: 523.25 * shift, start: 0.0, dur: 0.18 },
+    { freq: 659.25 * shift, start: 0.09, dur: 0.18 },
+    { freq: 783.99 * shift, start: 0.18, dur: 0.28 },
   ]);
 }
 
