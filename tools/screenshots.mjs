@@ -219,6 +219,51 @@ await page.setViewportSize({ width: 932, height: 430 });
 await page.waitForTimeout(80);
 await snap('12-iphone-promax-landscape');
 
+// ---------- phonics ----------
+await page.setViewportSize({ width: 844, height: 390 });
+await page.goto(`${url}#/phonics`);
+await page.waitForSelector('.phonics-letter');
+await snap('20-phonics-phone-landscape');
+
+// Trigger a miss to show the hint cue.
+await page.click('.phonics-miss');
+await page.waitForSelector('.phonics-hint:not([hidden])');
+await snap('21-phonics-miss-hint');
+
+// "Got it now" to clear miss state, then drive to a "session done" splash.
+await page.click('.phonics-advance');
+for (let i = 0; i < 8; i++) {
+  const done = await page.locator('.phonics-done:not([hidden])').count();
+  if (done > 0) break;
+  const adv = await page.locator('.phonics-advance:not([hidden])').count();
+  if (adv > 0) await page.click('.phonics-advance');
+  else await page.click('.phonics-got');
+  await page.waitForTimeout(800);
+}
+await page.waitForSelector('.phonics-done:not([hidden])');
+await snap('22-phonics-rainbow-done');
+await page.click('.phonics-done-home');
+await page.waitForSelector('.picker-card');
+
+// Tablet portrait + landscape for phonics too.
+await page.setViewportSize({ width: 820, height: 1180 });
+await page.goto(`${url}#/phonics`);
+await page.waitForSelector('.phonics-letter');
+await snap('23-phonics-tablet-portrait');
+
+await page.setViewportSize({ width: 1180, height: 820 });
+await page.waitForTimeout(80);
+await snap('24-phonics-tablet-landscape');
+
+// iPhone Pro Max landscape — the tight-viewport edge case.
+await page.setViewportSize({ width: 932, height: 430 });
+await page.waitForTimeout(80);
+await snap('25-phonics-iphone-promax-landscape');
+
+await page.click('.phonics-miss');
+await page.waitForSelector('.phonics-hint:not([hidden])');
+await snap('26-phonics-miss-promax');
+
 await browser.close();
 server.close();
 console.log('done');

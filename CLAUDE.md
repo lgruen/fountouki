@@ -25,6 +25,15 @@
   how short (concise pass/fail + paths, not verbose output).
 - Main thread stays for code, decisions, commits.
 
+### Independent review for non-trivial work
+- After implementing a meaningful slice (a new game, a major refactor,
+  any non-trivial feature), launch an Agent (general-purpose) to review
+  the result. Brief it lightly — file paths, scope, audience — but
+  don't justify your choices or you'll bias the review.
+- The review covers code quality + architecture + game design /
+  pedagogy + visual layout. Final call is still yours unless the agent
+  flags a question only the user can answer — escalate those.
+
 ### Tight docs
 - Audience for every doc here (CLAUDE.md / README / TODO / IDEAS /
   code comments) is primarily a future Claude. Bullets over prose,
@@ -66,3 +75,23 @@
   monotonic progress (stars / bars never decrement), no time pressure,
   theme as wrapper around the stimulus not embedded clutter, ~5-minute
   soft sessions.
+- **Design for language delays and memory challenges.** Assume the
+  player has a smaller working-memory budget than a typical preschooler
+  and slower receptive-language processing:
+  - One stimulus on screen at a time. No competing visual elements
+    near the target.
+  - Generous repetition + spaced practice (SRS, in-session re-presents).
+  - Pictures *with* words for any concept-naming UI; never picture-only,
+    never text-only.
+  - Predictable layout across sessions; avoid surprise mechanics or
+    randomized button placement.
+  - Short, direct prompts. No idioms, wordplay, or sarcasm.
+  - When grading is parent-mediated, lean on the parent for nuance
+    (pacing, hints, model-and-repeat); the app's job is the structured
+    excuse, not the assessment.
+
+## PR descriptions
+- For visual / UI work, attach a couple of representative screenshots
+  to the PR body (under `## Screenshots`). Use `gh pr create` with
+  `--body` referencing files from `screenshots/`, or upload via the GH
+  web UI after the PR is open.
