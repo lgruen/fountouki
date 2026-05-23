@@ -41,6 +41,18 @@ details (see `CLAUDE.md`).
   vs questions. Picture prompts + tap-the-right-sentence or
   drag-to-build.
 
+## Care & grow (future)
+- Tend to a companion (pet or character); each completed care task =
+  visible growth (egg → hatchling → adult across many sessions).
+- Errorless drag-to-target interactions: food → mouth, soap → bath,
+  blanket → bed. Sequence learning baked into routines
+  (bath: water → soap → rinse → towel).
+- Monotonic: the companion never regresses; growth is the reward signal
+  (no stars needed).
+- Labeled actions / objects for vocabulary scaffolding (pictures + words).
+- Empathy / theory-of-mind angle: routines for another creature mirror
+  real daily routines.
+
 ## Mechanics worth reusing
 - Confetti burst on correct (already in `src/confetti.ts`).
 - Web Audio chimes (already in `src/sounds.ts`).
