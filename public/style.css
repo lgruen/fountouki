@@ -454,3 +454,65 @@ body {
   0%, 100% { transform: scale(1);   box-shadow: var(--shadow); }
   50%      { transform: scale(1.06); box-shadow: 0 8px 22px rgba(43,157,95,0.35); }
 }
+
+/* ---------- game container (every game mounts here) ---------- */
+.game {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+}
+
+/* ---------- picker (home screen) ---------- */
+.picker {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  gap: clamp(14px, 3vh, 36px);
+}
+.picker-topbar {
+  /* Use same absolutely-positioned topbar shape as games. */
+  position: absolute;
+}
+.picker-brand {
+  font-size: clamp(64px, 14vw, 140px);
+  line-height: 1;
+  filter: drop-shadow(0 4px 8px rgba(43, 44, 52, 0.10));
+}
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(clamp(120px, 22vw, 220px), 1fr));
+  gap: clamp(14px, 2vw, 28px);
+  width: 100%;
+  max-width: 720px;
+}
+.picker-card {
+  border: 0;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: clamp(18px, 3vw, 32px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(8px, 1.4vh, 16px);
+  cursor: pointer;
+  font: inherit;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+.picker-card:active { transform: scale(0.97); }
+.picker-icon {
+  font-size: clamp(48px, 8vw, 84px);
+  line-height: 1;
+}
+.picker-label {
+  font-size: clamp(14px, 1.6vw, 18px);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.home-btn { /* hazelnut */ font-size: clamp(22px, 2.6vw, 28px); }

@@ -53,7 +53,7 @@ const ctx = await browser.newContext({ viewport: { width: 844, height: 390 } });
 const page = await ctx.newPage();
 // The registration code skips SW install on localhost so dev iteration
 // isn't blocked by cached assets. Opt in for this test with ?sw=force.
-const testUrl = `${url}?sw=force`;
+const testUrl = `${url}?sw=force#/patterns`;
 
 page.on('console', (msg) => {
   const t = msg.type();
@@ -94,10 +94,9 @@ for (const [name, keys] of Object.entries(cached)) {
 
 console.log('2) go offline, reload, expect game to still work...');
 await ctx.setOffline(true);
-// Reload without the ?sw=force query — we don't need to *register* now
-// (already done), and a fresh URL exercises the SW's cache-hit path on
-// the HTML shell as well.
-await page.goto(url, { waitUntil: 'load' });
+// Reload without ?sw=force — already registered — but keep the hash so
+// patterns mounts directly and exercises the bundled JS, not just the picker.
+await page.goto(`${url}#/patterns`, { waitUntil: 'load' });
 await page.waitForSelector('.cell', { timeout: 5000 });
 const cellCount = await page.locator('.cell').count();
 const choiceCount = await page.locator('.choice').count();

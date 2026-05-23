@@ -8,7 +8,6 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icon-180.png" />
-  <!-- Launch in standalone (fullscreen) mode when added to the iOS home screen. -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -25,79 +24,10 @@
     </div>
   </div>
 
-  <main id="app">
-    <header class="topbar">
-      <div id="stars" class="stars" aria-label="Stars">
-        <span class="star">★</span>
-        <span id="star-count">0</span>
-      </div>
-      <div id="level-pips" class="level-pips" aria-label="Level"></div>
-      <button id="mute-btn" class="icon-btn" aria-pressed="false" aria-label="Mute sounds">
-        <span class="icon-sound">🔊</span>
-        <span class="icon-muted" hidden>🔇</span>
-      </button>
-      <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙️</button>
-    </header>
+  <main id="app"></main>
 
-    <div class="play-area">
-      <section id="sequence" class="sequence" aria-label="Pattern sequence"></section>
+  <canvas id="confetti" aria-hidden="true"></canvas>
 
-      <section id="choices" class="choices" aria-label="Answer choices"></section>
-    </div>
-
-    <canvas id="confetti" aria-hidden="true"></canvas>
-
-    <div id="settings-panel" class="settings-panel" hidden>
-      <div class="settings-card" role="dialog" aria-label="Settings">
-        <h2>Settings</h2>
-
-        <div class="setting-row">
-          <label for="theme-select">Pictures</label>
-          <select id="theme-select">
-            <option value="mix" selected>Mix (auto)</option>
-            <option value="emoji-animals">Animals 🐶</option>
-            <option value="emoji-fruit">Fruit 🍎</option>
-            <option value="emoji-vehicles">Vehicles 🚗</option>
-            <option value="emoji-construction">Construction 🏗️</option>
-            <option value="emoji-dinosaurs">Dinosaurs 🦖</option>
-            <option value="shapes">Shapes 🟥</option>
-            <option value="letters-upper">Letters (ABC)</option>
-            <option value="letters-lower">letters (abc)</option>
-            <option value="numbers">Numbers (123)</option>
-          </select>
-        </div>
-
-        <div class="setting-row">
-          <label for="difficulty-select">Helpers</label>
-          <select id="difficulty-select">
-            <option value="auto" selected>Auto — gets harder</option>
-            <option value="easy">Easy — pick from the row</option>
-            <option value="hard">Hard — pick from all</option>
-          </select>
-        </div>
-
-        <div class="setting-row">
-          <label for="mode-select">Game</label>
-          <select id="mode-select">
-            <option value="next" selected>What comes next?</option>
-            <option value="unit">Find the repeating piece</option>
-          </select>
-        </div>
-
-        <div class="setting-row checkbox-row">
-          <label><input type="checkbox" id="hint-toggle" /> Highlight the repeating piece</label>
-        </div>
-
-        <div class="setting-actions">
-          <button id="reset-btn" class="secondary">Start over</button>
-          <button id="close-settings" class="primary">Done</button>
-        </div>
-
-        <p class="footer-note">No data leaves this device. <a href="https://github.com/lgruen/fountouki" target="_blank" rel="noopener">Open source · MIT</a></p>
-      </div>
-    </div>
-  </main>
-
-  <script type="module" src="game.js"></script>
+  <script type="module" src="main.js"></script>
 </body>
 </html>

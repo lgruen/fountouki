@@ -76,54 +76,59 @@ async function snap(name) {
 }
 
 await page.goto(url);
+await page.waitForSelector('.picker-card');
+await snap('00-picker');
+
+// Navigate to patterns and wait for the first round to render.
+await page.click('.picker-card[data-game="patterns"]');
 await page.waitForSelector('.cell');
 await snap('01-initial');
 
 // Open settings.
-await page.click('#settings-btn');
+await page.click('.settings-btn');
 await page.waitForSelector('.settings-card');
 await snap('02-settings');
-await page.click('#close-settings');
+await page.click('.ptn-close');
 
 // Try the "shapes" theme.
-await page.click('#settings-btn');
-await page.selectOption('#theme-select', 'shapes');
-await page.click('#close-settings');
+await page.click('.settings-btn');
+await page.selectOption('#ptn-theme', 'shapes');
+await page.click('.ptn-close');
 await page.waitForSelector('.cell.shape');
 await snap('03-shapes');
 
 // Letters lowercase.
-await page.click('#settings-btn');
-await page.selectOption('#theme-select', 'letters-lower');
-await page.click('#close-settings');
+await page.click('.settings-btn');
+await page.selectOption('#ptn-theme', 'letters-lower');
+await page.click('.ptn-close');
 await page.waitForTimeout(50);
 await snap('04-letters-lower');
 
 // Numbers.
-await page.click('#settings-btn');
-await page.selectOption('#theme-select', 'numbers');
-await page.click('#close-settings');
+await page.click('.settings-btn');
+await page.selectOption('#ptn-theme', 'numbers');
+await page.click('.ptn-close');
 await page.waitForTimeout(50);
 await snap('05-numbers');
 
 // Construction.
-await page.click('#settings-btn');
-await page.selectOption('#theme-select', 'emoji-construction');
-await page.click('#close-settings');
+await page.click('.settings-btn');
+await page.selectOption('#ptn-theme', 'emoji-construction');
+await page.click('.ptn-close');
 await page.waitForSelector('.cell');
 await snap('05a-construction');
 
 // Dinosaurs.
-await page.click('#settings-btn');
-await page.selectOption('#theme-select', 'emoji-dinosaurs');
-await page.click('#close-settings');
+await page.click('.settings-btn');
+await page.selectOption('#ptn-theme', 'emoji-dinosaurs');
+await page.click('.ptn-close');
 await page.waitForSelector('.cell');
 await snap('05b-dinosaurs');
 
 // Pick a wrong answer to see the "try again" state.
-await page.click('#settings-btn');
-await page.selectOption('#theme-select', 'emoji-animals');
-await page.click('#close-settings');
+await page.click('.settings-btn');
+await page.selectOption('#ptn-theme', 'emoji-animals');
+await page.click('.ptn-close');
 await page.waitForSelector('.cell');
 // Click any non-correct choice (the first one — may be right; try them all until wrong).
 const choices = await page.$$('.choice');
@@ -139,17 +144,17 @@ await page.waitForTimeout(120);
 await snap('06-after-click');
 
 // Find-the-piece mode.
-await page.click('#settings-btn');
-await page.selectOption('#mode-select', 'unit');
-await page.click('#close-settings');
+await page.click('.settings-btn');
+await page.selectOption('#ptn-mode', 'unit');
+await page.click('.ptn-close');
 await page.waitForTimeout(80);
 await snap('07-unit-mode');
 
 // Visualize a higher level (period-3 / period-4 patterns) on the same viewport.
-await page.click('#settings-btn');
-await page.selectOption('#mode-select', 'next');
-await page.selectOption('#theme-select', 'emoji-fruit');
-await page.click('#close-settings');
+await page.click('.settings-btn');
+await page.selectOption('#ptn-mode', 'next');
+await page.selectOption('#ptn-theme', 'emoji-fruit');
+await page.click('.ptn-close');
 await page.evaluate(() => {
   // The state object is module-scoped; bump level via the Start Over flow
   // doesn't help. Instead, simulate level-3 by tweaking the difficulty
@@ -182,7 +187,7 @@ async function clickCorrectThenSnap(name) {
   await page.waitForTimeout(1200);
   await page.evaluate(() => {
     const w = window;
-    const ans = w.__patternplay?.answerId;
+    const ans = w.__patterns?.answerId;
     if (!ans) return;
     const btn = document.querySelector(`.choice[data-id="${ans}"]`);
     if (btn) btn.click();
