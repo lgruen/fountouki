@@ -5,7 +5,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { chromium } from 'playwright';
+import { launchChromium } from './_chrome.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const publicDir = join(root, 'public');
@@ -27,8 +27,9 @@ const targets = [
   { name: 'icon-maskable-512.png', size: 512, maskable: true },
 ];
 
-const execPath = process.env.CHROME_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const browser = await chromium.launch({ executablePath: execPath });
+// Use the full Chromium (color-emoji fonts) via the shared launcher —
+// the hazelnut icon is rendered as a 🌰 text element in the SVG.
+const browser = await launchChromium();
 try {
   const ctx = await browser.newContext({ deviceScaleFactor: 1 });
   const page = await ctx.newPage();
