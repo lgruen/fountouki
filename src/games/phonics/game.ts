@@ -183,13 +183,16 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     // Gives a visible long-term arc across sessions — "look how much
     // you've grown."
     const letters = Object.keys(state.letters).sort();
-    for (const l of letters) {
+    letters.forEach((l, i) => {
       const s = state.letters[l];
       const dot = document.createElement('span');
       dot.className = `mastery-dot box-${s?.box ?? 0}`;
       dot.setAttribute('aria-label', `${l}: box ${s?.box ?? 0}`);
+      // Stagger so the splash has a final cascade — kid sees their
+      // whole alphabet light up after the rainbow lands.
+      dot.style.animationDelay = `${800 + i * 22}ms`;
       masteryEl.append(dot);
-    }
+    });
   }
 
   // ---------- helpers ----------
@@ -240,6 +243,7 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     currentLetter = next;
     inMissReveal = false;
     letterEl.textContent = next;
+    card.classList.remove('miss');
     hint.hidden = true;
     missBtn.hidden = false;
     gotBtn.hidden = false;
@@ -293,9 +297,10 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     hintEmoji.textContent = ex.emoji;
     hintWord.textContent = `like ${ex.word}`;
     hint.hidden = false;
-    // Note: do NOT fade the letter. The original treatment read as "you
-    // failed" — the opposite of errorless learning. Letter stays full
-    // strength; the canonical exemplar simply joins it on screen.
+    // Subtle card tint so the recovery moment is visibly distinct from
+    // the prompt — without being alarming. Letter stays full strength
+    // (errorless).
+    card.classList.add('miss');
     missBtn.hidden = true;
     gotBtn.hidden = true;
     advanceBtn.hidden = false;
