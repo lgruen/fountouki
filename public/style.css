@@ -565,3 +565,174 @@ body {
   background: #fff;
   cursor: pointer;
 }
+
+/* ---------- phonics ---------- */
+.phonics-rainbow {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  height: clamp(12px, 1.6vh, 18px);
+}
+.phonics-rainbow-seg {
+  flex: 1;
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.10);
+  transition: background 350ms ease, transform 350ms ease;
+}
+.phonics-rainbow-seg.filled.seg-0 { background: #ef476f; }
+.phonics-rainbow-seg.filled.seg-1 { background: #ff8c42; }
+.phonics-rainbow-seg.filled.seg-2 { background: #ffd166; }
+.phonics-rainbow-seg.filled.seg-3 { background: #06d6a0; }
+.phonics-rainbow-seg.filled.seg-4 { background: #118ab2; }
+.phonics-rainbow-seg.filled.seg-5 { background: #6868cc; }
+.phonics-rainbow-seg.filled.seg-6 { background: #9b5de5; }
+
+.phonics-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: clamp(18px, 2vw, 22px);
+  font-weight: 700;
+}
+.phonics-stars .star { color: #f6b800; }
+
+.phonics-play {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(18px, 3vh, 36px);
+  margin-top: auto;
+  margin-bottom: auto;
+}
+.phonics-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: clamp(20px, 4vw, 40px) clamp(30px, 8vw, 84px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: clamp(180px, 28vw, 320px);
+}
+.phonics-letter {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Comic Sans MS", "Comic Sans", system-ui, sans-serif;
+  font-size: clamp(110px, 24vw, 240px);
+  font-weight: 900;
+  line-height: 1;
+  color: var(--ink);
+  transition: opacity 250ms ease;
+  letter-spacing: -0.04em;
+}
+.phonics-letter.faded { opacity: 0.32; }
+.phonics-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  animation: hint-in 260ms ease;
+}
+.phonics-hint[hidden] { display: none; }
+.phonics-hint-emoji { font-size: clamp(40px, 6.5vw, 76px); line-height: 1; }
+.phonics-hint-word {
+  font-size: clamp(13px, 1.5vw, 16px);
+  color: var(--muted);
+  font-weight: 600;
+}
+@keyframes hint-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.phonics-actions {
+  display: flex;
+  gap: clamp(14px, 2.5vw, 30px);
+}
+.phonics-action {
+  width: clamp(72px, 9vw, 108px);
+  height: clamp(72px, 9vw, 108px);
+  border-radius: 50%;
+  border: 0;
+  font-family: inherit;
+  font-size: clamp(36px, 5.2vw, 60px);
+  font-weight: 900;
+  color: white;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: transform 100ms ease;
+}
+.phonics-action:active { transform: scale(0.94); }
+.phonics-action[hidden] { display: none; }
+.phonics-miss {
+  background: var(--card);
+  color: var(--muted);
+  box-shadow: var(--shadow), inset 0 0 0 2px #e6e1d3;
+}
+.phonics-got { background: var(--ok); color: var(--ok-strong); }
+.phonics-advance { background: var(--accent); color: white; }
+
+/* Phone landscape: tight vertical space. Shrink letter + paddings so the
+   card + (miss-state) hint + action row all fit above the home indicator. */
+@media (orientation: landscape) and (max-height: 540px) {
+  .phonics-letter { font-size: clamp(72px, 28vh, 140px); }
+  .phonics-letter.faded { font-size: clamp(48px, 18vh, 100px); }
+  .phonics-card { padding: clamp(10px, 2vh, 18px) clamp(24px, 6vw, 60px); gap: 6px; }
+  .phonics-hint-emoji { font-size: clamp(36px, 12vh, 64px); }
+  .phonics-action { width: clamp(56px, 14vh, 88px); height: clamp(56px, 14vh, 88px); font-size: clamp(28px, 7vh, 48px); }
+  .phonics-play { gap: clamp(10px, 2vh, 22px); }
+  .phonics-topbar { gap: clamp(8px, 1vw, 12px); }
+  .phonics-rainbow { height: clamp(8px, 1.2vh, 12px); }
+}
+
+.phonics-done {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, #ef476f, #ff8c42, #ffd166, #06d6a0, #118ab2, #9b5de5);
+  background-size: 300% 300%;
+  animation: rainbow-shift 6s ease infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  padding: 16px;
+}
+.phonics-done[hidden] { display: none; }
+.phonics-done-card {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: var(--radius);
+  padding: 28px clamp(28px, 6vw, 56px);
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+.phonics-done-card h2 {
+  margin: 8px 0 18px;
+  font-size: clamp(24px, 3vw, 32px);
+}
+.phonics-done-rainbow {
+  font-size: clamp(72px, 11vw, 110px);
+  line-height: 1;
+}
+.phonics-done-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+.phonics-done-actions button {
+  font: inherit;
+  font-weight: 700;
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: 0;
+  cursor: pointer;
+}
+.phonics-done-actions .secondary {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 2px #e6e1d3;
+}
+@keyframes rainbow-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}

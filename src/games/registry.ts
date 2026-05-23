@@ -1,6 +1,7 @@
 // Registry of available games. Adding a game = add an import + entry here.
 
 import { mount as mountPatterns } from './patterns/game.js';
+import { mount as mountPhonics } from './phonics/game.js';
 
 export interface MountOpts {
   /** Called when the in-game home button is tapped. */
@@ -18,4 +19,5 @@ export interface GameDef {
 
 export const GAMES: GameDef[] = [
   { id: 'patterns', label: 'patterns', emoji: '🧩', mount: mountPatterns },
+  { id: 'phonics', label: 'phonics', emoji: '🌈', mount: mountPhonics },
 ];
