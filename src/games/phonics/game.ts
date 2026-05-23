@@ -295,7 +295,7 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     // to its variety set in normal play.
     const ex = pickExemplar(currentLetter, 0);
     hintEmoji.textContent = ex.emoji;
-    hintWord.textContent = `like ${ex.word}`;
+    hintWord.textContent = ex.word;
     hint.hidden = false;
     // Subtle card tint so the recovery moment is visibly distinct from
     // the prompt — without being alarming. Letter stays full strength
