@@ -7,6 +7,12 @@
 - Before pushing: `npm run check` (typecheck + build), `npm test`
   (Playwright). Visuals: also `npm run screenshots` and eyeball the
   output. Red tests block deploy — fix them even if unrelated.
+- Fresh sandbox? `npm ci` first. After install, `git checkout --
+  package-lock.json` if it churned (cross-platform libc metadata) —
+  don't commit that drift.
+- `npm run screenshots` needs Chromium. If `npx playwright install
+  chromium` can't reach the network, say so and skip rather than
+  faking visual sign-off.
 
 ## Working style
 
