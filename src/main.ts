@@ -6,6 +6,7 @@ import { mount as mountPicker } from './picker.js';
 import { applyOnBoot } from './shared/settings.js';
 import { migrateLegacy } from './shared/storage.js';
 import { registerServiceWorker, tryLockLandscape, buildId } from './shared/pwa.js';
+import { sync } from './shared/sync.js';
 
 const appEl = document.getElementById('app');
 if (!(appEl instanceof HTMLElement)) throw new Error('missing #app');
@@ -35,6 +36,13 @@ window.addEventListener('hashchange', render);
 render();
 tryLockLandscape();
 registerServiceWorker();
+
+// Flush any pending sync writes when the tab becomes hidden / on pagehide
+// so a kid hitting the home button doesn't drop the last grade or two.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') void sync.flush();
+});
+window.addEventListener('pagehide', () => void sync.flush());
 
 // Build id on window for adhoc debugging.
 (window as unknown as { __fountouki_build?: string }).__fountouki_build = buildId();
