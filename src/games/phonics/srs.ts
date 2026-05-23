@@ -25,19 +25,22 @@ export interface PhonicsState {
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
 
-/** Interval from grading a card to its next due time. */
+/** Interval from grading a card to its next due time.
+ *  The early ramp is short enough that a kid can see the same card 2-3×
+ *  in one ~5-min session (massed practice for the new mapping), then a
+ *  longer park before the next session. */
 export function intervalFor(box: number): number {
   switch (box) {
     case 0:
       return 0;
     case 1:
-      return 5 * MIN;
+      return 2 * MIN;
     case 2:
-      return HOUR;
+      return 15 * MIN;
     case 3:
-      return 24 * HOUR;
+      return 6 * HOUR;
     default:
-      return 72 * HOUR;
+      return 24 * HOUR;
   }
 }
 

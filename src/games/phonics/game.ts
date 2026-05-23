@@ -194,7 +194,7 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     for (const l of letters) {
       const s = state.letters[l];
       const dot = document.createElement('span');
-      dot.className = `phonics-mastery-dot box-${s?.box ?? 0}`;
+      dot.className = `mastery-dot box-${s?.box ?? 0}`;
       dot.setAttribute('aria-label', `${l}: box ${s?.box ?? 0}`);
       masteryEl.append(dot);
     }
@@ -271,8 +271,9 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     // not just one arc.
     arcSvg.classList.remove('pulsing');
     void arcSvg.getBoundingClientRect();
-    arcSvg.classList.add('pulsing');
+    arcSvg.classList.add('pulsing', 'celebrating');
     setT(() => arcSvg.classList.remove('pulsing'), 480);
+    setT(() => arcSvg.classList.remove('celebrating'), 650);
     // Streak-aware reward: more confetti + higher pitch as the kid runs hot.
     const streakBoost = Math.min(streak - 1, 5);
     playCorrect(streakBoost);
