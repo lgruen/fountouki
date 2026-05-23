@@ -636,7 +636,11 @@ body {
   align-items: center;
   gap: 12px;
   min-width: clamp(180px, 28vw, 320px);
+  transition: background 320ms ease;
 }
+/* Subtle visual distinction so the miss-recovery moment doesn't look
+   identical to the prompt — slight warm tint, no alarm-red. */
+.phonics-card.miss { background: #fff6ef; }
 .phonics-letter {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Comic Sans MS", "Comic Sans", system-ui, sans-serif;
   font-size: clamp(96px, 20vw, 200px);
@@ -663,16 +667,16 @@ body {
 }
 @keyframes letter-hop {
   0%   { transform: translateY(0) scale(1); }
-  30%  { transform: translateY(-16px) scale(1.10); }
-  55%  { transform: translateY(2px) scale(0.96); }
+  28%  { transform: translateY(-22px) scale(1.22); }
+  55%  { transform: translateY(2px) scale(0.94); }
   100% { transform: translateY(0) scale(1); }
 }
 @keyframes letter-hop-hot {
-  0%   { transform: translateY(0)   scale(1)    rotate(0deg); }
-  25%  { transform: translateY(-26px) scale(1.18) rotate(-7deg); }
-  45%  { transform: translateY(-10px) scale(1.10) rotate(5deg); }
-  65%  { transform: translateY(4px)  scale(0.94) rotate(-2deg); }
-  100% { transform: translateY(0)   scale(1)    rotate(0deg); }
+  0%   { transform: translateY(0)    scale(1)    rotate(0deg); }
+  22%  { transform: translateY(-34px) scale(1.32) rotate(-8deg); }
+  45%  { transform: translateY(-12px) scale(1.16) rotate(6deg); }
+  65%  { transform: translateY(4px)   scale(0.92) rotate(-2deg); }
+  100% { transform: translateY(0)    scale(1)    rotate(0deg); }
 }
 .phonics-hint {
   display: flex;
@@ -817,6 +821,12 @@ body {
 .phonics-mastery .mastery-dot {
   width: clamp(14px, 1.8vw, 18px);
   height: clamp(14px, 1.8vw, 18px);
+  opacity: 0;
+  animation: dot-in 320ms ease forwards;
+}
+@keyframes dot-in {
+  from { opacity: 0; transform: scale(0.4); }
+  to   { opacity: 1; transform: scale(1); }
 }
 .mastery-dot {
   width: clamp(10px, 1.4vw, 14px);
