@@ -58,8 +58,11 @@ const tokenBefore = await page.evaluate(() => {
 });
 assert.equal(tokenBefore, null, 'fresh storage should have no syncToken');
 
-console.log('2) long-press hazelnut → parent settings appears');
-// Hold the mouse down for > 500ms (long-press threshold).
+console.log('2) enter a game; long-press back arrow → parent settings appears');
+// Picker has no home button; the ← back inside a game is where parent
+// settings live (its long-press handler).
+await page.click('.picker-card[data-game="patterns"]');
+await page.waitForSelector('.cell');
 await page.locator('.home-btn').click({ delay: 700 });
 await page.waitForSelector('.parent-settings-panel');
 
@@ -79,7 +82,7 @@ assert.equal(stored, generated, 'token should persist');
 
 console.log('5) reload → re-opening shows persisted token');
 await page.reload();
-await page.waitForSelector('.picker-card');
+await page.waitForSelector('.cell'); // still in patterns after reload
 await page.locator('.home-btn').click({ delay: 700 });
 await page.waitForSelector('.parent-settings-panel');
 const reloaded = await page.inputValue('#parent-token');

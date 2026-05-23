@@ -478,11 +478,6 @@ body {
   /* Use same absolutely-positioned topbar shape as games. */
   position: absolute;
 }
-.picker-brand {
-  font-size: clamp(64px, 14vw, 140px);
-  line-height: 1;
-  filter: drop-shadow(0 4px 8px rgba(43, 44, 52, 0.10));
-}
 .picker-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(clamp(120px, 22vw, 220px), 1fr));
@@ -567,27 +562,35 @@ body {
 }
 
 /* ---------- phonics ---------- */
-.phonics-rainbow {
-  flex: 1;
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  height: clamp(12px, 1.6vh, 18px);
+.phonics-topbar-spacer { flex: 1; }
+.phonics-arcs {
+  display: block;
+  width: clamp(220px, 44vw, 360px);
+  height: auto;
+  margin-bottom: clamp(4px, 1vh, 12px);
+  overflow: visible;
 }
-.phonics-rainbow-seg {
-  flex: 1;
-  height: 100%;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.10);
-  transition: background 350ms ease, transform 350ms ease;
+.phonics-arc-path {
+  stroke: rgba(43, 44, 52, 0.10);
+  transition: stroke 380ms ease, stroke-width 320ms ease;
 }
-.phonics-rainbow-seg.filled.seg-0 { background: #ef476f; }
-.phonics-rainbow-seg.filled.seg-1 { background: #ff8c42; }
-.phonics-rainbow-seg.filled.seg-2 { background: #ffd166; }
-.phonics-rainbow-seg.filled.seg-3 { background: #06d6a0; }
-.phonics-rainbow-seg.filled.seg-4 { background: #118ab2; }
-.phonics-rainbow-seg.filled.seg-5 { background: #6868cc; }
-.phonics-rainbow-seg.filled.seg-6 { background: #9b5de5; }
+/* Outer → inner: ROYGBIV. Arc-0 is the biggest (outermost = red). */
+.phonics-arc-path.filled.arc-0 { stroke: #ff4d6d; }
+.phonics-arc-path.filled.arc-1 { stroke: #ff8c42; }
+.phonics-arc-path.filled.arc-2 { stroke: #ffd166; }
+.phonics-arc-path.filled.arc-3 { stroke: #2bd5a0; }
+.phonics-arc-path.filled.arc-4 { stroke: #38b3e2; }
+.phonics-arc-path.filled.arc-5 { stroke: #6e72e7; }
+.phonics-arc-path.filled.arc-6 { stroke: #b364e5; }
+.phonics-arc-path.just-filled {
+  animation: arc-pop 650ms cubic-bezier(0.34, 1.6, 0.64, 1);
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));
+}
+@keyframes arc-pop {
+  0%   { stroke-width: 8; }
+  35%  { stroke-width: 16; }
+  100% { stroke-width: 8; }
+}
 
 .phonics-stars {
   display: inline-flex;
@@ -619,14 +622,24 @@ body {
 }
 .phonics-letter {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Comic Sans MS", "Comic Sans", system-ui, sans-serif;
-  font-size: clamp(110px, 24vw, 240px);
+  font-size: clamp(96px, 20vw, 200px);
   font-weight: 900;
   line-height: 1;
   color: var(--ink);
   transition: opacity 250ms ease;
   letter-spacing: -0.04em;
+  transform-origin: 50% 80%;
 }
 .phonics-letter.faded { opacity: 0.32; }
+.phonics-letter.hop {
+  animation: letter-hop 650ms cubic-bezier(0.34, 1.6, 0.64, 1);
+}
+@keyframes letter-hop {
+  0%   { transform: translateY(0) scale(1); }
+  30%  { transform: translateY(-16px) scale(1.10); }
+  55%  { transform: translateY(2px) scale(0.96); }
+  100% { transform: translateY(0) scale(1); }
+}
 .phonics-hint {
   display: flex;
   flex-direction: column;
@@ -676,14 +689,14 @@ body {
 /* Phone landscape: tight vertical space. Shrink letter + paddings so the
    card + (miss-state) hint + action row all fit above the home indicator. */
 @media (orientation: landscape) and (max-height: 540px) {
-  .phonics-letter { font-size: clamp(72px, 28vh, 140px); }
-  .phonics-letter.faded { font-size: clamp(48px, 18vh, 100px); }
-  .phonics-card { padding: clamp(10px, 2vh, 18px) clamp(24px, 6vw, 60px); gap: 6px; }
-  .phonics-hint-emoji { font-size: clamp(36px, 12vh, 64px); }
-  .phonics-action { width: clamp(56px, 14vh, 88px); height: clamp(56px, 14vh, 88px); font-size: clamp(28px, 7vh, 48px); }
-  .phonics-play { gap: clamp(10px, 2vh, 22px); }
+  .phonics-arcs { width: clamp(200px, 36vw, 300px); margin-bottom: 0; }
+  .phonics-letter { font-size: clamp(56px, 22vh, 110px); }
+  .phonics-letter.faded { font-size: clamp(36px, 14vh, 76px); }
+  .phonics-card { padding: clamp(8px, 1.6vh, 14px) clamp(22px, 6vw, 60px); gap: 4px; }
+  .phonics-hint-emoji { font-size: clamp(28px, 10vh, 52px); }
+  .phonics-action { width: clamp(52px, 13vh, 82px); height: clamp(52px, 13vh, 82px); font-size: clamp(28px, 7vh, 48px); }
+  .phonics-play { gap: clamp(8px, 1.8vh, 20px); }
   .phonics-topbar { gap: clamp(8px, 1vw, 12px); }
-  .phonics-rainbow { height: clamp(8px, 1.2vh, 12px); }
 }
 
 .phonics-done {

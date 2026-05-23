@@ -68,6 +68,25 @@
 - Sync state is per-game under one family-level token.
 - Scores are session-only — never persist them.
 
+## The "would I play this?" test
+- Before claiming a game is done, ask: *if you were a 4yo with a short
+  attention span and the constraints below, would you push yourself to
+  come back to this regularly?* "Tolerates" is failing. "Wants more" is
+  the bar.
+- Look at the screen and ask: is anything in here actually rewarding?
+  Are the wins big enough to feel earned? Does the visual itself pull
+  the kid in, or does it read like a quiz app for adults?
+- Bias toward richer, more playful visuals (big animated rewards,
+  vibrant color, characters that respond) over restrained / minimal —
+  the design constraints below are about removing *noise around the
+  target*, not stripping the joy out of the screen.
+
+## Brand
+- 🌰 is the PWA launcher icon **only**. Don't render it inside the app
+  (no home button, no header logo, no settings-panel chrome). In-app
+  buttons should use neutral glyphs (← for back, ⚙ for game settings,
+  etc.).
+
 ## Audience & pedagogy baseline
 - Preschoolers; big tap targets, minimal text, visual-first navigation.
 - Word labels are optional reading practice, never required.

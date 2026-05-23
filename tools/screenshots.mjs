@@ -225,6 +225,14 @@ await page.goto(`${url}#/phonics`);
 await page.waitForSelector('.phonics-letter');
 await snap('20-phonics-phone-landscape');
 
+// Drive partway through (4 stars) so the rainbow is mid-fill.
+for (let i = 0; i < 4; i++) {
+  await page.click('.phonics-got');
+  await page.waitForTimeout(800);
+}
+await page.waitForTimeout(120);
+await snap('20b-phonics-mid-rainbow');
+
 // Trigger a miss to show the hint cue.
 await page.click('.phonics-miss');
 await page.waitForSelector('.phonics-hint:not([hidden])');

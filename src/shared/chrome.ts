@@ -14,7 +14,7 @@ export interface HomeOpts {
 export function makeHomeButton(opts: HomeOpts): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.className = 'icon-btn home-btn';
-  btn.textContent = '🌰';
+  btn.textContent = '←';
   btn.setAttribute('aria-label', 'Home');
 
   let pressTimer: number | null = null;

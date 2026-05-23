@@ -1,7 +1,7 @@
 // Home-screen game picker. Hazelnut at top, big tappable cards below.
 
 import type { GameDef } from './games/registry.js';
-import { makeMuteButton, makeHomeButton } from './shared/chrome.js';
+import { makeMuteButton } from './shared/chrome.js';
 
 export function mount(
   container: HTMLElement,
@@ -13,25 +13,14 @@ export function mount(
   const view = document.createElement('div');
   view.className = 'picker';
 
-  // Topbar: hazelnut on left (no-op tap on the picker; long-press reserved
-  // for parent settings later); mute on right.
+  // Topbar: just mute (right-aligned). Parent settings access lives on
+  // the in-game ← back button's long-press, not here.
   const top = document.createElement('header');
   top.className = 'topbar picker-topbar';
-  top.append(
-    makeHomeButton({ onHome: () => {} }),
-    document.createElement('div'), // flex spacer
-    makeMuteButton(),
-  );
-  const spacer = top.children[1] as HTMLDivElement;
+  const spacer = document.createElement('div');
   spacer.style.flex = '1';
+  top.append(spacer, makeMuteButton());
   view.append(top);
-
-  // Big centered brand mark.
-  const brand = document.createElement('div');
-  brand.className = 'picker-brand';
-  brand.textContent = '🌰';
-  brand.setAttribute('aria-label', 'fountouki');
-  view.append(brand);
 
   // Card grid.
   const grid = document.createElement('div');
