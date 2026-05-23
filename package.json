@@ -1,8 +1,8 @@
 {
-  "name": "pattern-game",
+  "name": "fountouki",
   "version": "0.1.0",
   "private": true,
-  "description": "A tiny sequence-pattern game for preschoolers.",
+  "description": "Tiny browser games for preschoolers.",
   "license": "MIT",
   "type": "module",
   "scripts": {

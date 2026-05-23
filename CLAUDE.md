@@ -3,8 +3,8 @@
 ## Workflow
 
 - At the end of every task that introduces or modifies code on a feature
-  branch, create a pull request against `main` automatically — don't wait
-  to be asked. Use a concise PR title, a short summary, and a test plan.
+  branch, create a pull request against `main` automatically — don't wait to be
+  asked. Use a concise PR title and a short summary. No need for a test plan.
 - Develop on the branch the session was started on; never push directly
   to `main`.
 - Run `npm run check` (typecheck + build) and `npm test` (Playwright

@@ -1,59 +1,17 @@
-# Pattern Play
+# fountouki 🌰
 
-A tiny browser game for preschoolers to practice completing sequence patterns —
-"AAB AAB AA?". No accounts, no analytics, no personal data. Works offline once
-loaded.
+Tiny static web app with kid-sized games. TypeScript → esbuild → `dist/`, no
+runtime deps. Deploys to GitHub Pages from `main`.
 
-## Quick start
-
-```bash
+```
 npm install
-npm run dev      # builds + serves on http://localhost:5173
+npm run dev       # build + serve on http://localhost:5173
 ```
 
-Other scripts:
+Other scripts: `build`, `typecheck`, `check` (typecheck + build),
+`screenshots`, `icons`, `test`.
 
-```bash
-npm run build       # one-shot build into dist/
-npm run typecheck   # tsc --noEmit (strict)
-npm run check       # typecheck + build
-npm run screenshots # render screenshots/*.png for visual review (uses Playwright)
-npm run icons       # regenerate PWA icons from public/icon.svg
-node tools/sw-offline-test.mjs   # smoke-test the offline service worker
-```
-
-## Fullscreen on a phone
-
-The site is a small installable web app (PWA): adding it to the home
-screen launches it without browser chrome.
-
-- **iPhone / iPad (Safari)**: open the site → tap the **Share** button →
-  **Add to Home Screen** → tap the new "Pattern Play" icon to launch
-  fullscreen.
-- **Android (Chrome)**: open the site → menu (⋮) → **Add to Home
-  screen** (or **Install app**) → launch from the new icon.
-
-If you change `public/icon.svg`, regenerate the PNG variants with
-`npm run icons`.
-
-## How it works
-
-- Patterns are generated from small templates (`AB`, `AAB`, `ABC`, …) and
-  filled with items from a theme (emoji animals, shapes, letters, numbers).
-- Difficulty rises with consecutive correct answers (level 1–6).
-- Two modes:
-  - **What comes next?** — tap the missing item.
-  - **Find the repeating piece** — tap the first then last cell of the
-    smallest repeating unit.
-- Sounds are synthesized in the browser (Web Audio); confetti is a tiny
-  canvas particle system.
-
-## Deploying
-
-Pushes to `main` are deployed to GitHub Pages via
-`.github/workflows/deploy.yml`. Enable Pages → "GitHub Actions" in repo
-settings and the URL will appear on the workflow run.
-
-## License
-
-MIT — see [`LICENSE`](LICENSE).
+Currently shipping **Patterns** (sequence-completion). Phonics in
+progress; further games in `docs/IDEAS.md`. Built for two specific
+preschoolers on their devices — public repo, not a general-purpose
+product. Working agreements: see `CLAUDE.md`.
