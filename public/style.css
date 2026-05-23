@@ -529,6 +529,8 @@ body {
   padding: 22px;
   width: 100%;
   max-width: 460px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
   box-shadow: var(--shadow);
 }
 .parent-settings-card h2 { margin: 0 0 12px; font-size: 20px; }
@@ -571,13 +573,10 @@ body {
   overflow: visible;
 }
 .phonics-arc-path {
-  /* Unfilled arcs are deliberately ghostly so the letter remains the hero. */
-  stroke: rgba(43, 44, 52, 0.05);
-  stroke-dasharray: 3 9;
-  transition: stroke 380ms ease, stroke-width 320ms ease, stroke-dasharray 380ms ease;
-}
-.phonics-arc-path.filled {
-  stroke-dasharray: none;
+  /* Unfilled arcs are invisible — the letter is the only thing on
+     screen until the kid earns their first stripe. */
+  stroke: transparent;
+  transition: stroke 380ms ease, stroke-width 320ms ease, opacity 220ms ease;
 }
 /* Outer → inner: ROYGBIV. Arc-0 is the biggest (outermost = red). */
 .phonics-arc-path.filled.arc-0 { stroke: #ff4d6d; }
@@ -593,8 +592,13 @@ body {
 }
 @keyframes arc-pop {
   0%   { stroke-width: 8; }
-  35%  { stroke-width: 16; }
+  35%  { stroke-width: 18; }
   100% { stroke-width: 8; }
+}
+/* While the new arc pops, dim the already-filled arcs so the earned
+   stripe is unambiguously the hero of the moment. */
+.phonics-arcs.celebrating .phonics-arc-path.filled:not(.just-filled) {
+  opacity: 0.35;
 }
 .phonics-arcs {
   transition: transform 380ms cubic-bezier(0.34, 1.6, 0.64, 1);
@@ -642,7 +646,6 @@ body {
   letter-spacing: -0.04em;
   transform-origin: 50% 80%;
 }
-.phonics-letter.faded { opacity: 0.32; } /* kept for legacy / future use */
 .phonics-letter {
   animation: letter-idle 5s ease-in-out infinite;
 }
@@ -670,9 +673,12 @@ body {
 .phonics-hint[hidden] { display: none; }
 .phonics-hint-emoji { font-size: clamp(40px, 6.5vw, 76px); line-height: 1; }
 .phonics-hint-word {
-  font-size: clamp(18px, 2.2vw, 24px);
+  /* Small + muted: this is parent-facing reference text, not kid
+     reading material. The emoji is the kid-facing cue. */
+  font-size: clamp(12px, 1.4vw, 15px);
   color: var(--muted);
   font-weight: 600;
+  opacity: 0.85;
 }
 @keyframes hint-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -698,7 +704,12 @@ body {
 }
 .phonics-action:active { transform: scale(0.94); }
 .phonics-action[hidden] { display: none; }
+/* Miss is a parent-tap, not a kid reward — shrink + neutral so it
+   doesn't compete with the green ✓ for kid attention. */
 .phonics-miss {
+  width: clamp(48px, 6.5vw, 70px);
+  height: clamp(48px, 6.5vw, 70px);
+  font-size: clamp(22px, 3vw, 32px);
   background: var(--card);
   color: var(--muted);
   box-shadow: var(--shadow), inset 0 0 0 2px #e6e1d3;
@@ -715,6 +726,7 @@ body {
   .phonics-card { padding: clamp(8px, 1.6vh, 14px) clamp(22px, 6vw, 60px); gap: 4px; }
   .phonics-hint-emoji { font-size: clamp(28px, 10vh, 52px); }
   .phonics-action { width: clamp(52px, 13vh, 82px); height: clamp(52px, 13vh, 82px); font-size: clamp(28px, 7vh, 48px); }
+  .phonics-miss { width: clamp(40px, 9vh, 56px); height: clamp(40px, 9vh, 56px); font-size: clamp(20px, 5vh, 32px); }
   .phonics-play { gap: clamp(8px, 1.8vh, 20px); }
   .phonics-topbar { gap: clamp(8px, 1vw, 12px); }
 }
@@ -776,17 +788,17 @@ body {
   max-width: 320px;
   width: 100%;
 }
-.phonics-mastery-dot, .mastery-dot {
+.mastery-dot {
   width: clamp(10px, 1.4vw, 14px);
   height: clamp(10px, 1.4vw, 14px);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.10);
 }
-.phonics-mastery-dot.box-0, .mastery-dot.box-0 { background: rgba(43, 44, 52, 0.10); }
-.phonics-mastery-dot.box-1, .mastery-dot.box-1 { background: #ffd6a8; }
-.phonics-mastery-dot.box-2, .mastery-dot.box-2 { background: #ffb56e; }
-.phonics-mastery-dot.box-3, .mastery-dot.box-3 { background: #4adf99; }
-.phonics-mastery-dot.box-4, .mastery-dot.box-4 {
+.mastery-dot.box-0 { background: rgba(43, 44, 52, 0.10); }
+.mastery-dot.box-1 { background: #ffd6a8; }
+.mastery-dot.box-2 { background: #ffb56e; }
+.mastery-dot.box-3 { background: #4adf99; }
+.mastery-dot.box-4 {
   background: linear-gradient(135deg, #ffd84f, #ff9a3c);
   box-shadow: 0 0 6px rgba(255, 154, 60, 0.45);
 }
