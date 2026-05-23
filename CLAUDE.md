@@ -33,6 +33,10 @@
 - The review covers code quality + architecture + game design /
   pedagogy + visual layout. Final call is still yours unless the agent
   flags a question only the user can answer — escalate those.
+- For game design / visuals, **iterate**. Address findings, re-screen-
+  shot, launch a fresh review on the new state. Continue until a clean
+  review *and* the "would I play this?" test is genuinely passing —
+  not just on round one.
 
 ### Tight docs
 - Audience for every doc here (CLAUDE.md / README / TODO / IDEAS /
