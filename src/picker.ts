@@ -33,7 +33,8 @@ export function mount(
 
     const icon = document.createElement('div');
     icon.className = 'picker-icon';
-    icon.textContent = g.emoji;
+    if (g.renderIcon) g.renderIcon(icon);
+    else icon.textContent = g.emoji;
     card.append(icon);
 
     const label = document.createElement('div');
