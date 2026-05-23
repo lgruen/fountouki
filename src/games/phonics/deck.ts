@@ -79,12 +79,14 @@ export function getCard(letter: string): LetterCard | undefined {
   return BY_LETTER.get(letter);
 }
 
-/** Pick an exemplar for a letter at the given Leitner box. */
+/** Pick an exemplar for a letter at the given Leitner box.
+ *  Variants unlock at box >= 2 so the kid actually sees some variety in
+ *  normal play (box 3 = 24h interval means most letters never reach it
+ *  in early sessions). */
 export function pickExemplar(letter: string, box: number, rng = Math.random): Exemplar {
   const card = BY_LETTER.get(letter);
   if (!card) throw new Error(`unknown letter: ${letter}`);
-  if (box < 3 || !card.variants?.length) return card.canonical;
-  // Box 3+: rotate canonical + variants for generalization.
+  if (box < 2 || !card.variants?.length) return card.canonical;
   const pool = [card.canonical, ...card.variants];
   return pool[Math.floor(rng() * pool.length)] ?? card.canonical;
 }

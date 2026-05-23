@@ -272,6 +272,15 @@ await page.click('.phonics-miss');
 await page.waitForSelector('.phonics-hint:not([hidden])');
 await snap('26-phonics-miss-promax');
 
+// Parent settings panel with mastery stats — long-press the in-game ←.
+await page.setViewportSize({ width: 844, height: 390 });
+// Click advance to leave the miss state.
+const advanceVisible = await page.locator('.phonics-advance:not([hidden])').count();
+if (advanceVisible > 0) await page.click('.phonics-advance');
+await page.locator('.home-btn').click({ delay: 700 });
+await page.waitForSelector('.parent-settings-panel');
+await snap('27-parent-mastery');
+
 await browser.close();
 server.close();
 console.log('done');

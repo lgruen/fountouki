@@ -102,13 +102,14 @@ export function gotIt(state: PhonicsState, letter: string, now = Date.now()): vo
   state.version += 1;
 }
 
-/** Soft-decay on miss: drop two boxes, not all the way to 0. Less
- *  punitive than vanilla Leitner — a single wobble on a box-3 letter
- *  doesn't blow away days of separation. */
+/** Soft-decay on miss: drop one box, not all the way to 0. For an
+ *  audience with memory challenges, a single wobble shouldn't blow away
+ *  days of separation — and dropping 2 boxes was flooding subsequent
+ *  sessions with the same letter. */
 export function missed(state: PhonicsState, letter: string, now = Date.now()): void {
   const s = state.letters[letter];
   if (!s) return;
-  s.box = Math.max(0, s.box - 2);
+  s.box = Math.max(0, s.box - 1);
   s.due = now + intervalFor(s.box);
   s.lastSeen = now;
   state.version += 1;
