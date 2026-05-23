@@ -24,6 +24,13 @@ body {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   overscroll-behavior: none;
+  /* Kids' fingers wander — kill every flavor of text-selection and the
+     iOS long-press callout so a stray long-hold can't pop up the copy
+     menu or highlight the score. */
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   user-select: none;
 }
 
