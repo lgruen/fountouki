@@ -516,7 +516,8 @@ body {
 .parent-settings-panel {
   position: fixed;
   inset: 0;
-  background: rgba(43, 44, 52, 0.55);
+  background: rgba(43, 44, 52, 0.72);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;

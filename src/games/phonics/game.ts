@@ -88,18 +88,10 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
   const home = makeHomeButton({ onHome: opts.onHome });
   const topSpacer = document.createElement('div');
   topSpacer.className = 'phonics-topbar-spacer';
-  const starsEl = document.createElement('div');
-  starsEl.className = 'phonics-stars';
-  starsEl.setAttribute('aria-label', 'Stars');
-  const starGlyph = document.createElement('span');
-  starGlyph.className = 'star';
-  starGlyph.textContent = '★';
-  const starN = document.createElement('span');
-  starN.className = 'phonics-star-count';
-  starN.textContent = '0';
-  starsEl.append(starGlyph, starN);
   const mute = makeMuteButton();
-  topbar.append(home, topSpacer, starsEl, mute);
+  // No star counter on the topbar — the rainbow IS the progress
+  // indicator. Avoids the "quiz score" feel of "★ 0" in the corner.
+  topbar.append(home, topSpacer, mute);
   root.append(topbar);
 
   const play = document.createElement('div');
@@ -202,14 +194,18 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
 
   // ---------- helpers ----------
   function paintRainbow(justFilledIndex?: number): void {
-    // Stars fill inner-to-outer: star 1 lights arc-(GOAL-1) (innermost),
-    // star GOAL lights arc-0 (outermost). Visually the rainbow grows.
+    // Stars fill outer-to-inner: star 1 lights arc-0 (outermost = red),
+    // star GOAL lights arc-(GOAL-1) (innermost = violet). The kid sees a
+    // genuine rainbow arc from the very first correct, not just the cool
+    // half until ~star 4.
     arcPaths.forEach((p, i) => {
-      const isFilled = i >= SESSION_GOAL - stars;
+      const isFilled = i < stars;
       p.classList.toggle('filled', isFilled);
       p.classList.toggle('just-filled', justFilledIndex === i);
     });
-    starN.textContent = String(stars);
+    // Hide the SVG slot when no arcs are lit yet — the card collapses to
+    // just the letter, no dead space above.
+    arcSvg.style.visibility = stars === 0 ? 'hidden' : 'visible';
   }
 
   function hopLetter(): void {
@@ -244,7 +240,6 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     currentLetter = next;
     inMissReveal = false;
     letterEl.textContent = next;
-    letterEl.classList.remove('faded');
     hint.hidden = true;
     missBtn.hidden = false;
     gotBtn.hidden = false;
@@ -264,7 +259,7 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     persist();
     stars += 1;
     streak += 1;
-    const newlyLitArcIndex = SESSION_GOAL - stars; // the arc that just got filled
+    const newlyLitArcIndex = stars - 1; // outer-to-inner: stars=1 → arc-0
     paintRainbow(newlyLitArcIndex);
     hopLetter();
     // Pulse the whole rainbow on each fill — the prize itself reacts,

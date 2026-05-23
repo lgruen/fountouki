@@ -21,7 +21,7 @@ details (see `CLAUDE.md`).
 - Rainbow wrapper: stripe / star per correct, no decoration on the
   stimulus itself.
 - Single canonical emoji per letter early; variety set unlocks at
-  box ≥ 3 (desirable difficulty after the basic mapping is solid).
+  box ≥ 2 (desirable difficulty once the basic mapping is taking).
 - Miss → reveal-then-repeat: show a hint cue (canonical-word emoji),
   parent voices the sound, kid repeats; card returns soon. Errorless.
 - Session arc: open → ~5-minute soft cap → "session done" celebration;
