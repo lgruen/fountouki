@@ -18,6 +18,10 @@ details (see `CLAUDE.md`).
 ## Phonics (next build)
 - Lowercase letter → sound, parent-graded flashcards.
 - Leitner SRS (5 boxes); per-letter `{ box, due, lastSeen }`.
+- Drip-in introduction in Jolly-Phonics order (`s a t i p n …`): at
+  most `NEW_LETTER_BUFFER` (=3) unsettled letters in rotation at once.
+  A new letter unlocks when an existing one reaches box ≥ 1. Already-
+  introduced letters stay active even if INTRO_ORDER changes later.
 - Rainbow wrapper: stripe / star per correct, no decoration on the
   stimulus itself.
 - Single canonical emoji per letter early; variety set unlocks at
