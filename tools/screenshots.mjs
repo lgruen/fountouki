@@ -250,7 +250,17 @@ for (let i = 0; i < 8; i++) {
   await page.waitForTimeout(800);
 }
 await page.waitForSelector('.phonics-done:not([hidden])');
+// Scene settles ~1.6s after open (last plant sprouts then frog idles).
+// Wait a beat so the screenshot shows the full garden + frog, not the
+// half-drawn rainbow with empty ground.
+await page.waitForTimeout(1800);
 await snap('22-phonics-rainbow-done');
+// Tap the frog so we capture a reaction frame in screenshots too.
+// `force` skips the stability wait — the frog has a perpetual idle
+// animation, so Playwright otherwise waits forever for it to settle.
+await page.click('.phonics-frog', { force: true });
+await page.waitForTimeout(220);
+await snap('22b-phonics-rainbow-done-frog-tapped');
 await page.click('.phonics-done-home');
 await page.waitForSelector('.picker-card');
 
@@ -264,10 +274,65 @@ await page.setViewportSize({ width: 1180, height: 820 });
 await page.waitForTimeout(80);
 await snap('24-phonics-tablet-landscape');
 
+// Drive to the rainbow done scene on tablet landscape (the biggest
+// surface area) so we can eyeball the scene at a non-phone aspect.
+for (let i = 0; i < 12; i++) {
+  const done = await page.locator('.phonics-done:not([hidden])').count();
+  if (done > 0) break;
+  const adv = await page.locator('.phonics-advance:not([hidden])').count();
+  if (adv > 0) await page.click('.phonics-advance');
+  else await page.click('.phonics-got');
+  await page.waitForTimeout(800);
+}
+await page.waitForSelector('.phonics-done:not([hidden])');
+await page.waitForTimeout(1800);
+await snap('24b-phonics-rainbow-done-tablet-landscape');
+await page.click('.phonics-done-home');
+await page.waitForSelector('.picker-card');
+
+// Same on tablet portrait.
+await page.setViewportSize({ width: 820, height: 1180 });
+await page.goto(`${url}#/phonics`);
+await page.waitForSelector('.phonics-letter');
+for (let i = 0; i < 12; i++) {
+  const done = await page.locator('.phonics-done:not([hidden])').count();
+  if (done > 0) break;
+  const adv = await page.locator('.phonics-advance:not([hidden])').count();
+  if (adv > 0) await page.click('.phonics-advance');
+  else await page.click('.phonics-got');
+  await page.waitForTimeout(800);
+}
+await page.waitForSelector('.phonics-done:not([hidden])');
+await page.waitForTimeout(1800);
+await snap('23b-phonics-rainbow-done-tablet-portrait');
+await page.click('.phonics-done-home');
+await page.waitForSelector('.picker-card');
+
 // iPhone Pro Max landscape — the tight-viewport edge case.
 await page.setViewportSize({ width: 932, height: 430 });
-await page.waitForTimeout(80);
+// We're on the picker after the previous "go home" — bounce back into
+// the phonics game so the miss-hint screenshot has something to land on.
+await page.goto(`${url}#/phonics`);
+await page.waitForSelector('.phonics-letter');
 await snap('25-phonics-iphone-promax-landscape');
+
+// Drive to the rainbow done on iPhone Pro Max so we can eyeball the
+// scene on the tightest landscape viewport too (notch + safe-area).
+for (let i = 0; i < 12; i++) {
+  const done = await page.locator('.phonics-done:not([hidden])').count();
+  if (done > 0) break;
+  const adv = await page.locator('.phonics-advance:not([hidden])').count();
+  if (adv > 0) await page.click('.phonics-advance');
+  else await page.click('.phonics-got');
+  await page.waitForTimeout(800);
+}
+await page.waitForSelector('.phonics-done:not([hidden])');
+await page.waitForTimeout(1800);
+await snap('25b-phonics-rainbow-done-promax-landscape');
+await page.click('.phonics-done-home');
+await page.waitForSelector('.picker-card');
+await page.goto(`${url}#/phonics`);
+await page.waitForSelector('.phonics-letter');
 
 await page.click('.phonics-miss');
 await page.waitForSelector('.phonics-hint:not([hidden])');
