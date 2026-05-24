@@ -36,5 +36,3 @@ are fine — the SW handles those automatically.
 
 ## Open work (app)
 - Per-game orientation override (currently landscape-only globally).
-- Parent settings panel: long-press hazelnut hook is wired but the panel
-  UI is still to come (sync token entry, etc.).

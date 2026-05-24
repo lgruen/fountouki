@@ -7,12 +7,15 @@ import { playCorrect, playIncorrect, playLevelUp, playTap } from '../../shared/s
 import { burst } from '../../shared/confetti.js';
 import { makeCell, makeChoiceButton } from './render.js';
 import { makeHomeButton, makeMuteButton } from '../../shared/chrome.js';
+import { openParentSettings } from '../../shared/parent-settings.js';
+import {
+  buildPatternsSettingsSection,
+  type ThemeChoice,
+  type Difficulty,
+  type GameMode,
+} from './settings-section.js';
 import { load, save } from '../../shared/storage.js';
 import type { MountOpts } from '../registry.js';
-
-type ThemeChoice = ThemeId | 'mix';
-type Difficulty = 'easy' | 'hard' | 'auto';
-type GameMode = 'next' | 'unit';
 
 interface PersistedSettings {
   themeChoice?: ThemeChoice;
@@ -54,8 +57,8 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     locked: false,
   };
 
-  // Timer + listener cleanup harness.
-  const abort = new AbortController();
+  // Timer cleanup harness. (Event listeners live on DOM owned by
+  // `container`, which is cleared on unmount.)
   const timers = new Set<number>();
   const setT = (fn: () => void, ms: number): number => {
     const id = window.setTimeout(() => {
@@ -74,7 +77,47 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
 
   const topbar = document.createElement('header');
   topbar.className = 'topbar';
-  const homeBtn = makeHomeButton({ onHome: opts.onHome });
+  const homeBtn = makeHomeButton({
+    onHome: opts.onHome,
+    onLongPress: () =>
+      openParentSettings({
+        section: buildPatternsSettingsSection({
+          getState: () => ({
+            themeChoice: state.themeChoice,
+            difficulty: state.difficulty,
+            mode: state.mode,
+            showHint: state.showHint,
+          }),
+          onThemeChange: (v) => {
+            state.themeChoice = v;
+            persist();
+            nextRound();
+          },
+          onDifficultyChange: (v) => {
+            state.difficulty = v;
+            persist();
+            nextRound();
+          },
+          onModeChange: (v) => {
+            state.mode = v;
+            persist();
+            nextRound();
+          },
+          onHintToggle: (v) => {
+            state.showHint = v;
+            persist();
+            if (state.round) renderSequence(state.round);
+          },
+          onReset: () => {
+            state.level = 1;
+            state.stars = 0;
+            state.streak = 0;
+            renderHud();
+            nextRound();
+          },
+        }),
+      }),
+  });
   const starsEl = document.createElement('div');
   starsEl.className = 'stars';
   starsEl.setAttribute('aria-label', 'Stars');
@@ -89,11 +132,7 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
   levelPipsEl.className = 'level-pips';
   levelPipsEl.setAttribute('aria-label', 'Level');
   const muteBtn = makeMuteButton();
-  const settingsBtn = document.createElement('button');
-  settingsBtn.className = 'icon-btn settings-btn';
-  settingsBtn.setAttribute('aria-label', 'Settings');
-  settingsBtn.textContent = '⚙️';
-  topbar.append(homeBtn, starsEl, levelPipsEl, muteBtn, settingsBtn);
+  topbar.append(homeBtn, starsEl, levelPipsEl, muteBtn);
   root.append(topbar);
 
   const playArea = document.createElement('div');
@@ -107,67 +146,13 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
   playArea.append(seqEl, choicesEl);
   root.append(playArea);
 
-  const settingsPanel = document.createElement('div');
-  settingsPanel.className = 'settings-panel';
-  settingsPanel.hidden = true;
-  settingsPanel.innerHTML = `
-    <div class="settings-card" role="dialog" aria-label="Settings">
-      <h2>Settings</h2>
-      <div class="setting-row">
-        <label for="ptn-theme">Pictures</label>
-        <select id="ptn-theme">
-          <option value="mix" selected>Mix (auto)</option>
-          <option value="emoji-animals">Animals 🐶</option>
-          <option value="emoji-fruit">Fruit 🍎</option>
-          <option value="emoji-vehicles">Vehicles 🚗</option>
-          <option value="emoji-construction">Construction 🏗️</option>
-          <option value="emoji-dinosaurs">Dinosaurs 🦖</option>
-          <option value="shapes">Shapes 🟥</option>
-          <option value="letters-upper">Letters (ABC)</option>
-          <option value="letters-lower">letters (abc)</option>
-          <option value="numbers">Numbers (123)</option>
-        </select>
-      </div>
-      <div class="setting-row">
-        <label for="ptn-difficulty">Helpers</label>
-        <select id="ptn-difficulty">
-          <option value="auto" selected>Auto — gets harder</option>
-          <option value="easy">Easy — pick from the row</option>
-          <option value="hard">Hard — pick from all</option>
-        </select>
-      </div>
-      <div class="setting-row">
-        <label for="ptn-mode">Game</label>
-        <select id="ptn-mode">
-          <option value="next" selected>What comes next?</option>
-          <option value="unit">Find the repeating piece</option>
-        </select>
-      </div>
-      <div class="setting-row checkbox-row">
-        <label><input type="checkbox" id="ptn-hint" /> Highlight the repeating piece</label>
-      </div>
-      <div class="setting-actions">
-        <button class="secondary ptn-reset">Start over</button>
-        <button class="primary ptn-close">Done</button>
-      </div>
-      <p class="footer-note">No data leaves this device. <a href="https://github.com/lgruen/fountouki" target="_blank" rel="noopener">Open source · MIT</a></p>
-    </div>`;
-  root.append(settingsPanel);
-
-  const themeSelect = settingsPanel.querySelector<HTMLSelectElement>('#ptn-theme')!;
-  const difficultySelect = settingsPanel.querySelector<HTMLSelectElement>('#ptn-difficulty')!;
-  const modeSelect = settingsPanel.querySelector<HTMLSelectElement>('#ptn-mode')!;
-  const hintToggle = settingsPanel.querySelector<HTMLInputElement>('#ptn-hint')!;
-  const resetBtn = settingsPanel.querySelector<HTMLButtonElement>('.ptn-reset')!;
-  const closeBtn = settingsPanel.querySelector<HTMLButtonElement>('.ptn-close')!;
-
   // ---------- helpers ----------
   function pickTheme(): Theme {
     if (state.themeChoice === 'mix') {
       const idx = Math.floor(Math.random() * ALL_THEME_IDS.length);
       return getTheme(ALL_THEME_IDS[idx] ?? 'emoji-animals');
     }
-    return getTheme(state.themeChoice);
+    return getTheme(state.themeChoice as ThemeId);
   }
 
   function effectiveAnswerMode(): 'easy' | 'hard' {
@@ -409,106 +394,12 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     });
   }
 
-  function applyToControls(): void {
-    themeSelect.value = state.themeChoice;
-    difficultySelect.value = state.difficulty;
-    modeSelect.value = state.mode;
-    hintToggle.checked = state.showHint;
-  }
-
-  function openSettings(): void {
-    applyToControls();
-    settingsPanel.hidden = false;
-  }
-  function closeSettings(): void {
-    settingsPanel.hidden = true;
-  }
-
-  // ---------- wire ----------
-  const sig = abort.signal;
-  settingsBtn.addEventListener('click', openSettings, { signal: sig });
-  closeBtn.addEventListener(
-    'click',
-    () => {
-      closeSettings();
-      persist();
-    },
-    { signal: sig },
-  );
-  settingsPanel.addEventListener(
-    'click',
-    (e) => {
-      if (e.target === settingsPanel) closeSettings();
-    },
-    { signal: sig },
-  );
-
-  themeSelect.addEventListener(
-    'change',
-    () => {
-      state.themeChoice = themeSelect.value as ThemeChoice;
-      persist();
-      nextRound();
-    },
-    { signal: sig },
-  );
-  difficultySelect.addEventListener(
-    'change',
-    () => {
-      state.difficulty = difficultySelect.value as Difficulty;
-      persist();
-      nextRound();
-    },
-    { signal: sig },
-  );
-  modeSelect.addEventListener(
-    'change',
-    () => {
-      state.mode = modeSelect.value as GameMode;
-      persist();
-      nextRound();
-    },
-    { signal: sig },
-  );
-  hintToggle.addEventListener(
-    'change',
-    () => {
-      state.showHint = hintToggle.checked;
-      persist();
-      if (state.round) renderSequence(state.round);
-    },
-    { signal: sig },
-  );
-
-  resetBtn.addEventListener(
-    'click',
-    () => {
-      state.level = 1;
-      state.stars = 0;
-      state.streak = 0;
-      renderHud();
-      closeSettings();
-      nextRound();
-    },
-    { signal: sig },
-  );
-
-  window.addEventListener(
-    'keydown',
-    (e) => {
-      if (e.key === 'Escape') closeSettings();
-    },
-    { signal: sig },
-  );
-
   // ---------- boot ----------
   loadPersisted();
-  applyToControls();
   renderHud();
   nextRound();
 
   return () => {
-    abort.abort();
     for (const id of timers) clearTimeout(id);
     timers.clear();
     delete window.__patterns;

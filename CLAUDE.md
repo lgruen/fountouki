@@ -78,6 +78,19 @@
 - Sync state is per-game under one family-level token.
 - Scores are session-only — never persist them.
 
+## Parent menu (long-press ←)
+- Settings that a kid shouldn't tap into live in the parent menu,
+  opened by long-pressing the in-game ← (500ms hold). No visible
+  chrome — keeps the gameplay screen uncluttered. New games inherit
+  this for free via `makeHomeButton({ onHome })`.
+- Per-game knobs (theme, difficulty, mode, …) slot into that same
+  panel via `openParentSettings({ section })`. See
+  `src/games/patterns/settings-section.ts` and
+  `src/games/phonics/mastery-section.ts` for the pattern. Don't add a
+  dedicated ⚙ button on the topbar.
+- Universal sync controls (token / endpoint) live at the bottom of the
+  panel and show in every game.
+
 ## The "would I play this?" test
 - Before claiming a game is done, ask: *if you were a 4yo with a short
   attention span and the constraints below, would you push yourself to
@@ -94,8 +107,8 @@
 ## Brand
 - 🌰 is the PWA launcher icon **only**. Don't render it inside the app
   (no home button, no header logo, no settings-panel chrome). In-app
-  buttons should use neutral glyphs (← for back, ⚙ for game settings,
-  etc.).
+  buttons should use neutral glyphs (← for back, etc.). Settings live
+  behind the long-press on ← — no dedicated topbar gear.
 
 ## Audience & pedagogy baseline
 - Preschoolers; big tap targets, minimal text, visual-first navigation.
