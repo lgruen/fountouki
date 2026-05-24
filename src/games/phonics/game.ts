@@ -360,6 +360,9 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
       showDone();
       return;
     }
+    // Active-set unlocks happen on queue rebuild, not the moment a
+    // letter is graded — so a newly mastered letter frees a slot for
+    // the next intro on the next drain, not mid-queue.
     if (queue.length === 0) queue = buildQueue(state);
     const next = queue.shift();
     if (!next) return;

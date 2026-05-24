@@ -74,6 +74,19 @@ export const DECK: LetterCard[] = [
 
 export const LETTERS: string[] = DECK.map((c) => c.letter);
 
+// Order in which letters are introduced to a fresh learner. Jolly Phonics
+// grouping: the first six letters (s, a, t, i, p, n) already form many
+// CVC words (sat, pin, nap, …), so phonics "clicks" early. The rest
+// follow the standard group sequence; alphabetical at the tail where
+// pedagogy stops differentiating much. Used by srs.activeLetters to
+// drip-feed new letters as the kid masters earlier ones.
+export const INTRO_ORDER: string[] = [
+  's', 'a', 't', 'i', 'p', 'n', // group 1
+  'c', 'k', 'e', 'h', 'r', 'm', 'd', // group 2
+  'g', 'o', 'u', 'l', 'f', 'b', // group 3
+  'j', 'z', 'w', 'v', 'y', 'x', 'q', // tail
+];
+
 const BY_LETTER = new Map(DECK.map((c) => [c.letter, c]));
 export function getCard(letter: string): LetterCard | undefined {
   return BY_LETTER.get(letter);

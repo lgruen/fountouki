@@ -2,26 +2,17 @@
 // current letter state and renders a summary + per-letter dot grid.
 
 import { load } from '../../shared/storage.js';
+import { INTRODUCED_BOX_MIN, activeLetters, emptyState, ensureLetters, validate } from './srs.js';
 import type { ParentSection } from '../../shared/parent-settings.js';
-
-interface LetterStat {
-  box: number;
-  lastSeen: number;
-}
-interface PhonicsBlob {
-  letters?: Record<string, LetterStat>;
-}
 
 const MASTERED_BOX = 4;
 const STRONG_MIN_BOX = 3;
 
 function statsHTML(): string {
-  const state = load<PhonicsBlob>('phonics', 'state');
-  if (!state || !state.letters) {
-    return `<p class="hint">No phonics play yet.</p>`;
-  }
+  const state = validate(load<unknown>('phonics', 'state')) ?? emptyState();
+  ensureLetters(state);
   const entries = Object.entries(state.letters).sort(([a], [b]) => a.localeCompare(b));
-  if (entries.length === 0) {
+  if (entries.every(([, s]) => s.lastSeen === 0)) {
     return `<p class="hint">No phonics play yet.</p>`;
   }
   let mastered = 0;
@@ -43,6 +34,12 @@ function statsHTML(): string {
         `<span class="mastery-dot box-${s.box}" title="${l} · box ${s.box}" aria-label="${l}: box ${s.box}"></span>`,
     )
     .join('');
+  const nextUp = activeLetters(state).filter(
+    (l) => (state.letters[l]?.box ?? 0) < INTRODUCED_BOX_MIN,
+  );
+  const nextLine = nextUp.length
+    ? `<p class="hint">In rotation now: <strong>${nextUp.join(' · ')}</strong>. The next letter unlocks when one of these is graded correct.</p>`
+    : `<p class="hint">All 26 letters in rotation.</p>`;
   return `
     <div class="parent-stats-summary">
       <span><strong>${mastered}</strong> mastered</span>
@@ -51,7 +48,8 @@ function statsHTML(): string {
       ${unseen ? `<span><strong>${unseen}</strong> new</span>` : ''}
     </div>
     <div class="mastery-grid" aria-label="Per-letter mastery">${dots}</div>
-    <p class="hint">Each dot = one letter, colored by Leitner box (gray = new, gold = mastered).</p>`;
+    <p class="hint">Each dot = one letter, colored by Leitner box (gray = new, gold = mastered).</p>
+    ${nextLine}`;
 }
 
 export function buildPhonicsMasterySection(): ParentSection {

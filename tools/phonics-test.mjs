@@ -58,14 +58,42 @@ const dbg = await page.evaluate(() => window.__phonics);
 assert.equal(dbg.stars, 0, 'fresh session starts at 0 stars');
 assert.equal(Object.keys(dbg.state.letters).length, 26, 'all 26 letters initialized');
 
+console.log('1b) fresh learner: only first few intro letters in rotation');
+// Drip-in: a never-played learner should be limited to the first three
+// letters of INTRO_ORDER (s, a, t). Walk through a few cards and make
+// sure nothing outside that set appears.
+const FIRST_INTRO = new Set(['s', 'a', 't']);
+assert(FIRST_INTRO.has(initialLetter), `first card should be in intro set, got ${initialLetter}`);
+const seen = new Set([initialLetter]);
+for (let i = 0; i < 5; i++) {
+  await page.click('.phonics-miss');
+  await page.waitForSelector('.phonics-hint:not([hidden])');
+  await page.click('.phonics-advance');
+  await page.waitForFunction(() => window.__phonics?.inMissReveal === false);
+  const cur = await page.evaluate(() => window.__phonics?.letter);
+  assert(
+    FIRST_INTRO.has(cur),
+    `letter ${cur} appeared before any unlock; expected only s/a/t in fresh rotation`,
+  );
+  seen.add(cur);
+}
+// We should have cycled through all three (with REQUEUE_GAP they rotate).
+assert.equal(seen.size, 3, `expected to see all 3 starter letters, saw: ${[...seen].join(',')}`);
+// Reset fresh state for the rest of the test so subsequent steps don't
+// inherit the misses we just inflicted.
+await page.evaluate(() => localStorage.clear());
+await page.reload();
+await page.waitForSelector('.phonics-letter');
+
 console.log('2) "got it" → star += 1, next card');
+const beforeGotLetter = await page.locator('.phonics-letter').textContent();
 await page.click('.phonics-got');
 await page.waitForFunction(() => (window.__phonics?.stars ?? 0) === 1);
 const afterGot = await page.evaluate(() => window.__phonics);
 assert.equal(afterGot.stars, 1);
-assert.notEqual(afterGot.letter, initialLetter, 'next card should be a different letter');
+assert.notEqual(afterGot.letter, beforeGotLetter, 'next card should be a different letter');
 // State for the got-it letter should now be at box 1.
-assert.equal(afterGot.state.letters[initialLetter].box, 1, `${initialLetter} should be in box 1`);
+assert.equal(afterGot.state.letters[beforeGotLetter].box, 1, `${beforeGotLetter} should be in box 1`);
 
 console.log('3) "missed" → hint shows, letter fades, advance button replaces grade buttons');
 const beforeMissLetter = afterGot.letter;

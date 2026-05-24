@@ -1,10 +1,19 @@
 // Leitner SRS for the phonics deck. Boxes 0–4; intervals tuned for a
 // 4yo doing short sessions 1–3x/day.
 
-import { LETTERS } from './deck.js';
+import { INTRO_ORDER, LETTERS } from './deck.js';
 
 export const MAX_BOX = 4;
 export const SCHEMA_VERSION = 1;
+
+// At most this many "not-yet-settled" letters (box < INTRODUCED_BOX_MIN)
+// can be in the active rotation at once. Keeps the unfamiliar surface
+// small while a fresh learner is still pattern-matching letter shapes.
+export const NEW_LETTER_BUFFER = 3;
+// A letter is "introduced" once it's been graded correct at least once
+// (box >= 1). Until then it counts against NEW_LETTER_BUFFER. A relapse
+// back to box 0 also re-counts it as new — kid needs the breathing room.
+export const INTRODUCED_BOX_MIN = 1;
 
 export interface LetterState {
   /** 0 (new / missed) to 4 (mastered for a few days). */
@@ -118,19 +127,51 @@ export function missed(state: PhonicsState, letter: string, now = Date.now()): v
   state.version += 1;
 }
 
-/** Build a session queue: all letters with due <= now, sorted by due asc.
- *  If none are due, fall back to all letters sorted by box asc → due asc
- *  so the kid can always practice. */
+/** Letters currently eligible to be queued.
+ *
+ *  Walks INTRO_ORDER and includes:
+ *   - every already-introduced letter (box >= INTRODUCED_BOX_MIN), regardless
+ *     of position — keeps prior progress in rotation even if INTRO_ORDER
+ *     is reordered later, or the kid jumps around;
+ *   - plus the first NEW_LETTER_BUFFER not-yet-introduced letters from
+ *     INTRO_ORDER, so the unfamiliar surface stays small. A relapsed
+ *     letter (box dropped back to 0) falls into this bucket too,
+ *     consuming a slot until the kid recovers it. */
+export function activeLetters(state: PhonicsState): string[] {
+  const active: string[] = [];
+  let unsettled = 0;
+  for (const letter of INTRO_ORDER) {
+    const s = state.letters[letter];
+    const box = s?.box ?? 0;
+    if (box >= INTRODUCED_BOX_MIN) {
+      active.push(letter);
+    } else if (unsettled < NEW_LETTER_BUFFER) {
+      active.push(letter);
+      unsettled += 1;
+    }
+  }
+  return active;
+}
+
+/** Build a session queue from the active set: letters with due <= now,
+ *  sorted by due asc. If none are due, fall back to all active letters
+ *  sorted by box asc → due asc so the kid can always practice. */
 export function buildQueue(state: PhonicsState, now = Date.now()): string[] {
+  const active = activeLetters(state);
   const due: Array<[string, LetterState]> = [];
-  for (const [l, s] of Object.entries(state.letters)) {
-    if (s.due <= now) due.push([l, s]);
+  for (const l of active) {
+    const s = state.letters[l];
+    if (s && s.due <= now) due.push([l, s]);
   }
   if (due.length > 0) {
     due.sort((a, b) => a[1].due - b[1].due);
     return due.map(([l]) => l);
   }
-  const all = Object.entries(state.letters);
+  const all: Array<[string, LetterState]> = [];
+  for (const l of active) {
+    const s = state.letters[l];
+    if (s) all.push([l, s]);
+  }
   all.sort((a, b) => a[1].box - b[1].box || a[1].due - b[1].due);
   return all.map(([l]) => l);
 }
