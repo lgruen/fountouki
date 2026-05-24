@@ -93,11 +93,26 @@ for (const p of PROFILES) {
       const el = document.querySelector(sel);
       return el ? el.getBoundingClientRect() : null;
     };
+    const home = document.querySelector('.home-btn');
+    const homeBefore = home ? window.getComputedStyle(home, '::before') : null;
+    const muteSound = document.querySelector('.mute-btn .icon-sound');
     return {
       vp: { w: window.innerWidth, h: window.innerHeight },
       home: r('.home-btn'),
-      svg: r('.home-btn > svg'),
+      homeChevron: homeBefore
+        ? {
+            content: homeBefore.content,
+            width: parseFloat(homeBefore.width),
+            height: parseFloat(homeBefore.height),
+            borderLeftWidth: parseFloat(homeBefore.borderLeftWidth),
+            borderBottomWidth: parseFloat(homeBefore.borderBottomWidth),
+            borderLeftColor: homeBefore.borderLeftColor,
+            borderBottomColor: homeBefore.borderBottomColor,
+            display: homeBefore.display,
+          }
+        : null,
       mute: r('.mute-btn'),
+      muteSound: muteSound ? r('.mute-btn .icon-sound') : null,
       card: r('.phonics-card'),
       actions: r('.phonics-actions'),
       miss: r('.phonics-miss'),
@@ -114,20 +129,44 @@ for (const p of PROFILES) {
     }
   };
 
-  // SVG renders, square, reasonable size.
-  check(info.svg !== null, 'back-button SVG present');
-  if (info.svg) {
-    check(info.svg.width >= 14, `SVG width >=14 (got ${info.svg.width})`);
-    check(info.svg.height >= 14, `SVG height >=14 (got ${info.svg.height})`);
-    // Aspect ratio square within rounding.
-    const ratio = info.svg.width / info.svg.height;
-    check(Math.abs(ratio - 1) < 0.1, `SVG aspect ~ 1:1 (got ${ratio.toFixed(3)})`);
-    // SVG should fit inside the home button (not overflow).
-    check(info.svg.width <= info.home.width, `SVG width <= home button width`);
+  // Back-button chevron is now drawn by the .home-btn::before
+  // pseudo-element (CSS borders, no SVG). Assert that:
+  //   - the pseudo-element exists and has rendered content
+  //   - it has reasonable pixel dimensions (>=8px square)
+  //   - the borders that draw the chevron are non-zero and visible
+  //     (not transparent, not matching the button background).
+  // This is the layer that broke on the real iPad — the inline-SVG
+  // approach rendered as 0×0 / invisible; the pseudo-element render
+  // path is much more uniform across WebKit versions.
+  check(info.homeChevron !== null, 'back-button ::before pseudo-element present');
+  if (info.homeChevron) {
+    const c = info.homeChevron;
+    // `content` is set to `""` so it computed as `"none"` would mean the
+    // pseudo-element is suppressed.
+    check(c.display !== 'none' && c.content !== 'none', `chevron rendered (display=${c.display}, content=${c.content})`);
+    check(c.width >= 8, `chevron width >= 8px (got ${c.width})`);
+    check(c.height >= 8, `chevron height >= 8px (got ${c.height})`);
+    const aspect = c.width / c.height;
+    check(Math.abs(aspect - 1) < 0.05, `chevron square (aspect ${aspect.toFixed(3)})`);
+    check(c.borderLeftWidth >= 2, `chevron left border drawn (${c.borderLeftWidth}px)`);
+    check(c.borderBottomWidth >= 2, `chevron bottom border drawn (${c.borderBottomWidth}px)`);
+    // Border color must be non-transparent and not the page background
+    // (#fef6e4) — that's the only way a stroked chevron is actually
+    // visible on the white button face.
+    const opaque = !/^rgba\(.*,\s*0\)$/.test(c.borderLeftColor) && c.borderLeftColor !== 'transparent';
+    check(opaque, `chevron border color opaque (${c.borderLeftColor})`);
   }
 
   // Home button fully visible and at expected min size.
   check(info.home.width >= p.minSize, `home button width >= ${p.minSize} (got ${info.home.width})`);
+
+  // Mute speaker should fill a noticeable fraction of the mute button —
+  // not a tiny dot inside a big circle. Previously the parent's small
+  // font-size made the emoji render at ~25% of the button.
+  if (info.muteSound && info.mute) {
+    const muteFrac = info.muteSound.width / info.mute.width;
+    check(muteFrac >= 0.5, `mute speaker fills >= 50% of button (got ${(muteFrac * 100).toFixed(0)}%)`);
+  }
 
   // X / ✓ pair: midpoint of button centers must match the card's center
   // within a tight tolerance. The earlier flex layout missed this by

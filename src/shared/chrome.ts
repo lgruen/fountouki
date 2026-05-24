@@ -14,15 +14,12 @@ export interface HomeOpts {
 export function makeHomeButton(opts: HomeOpts): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.className = 'icon-btn home-btn';
-  // Explicit width/height attributes on the SVG — without them, WebKit
-  // in a flex container sizes the SVG from its (undefined) intrinsic
-  // dimensions instead of the CSS percentage, producing a tiny non-square
-  // chevron on iPad / iOS Safari. The CSS still scales it via 1em.
-  btn.innerHTML =
-    '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
-    '<path d="M14 6l-6 6 6 6" fill="none" stroke="currentColor" ' +
-    'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-    '</svg>';
+  // No inner content: the chevron is drawn by the CSS `.home-btn::before`
+  // pseudo-element (a rotated bordered square). Inline SVG sized via
+  // any combination of percent / em / explicit width attributes
+  // rendered as an empty circle on the maintainer's iPad — replacing it
+  // with a CSS border shape sidesteps every iOS Safari SVG-sizing edge
+  // case in one move.
   btn.setAttribute('aria-label', 'Home');
 
   let pressTimer: number | null = null;
