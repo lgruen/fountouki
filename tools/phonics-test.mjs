@@ -119,9 +119,9 @@ console.log('6b) rainbow-done scene: frog + garden + no mastery grid');
 // Frog mascot is present and tappable.
 const frogVisible = await page.locator('.phonics-frog').isVisible();
 assert(frogVisible, 'frog mascot rendered in rainbow-done scene');
-// Plants render (procedural garden — 5 or 6 plants per session).
+// ONE hero plant per session — the reward is "what grew this time?".
 const plantCount = await page.locator('.phonics-plant').count();
-assert(plantCount >= 5 && plantCount <= 6, `expected 5-6 plants, got ${plantCount}`);
+assert.equal(plantCount, 1, `expected 1 hero plant, got ${plantCount}`);
 // Mastery dots removed from the modal (parent settings still has them).
 const masteryInModal = await page.locator('.phonics-done .mastery-dot').count();
 assert.equal(masteryInModal, 0, 'mastery dots no longer rendered inside rainbow-done');
