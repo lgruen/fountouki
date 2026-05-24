@@ -595,6 +595,9 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(43, 44, 52, 0.72);
+  /* -webkit- prefix is still required for Safari < 18 (the prefixed
+     form works back to iOS 9). */
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
