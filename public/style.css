@@ -896,6 +896,77 @@ body {
 .phonics-got { background: var(--ok); color: var(--ok-strong); }
 .phonics-advance { background: var(--accent); color: white; }
 
+/* Mark glyphs are CSS shapes, not text — see makeHomeButton's note. iOS
+   Safari's mono ✗ / ✓ have asymmetric bearings (the visible mark sits
+   left of the character box centre), so a `text-align: center` button
+   still looks lopsided on a real iPad. Drawing the marks as
+   absolutely-positioned pseudo-elements means the visual centre is the
+   button centre by construction. */
+.phonics-action { position: relative; }
+.phonics-miss::before,
+.phonics-miss::after,
+.phonics-got::before,
+.phonics-advance::before,
+.phonics-advance::after {
+  content: "";
+  position: absolute;
+  background: currentColor;
+  border-radius: 999px;
+}
+
+/* ✗ — two crossing bars, both centred on the button's geometric centre,
+   so the resulting X is dead-centre regardless of stroke width. */
+.phonics-miss::before,
+.phonics-miss::after {
+  top: 50%;
+  left: 50%;
+  width: 0.55em;
+  height: 0.14em;
+}
+.phonics-miss::before { transform: translate(-50%, -50%) rotate(45deg); }
+.phonics-miss::after  { transform: translate(-50%, -50%) rotate(-45deg); }
+
+/* ✓ — a single bar bent into an L via border-style trick: use one
+   bordered box rather than two bars so the two strokes meet cleanly
+   at the joint. The translate nudges the L so its visual centre of
+   mass lands at the button centre (the joint is in the lower-left of
+   the L's bounding box, so straight centring would push the mark up
+   and to the right). */
+.phonics-got::before {
+  background: transparent;
+  border-radius: 0;
+  top: 50%;
+  left: 50%;
+  width: 0.36em;
+  height: 0.72em;
+  border-right: 0.14em solid currentColor;
+  border-bottom: 0.14em solid currentColor;
+  border-bottom-right-radius: 0.04em;
+  transform: translate(-65%, -65%) rotate(45deg);
+}
+
+/* → — a horizontal bar plus a small triangle on its right end. Draws
+   pure CSS, centred. */
+.phonics-advance::before {
+  top: 50%;
+  left: 50%;
+  width: 0.55em;
+  height: 0.12em;
+  transform: translate(-50%, -50%);
+}
+.phonics-advance::after {
+  background: transparent;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 0;
+  border-top: 0.18em solid transparent;
+  border-bottom: 0.18em solid transparent;
+  border-left: 0.22em solid currentColor;
+  transform: translate(40%, -50%);
+}
+
 /* Phone landscape: tight vertical space. Shrink letter + paddings so the
    card + (miss-state) hint + action row all fit above the home indicator. */
 @media (orientation: landscape) and (max-height: 540px) {

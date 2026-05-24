@@ -172,18 +172,20 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
 
   const actions = document.createElement('div');
   actions.className = 'phonics-actions';
+  // ✗ / ✓ / → marks are drawn by CSS pseudo-elements (see style.css)
+  // rather than text content. iOS Safari's font fallback renders the
+  // unicode glyphs with asymmetric bearings — the visible mark sits
+  // visibly off-centre inside the round button face on a real iPad.
+  // CSS shapes center geometrically, no glyph metrics involved.
   const missBtn = document.createElement('button');
   missBtn.className = 'phonics-action phonics-miss';
   missBtn.setAttribute('aria-label', 'Missed');
-  missBtn.textContent = '✗';
   const gotBtn = document.createElement('button');
   gotBtn.className = 'phonics-action phonics-got';
   gotBtn.setAttribute('aria-label', 'Got it');
-  gotBtn.textContent = '✓';
   const advanceBtn = document.createElement('button');
   advanceBtn.className = 'phonics-action phonics-advance';
   advanceBtn.setAttribute('aria-label', 'Got it now');
-  advanceBtn.textContent = '→';
   advanceBtn.hidden = true;
   actions.append(missBtn, gotBtn, advanceBtn);
   play.append(actions);
