@@ -63,6 +63,31 @@ assert.equal(noBrand, 0, 'no hazelnut brand in-app');
 const homeBtnOnPicker = await page.locator('.picker .home-btn').count();
 assert.equal(homeBtnOnPicker, 0, 'no home button on the picker itself');
 
+// Build stamp: present, non-empty, rendered inside the viewport, and far
+// enough above the bottom edge to clear Android's gesture-nav strip in
+// landscape phone mode (the bug this test was added for: at 10px / 0.5
+// opacity / bottom 6px it was effectively invisible on a real device).
+const stamp = await page.evaluate(() => {
+  const el = document.querySelector('.picker-version');
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  return {
+    text: el.textContent ?? '',
+    rect: { x: r.x, y: r.y, width: r.width, height: r.height, bottom: r.bottom },
+    style: { opacity: parseFloat(cs.opacity), fontSize: parseFloat(cs.fontSize) },
+    vh: window.innerHeight,
+  };
+});
+assert(stamp !== null, 'expected .picker-version element');
+assert(stamp.text.length > 0, `expected non-empty build stamp (got "${stamp.text}")`);
+assert(stamp.rect.width > 0 && stamp.rect.height > 0, 'build stamp has non-zero size');
+assert(stamp.style.fontSize >= 12, `build stamp font-size >= 12 (got ${stamp.style.fontSize})`);
+assert(stamp.style.opacity >= 0.7, `build stamp opacity >= 0.7 (got ${stamp.style.opacity})`);
+const bottomGap = stamp.vh - stamp.rect.bottom;
+assert(bottomGap >= 8, `build stamp clears bottom edge (gap=${bottomGap}px)`);
+assert(stamp.rect.bottom <= stamp.vh, 'build stamp fully inside viewport');
+
 console.log('2) tap patterns card → patterns mounts');
 await page.click('.picker-card[data-game="patterns"]');
 await page.waitForSelector('.cell');
