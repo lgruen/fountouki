@@ -5,7 +5,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { launchChromium } from './_chrome.mjs';
+import { launchChromium } from './_browser.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const publicDir = join(root, 'public');

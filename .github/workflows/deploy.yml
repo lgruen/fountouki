@@ -25,7 +25,7 @@ jobs:
           cache: 'npm'
       - uses: actions/configure-pages@v5
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
