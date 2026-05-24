@@ -1,22 +1,45 @@
 # Working agreements
 
+## Primary platform: iPad iOS Safari, installed as a PWA
+The app exists to run on an iPad as a home-screen PWA. **iPad WebKit is
+the platform; everything else is convenience.** A change isn't shipped
+until it's been verified under the iPad device profile, even if every
+chromium check is green. Two bugs (invisible back-button SVG, off-centre
+X/✓ row) shipped past the chromium pass because nobody looked at the
+iPad render; don't repeat that.
+
+The mechanical checks live in:
+- `tools/ios-layout-test.mjs` — asserts layout invariants (SVG renders
+  square + visible, action-row centers under the card axis, …) under
+  WebKit + real iPad/iPhone device profiles. Part of `npm test`.
+- `tools/screenshots.mjs` `runIosDeviceScenes` — captures real iOS
+  device-emulated screenshots into `screenshots/webkit-ios/<device>/`.
+  Eyeball *these first*, before the synthetic chromium ones.
+
 ## Workflow
 - Open a PR against `main` at the end of any code-changing task. Concise
   title + short summary. No test plan needed.
 - Develop on the branch the session was started on; never push to `main`.
 - Before pushing: `npm run check` (typecheck + build), `npm test`
-  (Playwright — runs every spec on Chromium AND WebKit). Visuals: also
-  `npm run screenshots` and eyeball the output. Red tests block deploy
-  — fix them even if unrelated.
+  (Playwright — runs every spec on Chromium AND WebKit, and runs
+  `ios-layout-test.mjs` under WebKit). Visuals: also `npm run
+  screenshots` and eyeball the output **starting with
+  `screenshots/webkit-ios/ipad-pro-11-*`**, then phone profiles, then
+  the synthetic chromium pass. Red tests block deploy — fix them even
+  if unrelated.
 - Fresh sandbox? `npm ci` first. After install, `git checkout --
   package-lock.json` if it churned (cross-platform libc metadata) —
   don't commit that drift.
 - `npm test` / `npm run screenshots` need both engines: `npx playwright
   install --with-deps chromium webkit`. If the network can't reach
   Playwright's CDN, say so and skip rather than faking visual sign-off.
+  **Never sign off on visuals without the WebKit + iPad pass** — that
+  is the platform the app actually runs on.
 - Single-engine debugging: `BROWSER=webkit node tools/phonics-test.mjs`
   (or `BROWSER=chromium`); `ONLY=webkit npm run screenshots` skips the
-  chromium pass.
+  chromium pass. To reproduce an iPad-only bug in isolation:
+  `BROWSER=webkit node tools/ios-layout-test.mjs` (assertions) plus
+  `ONLY=webkit npm run screenshots` (captures `webkit-ios/<device>/`).
 
 ## Working style
 
@@ -24,14 +47,23 @@
 - For new UI / gameplay: add a Playwright spec under `tools/` covering
   golden path + at least one edge case (wrong answer, reload mid-flow,
   empty state).
-- Visual changes: run `npm run screenshots` and eyeball at phone
-  landscape / tablet portrait / tablet landscape; consider iPhone Pro
-  Max landscape (932×430) for safe-area edge cases.
-- **Always compare chromium vs webkit output** for the same scene
-  (`screenshots/chromium/` vs `screenshots/webkit/`) and also check
-  `screenshots/webkit-ios/<device>/` for iOS-device-emulated layouts.
-  iPad / iPhone Safari quirks (100dvh, safe-area, flexbox rounding)
-  only show on the WebKit pass.
+- For any change touching shared chrome (back button, mute, topbar,
+  parent-settings overlay) or game-shell layout: extend
+  `tools/ios-layout-test.mjs` with an assertion for the new invariant.
+  Eyeballing alone misses the bugs; a numeric tolerance check doesn't.
+- Visual changes: run `npm run screenshots`. Eyeball **in this order**
+  (the iPad pass is the one that matters):
+  1. `screenshots/webkit-ios/ipad-pro-11-landscape/` and
+     `screenshots/webkit-ios/ipad-pro-11-portrait/` — the primary
+     platform.
+  2. `screenshots/webkit-ios/iphone-*` — secondary iOS targets.
+  3. `screenshots/webkit/` (synthetic landscape, tablet portrait,
+     tablet landscape) and the iPhone Pro Max landscape 932×430 case
+     for safe-area edges.
+  4. `screenshots/chromium/` only as a sanity check for non-iOS users.
+- iPad / iPhone Safari quirks (100dvh, safe-area, flexbox rounding,
+  SVG-in-flex sizing) only show on the WebKit pass. **A clean chromium
+  run is not sign-off.**
 - Tokens are cheap; bug reports are not.
 
 ### Delegate noisy work to subagents

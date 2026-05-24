@@ -598,10 +598,23 @@ body {
 .picker-version:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
 
 .home-btn { color: var(--ink); }
+/* em-based sizing tracks the parent's font-size and avoids the WebKit
+   flex-item SVG sizing bug: percentage widths on an SVG whose intrinsic
+   dimensions aren't pinned by width/height attributes produce a tiny,
+   non-square render on iPad / iOS Safari (the button looks empty). */
 .home-btn > svg {
-  width: 55%;
-  height: 55%;
+  width: 1em;
+  height: 1em;
   display: block;
+}
+/* Apple Color Emoji at the parent's font-size renders a fairly small
+   visible glyph relative to its layout box (lots of padding around the
+   colored speaker). Bump the emoji font-size so the icon fills the
+   button at iPad sizes the same way the SVG chevron does. */
+.mute-btn .icon-sound,
+.mute-btn .icon-muted {
+  font-size: 1.5em;
+  line-height: 1;
 }
 
 /* ---------- parent settings (long-press hazelnut) ---------- */
@@ -822,8 +835,17 @@ body {
 }
 
 .phonics-actions {
-  display: flex;
+  /* Grid with two equal-width slots sized to the LARGER (got) button so
+     the two button CENTERS land symmetric around the row's midline. A
+     plain flex row puts the smaller miss at the left edge and the bigger
+     got at the right, which is mathematically centered but visually
+     skewed — the user reads the pair as off-center under the card. */
+  --phonics-slot: clamp(72px, 9vw, 108px);
+  display: grid;
+  grid-template-columns: var(--phonics-slot) var(--phonics-slot);
   gap: clamp(14px, 2.5vw, 30px);
+  justify-items: center;
+  align-items: center;
 }
 .phonics-action {
   width: clamp(72px, 9vw, 108px);
@@ -862,6 +884,7 @@ body {
   .phonics-hint-emoji { font-size: clamp(28px, 10vh, 52px); }
   .phonics-action { width: clamp(52px, 13vh, 82px); height: clamp(52px, 13vh, 82px); font-size: clamp(28px, 7vh, 48px); }
   .phonics-miss { width: clamp(40px, 9vh, 56px); height: clamp(40px, 9vh, 56px); font-size: clamp(20px, 5vh, 32px); }
+  .phonics-actions { --phonics-slot: clamp(52px, 13vh, 82px); }
   .phonics-play { gap: clamp(8px, 1.8vh, 20px); }
   .phonics-topbar { gap: clamp(8px, 1vw, 12px); }
 }
@@ -874,6 +897,7 @@ body {
   .phonics-card { padding: clamp(28px, 5vw, 56px) clamp(36px, 8vw, 96px); }
   .phonics-action { width: clamp(96px, 12vw, 140px); height: clamp(96px, 12vw, 140px); font-size: clamp(48px, 7vw, 80px); }
   .phonics-miss { width: clamp(68px, 8vw, 96px); height: clamp(68px, 8vw, 96px); font-size: clamp(32px, 4vw, 48px); }
+  .phonics-actions { --phonics-slot: clamp(96px, 12vw, 140px); }
 }
 
 /* ---------- phonics: rainbow-done scene ----------
