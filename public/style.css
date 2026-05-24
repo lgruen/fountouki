@@ -598,22 +598,43 @@ body {
 .picker-version:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
 
 .home-btn { color: var(--ink); }
-/* em-based sizing tracks the parent's font-size and avoids the WebKit
-   flex-item SVG sizing bug: percentage widths on an SVG whose intrinsic
-   dimensions aren't pinned by width/height attributes produce a tiny,
-   non-square render on iPad / iOS Safari (the button looks empty). */
-.home-btn > svg {
-  width: 1em;
-  height: 1em;
+/* CSS-drawn back chevron: small square with left+bottom borders, rotated
+   45° to read as `<`. Inline SVG sized via percent / em / explicit
+   attributes rendered as an empty button on the maintainer's iPad
+   (iOS Safari's flex-item SVG sizing path is busted in ways I couldn't
+   work around). Pure CSS borders sidestep every SVG quirk — no replaced
+   element, no intrinsic-size fallback, no font-size resolution on a
+   foreign element. Explicit pixel sizes (no percent / em) so the
+   chevron stays visible even if the font-size cascade breaks. The
+   translate nudges the rotated square so its visual midpoint lands at
+   the button center (a plain rotated square has its mass to the
+   lower-right of its layout box). */
+.home-btn::before {
+  content: "";
   display: block;
+  width: 12px;
+  height: 12px;
+  border-left: 3px solid currentColor;
+  border-bottom: 3px solid currentColor;
+  border-bottom-left-radius: 2px;
+  transform: rotate(45deg) translate(12%, -12%);
+}
+@media (min-width: 540px) {
+  .home-btn::before {
+    width: 14px;
+    height: 14px;
+    border-left-width: 3px;
+    border-bottom-width: 3px;
+  }
 }
 /* Apple Color Emoji at the parent's font-size renders a fairly small
    visible glyph relative to its layout box (lots of padding around the
-   colored speaker). Bump the emoji font-size so the icon fills the
-   button at iPad sizes the same way the SVG chevron does. */
+   colored speaker). Explicit pixel font-sizes (no em — same iOS Safari
+   resolution edge case the SVG hit) so the speaker reliably fills the
+   button at iPad sizes. */
 .mute-btn .icon-sound,
 .mute-btn .icon-muted {
-  font-size: 1.5em;
+  font-size: clamp(32px, 3.8vw, 40px);
   line-height: 1;
 }
 
