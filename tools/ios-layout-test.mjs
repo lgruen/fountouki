@@ -182,6 +182,53 @@ for (const p of PROFILES) {
   // miss must be left of got (visual order matters for muscle memory).
   check(missCenter < gotCenter, `miss left of got`);
 
+  // The ✗ / ✓ marks themselves are CSS-drawn pseudo-elements. Assert
+  // their visible mass sits within ~2px of each button's own centre —
+  // the iPad showed the unicode glyphs noticeably left-biased inside
+  // the round buttons (font-bearing asymmetry), which this catches.
+  // Pseudo-elements don't appear in getBoundingClientRect, so we read
+  // their resolved top/left (px values resolved from the declared 50%)
+  // and the button's own size, then assert the pseudo's top-left lands
+  // at the button's midpoint. Combined with `transform: translate(-50%,
+  // -50%)` in CSS, that pins the pseudo's centre to the button centre
+  // by construction — no glyph metrics involved.
+  const markCenters = await page.evaluate(() => {
+    function read(sel, which) {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const cs = window.getComputedStyle(el, which);
+      return {
+        position: cs.position,
+        topPx: parseFloat(cs.top),
+        leftPx: parseFloat(cs.left),
+        content: cs.content,
+        btnW: r.width,
+        btnH: r.height,
+      };
+    }
+    return {
+      missBefore: read('.phonics-miss', '::before'),
+      missAfter:  read('.phonics-miss', '::after'),
+      gotBefore:  read('.phonics-got',  '::before'),
+    };
+  });
+
+  for (const [name, info] of Object.entries(markCenters)) {
+    if (!info) continue;
+    check(info.position === 'absolute', `${name} absolutely positioned`);
+    check(info.content !== 'none' && info.content !== 'normal',
+      `${name} has rendered content`);
+    const expectedTop = info.btnH / 2;
+    const expectedLeft = info.btnW / 2;
+    const dTop = Math.abs(info.topPx - expectedTop);
+    const dLeft = Math.abs(info.leftPx - expectedLeft);
+    check(dTop < 1,
+      `${name} top anchored at button midline (got ${info.topPx}px, expected ~${expectedTop}px)`);
+    check(dLeft < 1,
+      `${name} left anchored at button midline (got ${info.leftPx}px, expected ~${expectedLeft}px)`);
+  }
+
   await ctx.close();
 }
 
