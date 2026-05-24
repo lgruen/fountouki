@@ -545,6 +545,24 @@ body {
   font-weight: 600;
 }
 
+/* Build stamp — tiny, low-contrast, parked at the bottom edge. Just
+   enough to confirm "yes, I'm on the freshest deploy" without
+   distracting from the cards. */
+.picker-version {
+  position: absolute;
+  bottom: 6px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.5;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
+}
+
 .home-btn { color: var(--ink); }
 .home-btn > svg {
   width: 55%;

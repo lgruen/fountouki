@@ -2,6 +2,7 @@
 
 import type { GameDef } from './games/registry.js';
 import { makeMuteButton } from './shared/chrome.js';
+import { buildId } from './shared/pwa.js';
 
 export function mount(
   container: HTMLElement,
@@ -47,9 +48,35 @@ export function mount(
   }
   view.append(grid);
 
+  // Discreet build stamp at the bottom — quick eyeball check that the
+  // device is actually running the newest deploy. Rendered in the
+  // device's local time so what you see matches "when did I push?".
+  const version = document.createElement('div');
+  version.className = 'picker-version';
+  version.textContent = formatBuildStamp(buildId());
+  view.append(version);
+
   container.append(view);
 
   return () => {
     container.innerHTML = '';
   };
+}
+
+// Build id format: compact UTC ISO "YYYYMMDDTHHMMSS" (see build.mjs).
+// Render as "YYYY-MM-DD HH:mm" in local time. Returns the raw id on
+// any parse failure rather than throwing — diagnostics shouldn't crash
+// the home screen.
+function formatBuildStamp(id: string): string {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(id);
+  if (!m) return id;
+  const [, y, mo, d, h, mi, s] = m;
+  const iso = `${y}-${mo}-${d}T${h}:${mi}:${s}Z`;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return id;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
 }
