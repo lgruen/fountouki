@@ -9,6 +9,11 @@ export function buildId(): string {
 
 let swRegistration: ServiceWorkerRegistration | null = null;
 
+// Throttle for auto-checks (visibility / pageshow). Long-press from the
+// picker bypasses this — parents asking explicitly always go through.
+const AUTO_CHECK_THROTTLE_MS = 30 * 60 * 1000;
+let lastAutoCheckAt = 0;
+
 export function registerServiceWorker(): void {
   if (!('serviceWorker' in navigator)) return;
 
@@ -42,11 +47,47 @@ export function registerServiceWorker(): void {
       .register('./sw.js')
       .then((reg) => {
         swRegistration = reg;
-        void reg.update();
+        // Boot check counts as our "recent" auto-check so we don't
+        // immediately re-fire when the user briefly backgrounds the app.
+        lastAutoCheckAt = Date.now();
+        void reg.update().catch(() => undefined);
       })
       .catch(() => {
         /* offline-only registration failure is fine */
       });
+
+    wireAutoUpdateChecks();
+  });
+}
+
+// Installed PWAs (especially on iOS) tend to resume from background
+// instead of cold-starting, so the boot-time `reg.update()` rarely runs
+// in practice. Hook into the lifecycle events that fire on resume and
+// throttle to once every AUTO_CHECK_THROTTLE_MS so a quick app-switch
+// doesn't hammer the SW. Every path tolerates offline silently:
+// `checkForUpdate` already catches `reg.update()` rejections, and the
+// outer `.catch` is defense in depth against synchronous throws so a
+// failed check can never break the app.
+function wireAutoUpdateChecks(): void {
+  const trigger = () => {
+    const now = Date.now();
+    if (now - lastAutoCheckAt < AUTO_CHECK_THROTTLE_MS) return;
+    lastAutoCheckAt = now;
+    try {
+      void checkForUpdate().catch(() => undefined);
+    } catch {
+      /* never let an update check surface to the UI */
+    }
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') trigger();
+  });
+  // iOS Safari restores standalone PWAs from BFCache in some flows; the
+  // visibilitychange path doesn't always fire then but `pageshow` with
+  // `persisted` does. Plain non-persisted pageshow on first load is
+  // ignored — boot already did its own check.
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) trigger();
   });
 }
 
@@ -65,6 +106,10 @@ export async function checkForUpdate(): Promise<UpdateCheck> {
   if (!('serviceWorker' in navigator)) return { state: 'unsupported' };
   const reg = swRegistration ?? (await navigator.serviceWorker.getRegistration()) ?? null;
   if (!reg) return { state: 'no-registration' };
+  // Any check (manual or auto) resets the auto-check throttle window so
+  // a long-press doesn't immediately get followed by a redundant
+  // visibility-triggered check.
+  lastAutoCheckAt = Date.now();
   try {
     await reg.update();
   } catch {
