@@ -966,23 +966,24 @@ body {
   position: absolute;
   inset: 0;
 }
+/* The single hero plant — "what grew this time?". Bigger than the
+   previous multi-plant version but still smaller than the frog so the
+   frog stays the recurring main character. */
 .phonics-plant {
   position: absolute;
   bottom: 14%;
-  transform: translate(-50%, var(--plant-y, 0)) scale(0);
-  font-size: clamp(40px, 7vw, 84px);
+  transform: translate(-50%, 0) scale(0);
+  font-size: clamp(56px, 10vw, 120px);
   line-height: 1;
   pointer-events: none; /* decor only — frog is the single tappable focal */
-  animation: phonics-plant-sprout 550ms cubic-bezier(0.34, 1.6, 0.64, 1) forwards;
+  animation: phonics-plant-sprout 600ms cubic-bezier(0.34, 1.6, 0.64, 1) forwards;
   animation-delay: var(--sprout-delay, 600ms);
-  /* drop-shadow lifts the plant off the green ground; otherwise small
-     plants (🍓, 🌷) read as dark blobs against the grass. */
-  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.18));
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.22));
 }
 @keyframes phonics-plant-sprout {
-  0%   { transform: translate(-50%, calc(var(--plant-y, 0px) + 30px)) scale(0)    rotate(-8deg); }
-  60%  { transform: translate(-50%, calc(var(--plant-y, 0px) - 8px))  scale(1.18) rotate(4deg); }
-  100% { transform: translate(-50%, var(--plant-y, 0px))              scale(1)    rotate(0deg); }
+  0%   { transform: translate(-50%, 30px) scale(0)    rotate(-10deg); }
+  55%  { transform: translate(-50%, -10px) scale(1.22) rotate(6deg); }
+  100% { transform: translate(-50%, 0)    scale(1)    rotate(0deg); }
 }
 
 .phonics-frog {
@@ -1008,42 +1009,50 @@ body {
   0%, 100% { transform: translate(-50%, 0)     scale(1, 1);     }
   50%      { transform: translate(-50%, -2px)  scale(1.02, 0.98); }
 }
+/* All four reactions are *real jumps* — frog visibly leaves the ground
+   on every tap. Heights are em-scaled so the hop tracks the frog's
+   size on phones vs. tablets (previously fixed pixels made tablet
+   reactions feel like wobbles). Animation durations all sit under the
+   700ms removal timer in onFrogTap; consecutive taps replay cleanly. */
 .phonics-frog.react-hop {
-  animation: phonics-frog-hop 600ms cubic-bezier(0.34, 1.6, 0.64, 1);
+  animation: phonics-frog-hop 650ms cubic-bezier(0.34, 1.6, 0.64, 1);
+}
+.phonics-frog.react-twist {
+  animation: phonics-frog-twist 650ms cubic-bezier(0.34, 1.6, 0.64, 1);
 }
 .phonics-frog.react-big {
   animation: phonics-frog-bighop 700ms cubic-bezier(0.34, 1.6, 0.64, 1);
 }
-.phonics-frog.react-ribbit {
-  animation: phonics-frog-ribbit 600ms ease-in-out;
-}
-.phonics-frog.react-blink {
-  animation: phonics-frog-blink 600ms ease;
+.phonics-frog.react-spin {
+  animation: phonics-frog-spin 700ms cubic-bezier(0.34, 1.6, 0.64, 1);
 }
 @keyframes phonics-frog-hop {
-  0%   { transform: translate(-50%, 0)     scale(1, 1); }
-  20%  { transform: translate(-50%, 0)     scale(1.18, 0.82); }
-  55%  { transform: translate(-50%, -38px) scale(0.92, 1.12); }
-  85%  { transform: translate(-50%, 0)     scale(1.10, 0.92); }
-  100% { transform: translate(-50%, 0)     scale(1, 1); }
-}
-@keyframes phonics-frog-bighop {
-  0%   { transform: translate(-50%, 0)     scale(1, 1)    rotate(0deg); }
-  15%  { transform: translate(-50%, 0)     scale(1.25, 0.78) rotate(0deg); }
-  55%  { transform: translate(-50%, -70px) scale(0.9, 1.16)  rotate(-8deg); }
-  80%  { transform: translate(-50%, -10px) scale(1.05, 0.95) rotate(4deg); }
-  100% { transform: translate(-50%, 0)     scale(1, 1)    rotate(0deg); }
-}
-@keyframes phonics-frog-ribbit {
   0%   { transform: translate(-50%, 0)    scale(1, 1); }
-  40%  { transform: translate(-50%, -4px) scale(1.18, 1.10); }
-  70%  { transform: translate(-50%, -2px) scale(1.10, 1.06); }
+  15%  { transform: translate(-50%, 0)    scale(1.20, 0.80); }
+  50%  { transform: translate(-50%, -1em) scale(0.92, 1.12); }
+  85%  { transform: translate(-50%, 0)    scale(1.10, 0.92); }
   100% { transform: translate(-50%, 0)    scale(1, 1); }
 }
-@keyframes phonics-frog-blink {
-  0%   { transform: translate(-50%, 0)    scale(1, 1)    rotate(0deg); }
-  50%  { transform: translate(-50%, -3px) scale(1.06, 0.94) rotate(-3deg); }
-  100% { transform: translate(-50%, 0)    scale(1, 1)    rotate(0deg); }
+@keyframes phonics-frog-twist {
+  0%   { transform: translate(-50%, 0)      scale(1)         rotate(0deg); }
+  15%  { transform: translate(-50%, 0)      scale(1.18, 0.82) rotate(0deg); }
+  50%  { transform: translate(-50%, -1.1em) scale(0.94, 1.10) rotate(-18deg); }
+  80%  { transform: translate(-50%, 0)      scale(1.06, 0.94) rotate(8deg); }
+  100% { transform: translate(-50%, 0)      scale(1)         rotate(0deg); }
+}
+@keyframes phonics-frog-bighop {
+  0%   { transform: translate(-50%, 0)      scale(1)         rotate(0deg); }
+  12%  { transform: translate(-50%, 0)      scale(1.28, 0.74) rotate(0deg); }
+  50%  { transform: translate(-50%, -1.8em) scale(0.88, 1.18) rotate(-10deg); }
+  85%  { transform: translate(-50%, 0)      scale(1.08, 0.92) rotate(4deg); }
+  100% { transform: translate(-50%, 0)      scale(1)         rotate(0deg); }
+}
+@keyframes phonics-frog-spin {
+  0%   { transform: translate(-50%, 0)      scale(1)         rotate(0deg); }
+  12%  { transform: translate(-50%, 0)      scale(1.22, 0.80) rotate(0deg); }
+  50%  { transform: translate(-50%, -1.5em) scale(0.94, 1.10) rotate(180deg); }
+  85%  { transform: translate(-50%, 0)      scale(1.08, 0.92) rotate(340deg); }
+  100% { transform: translate(-50%, 0)      scale(1)         rotate(360deg); }
 }
 .phonics-frog:active { transform: translate(-50%, 4px) scale(0.96, 0.94); }
 
@@ -1116,7 +1125,10 @@ body {
      keeps arc ends visibly above the horizon. */
   .phonics-done-arcs   { bottom: 41%; width: clamp(320px, max(86vw, 56vh), 1100px); }
   .phonics-done-sun    { top: 6%; left: 6%; width: clamp(90px, 18vw, 180px); height: clamp(90px, 18vw, 180px); }
-  .phonics-plant       { bottom: 62%; font-size: clamp(48px, 9vw, 110px); }
+  /* Pull frog + plant up to the horizon so they don't hug the bottom
+     of an enormous green strip. Plant size uses the base clamp — the
+     base already grows on portrait via the vw component. */
+  .phonics-plant       { bottom: 62%; }
   .phonics-frog        { bottom: 56%; font-size: clamp(72px, 14vw, 180px); }
 }
 
