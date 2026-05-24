@@ -147,7 +147,9 @@ body {
   40%  { transform: scale(1.8); box-shadow: 0 0 0 6px rgba(0,0,0,0.05); }
   100% { transform: scale(1); }
 }
-.topbar > #level-pips { margin-right: auto; }
+/* Push mute to the right edge of the patterns topbar — same visual
+   shape as phonics (home on the left, mute on the right). */
+.topbar > .level-pips { margin-right: auto; }
 
 .icon-btn {
   border: 0;
@@ -277,26 +279,6 @@ body {
   z-index: 5;
 }
 
-.settings-panel {
-  position: fixed;
-  inset: 0;
-  background: rgba(43, 44, 52, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10;
-  padding: 16px;
-}
-.settings-panel[hidden] { display: none; }
-.settings-card {
-  background: var(--card);
-  border-radius: var(--radius);
-  padding: 18px;
-  width: 100%;
-  max-width: 420px;
-  box-shadow: var(--shadow);
-}
-.settings-card h2 { margin: 0 0 12px; font-size: 20px; }
 .setting-row {
   display: flex;
   flex-direction: column;
@@ -336,8 +318,6 @@ body {
 }
 .primary { background: var(--accent); color: white; }
 .secondary { background: transparent; color: var(--muted); }
-.footer-note { font-size: 12px; color: var(--muted); margin: 12px 0 0; text-align: center; }
-.footer-note a { color: var(--muted); }
 
 /* Rotate-to-landscape overlay. Hidden by default; shown only when the
    viewport is in portrait orientation AND small enough to be a phone
@@ -595,7 +575,21 @@ body {
   box-shadow: var(--shadow);
 }
 .parent-settings-card h2 { margin: 0 0 12px; font-size: 20px; }
-.parent-settings-card .setting-row input {
+/* Phone landscape — the panel hosts game-specific sections now (theme,
+   mode, hint, …) so compact spacing keeps the Done button on-screen
+   without forcing a scroll. */
+@media (orientation: landscape) and (max-height: 540px) {
+  .parent-settings-card { padding: 14px 16px; }
+  .parent-settings-card h2 { margin: 0 0 8px; font-size: 17px; }
+  .parent-section { margin-bottom: 10px; }
+  .parent-section h3 { margin: 0 0 6px; font-size: 14px; }
+  .parent-settings-card .setting-row { margin-bottom: 8px; gap: 4px; }
+  .parent-settings-card .setting-row select { padding: 7px 10px; font-size: 14px; }
+  .parent-settings-card .hint { font-size: 11px; }
+  .parent-token-actions { margin-top: 6px; }
+}
+/* Text inputs only — leaving checkbox/radio at their natural size. */
+.parent-settings-card .setting-row input[type='text'] {
   font: inherit;
   font-size: 15px;
   padding: 10px 12px;

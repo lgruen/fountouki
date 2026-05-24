@@ -22,6 +22,13 @@ Other scripts: `build`, `typecheck`, `check` (typecheck + build),
 
 Future game wishlist in `docs/IDEAS.md`.
 
+## Parent menu
+
+Long-press the in-game ← (~500ms) to open the parent settings panel:
+sync token + endpoint always, plus any per-game knobs (theme, mode,
+mastery view, …) the current game contributes. Kids tap ← briefly →
+home; parents hold ← → settings. No visible gear in the topbar.
+
 ## Audience
 
 Built for two specific preschoolers on their devices — public repo,

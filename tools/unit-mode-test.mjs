@@ -66,9 +66,13 @@ page.on('pageerror', (err) => console.error('PAGE ERROR:', err.message));
 console.log('1) load and switch to unit mode');
 await page.goto(`${url}#/patterns`);
 await page.waitForSelector('.cell');
-await page.click('.settings-btn');
+// Patterns settings live behind a long-press on the in-game ← (same
+// as phonics); the ⚙ button no longer exists.
+await page.locator('.home-btn').click({ delay: 700 });
+await page.waitForSelector('.parent-settings-card');
 await page.selectOption('#ptn-mode', 'unit');
-await page.click('.ptn-close');
+await page.click('.parent-close');
+await page.waitForSelector('.parent-settings-panel', { state: 'detached' });
 await page.waitForSelector('.cell.selectable');
 
 const period = await page.evaluate(() => window.__patterns?.template?.length);

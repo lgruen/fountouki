@@ -13,6 +13,8 @@ import {
   validate,
 } from './srs.js';
 import { makeHomeButton, makeMuteButton } from '../../shared/chrome.js';
+import { openParentSettings } from '../../shared/parent-settings.js';
+import { buildPhonicsMasterySection } from './mastery-section.js';
 import { load, save } from '../../shared/storage.js';
 import { sync } from '../../shared/sync.js';
 import { burst } from '../../shared/confetti.js';
@@ -111,7 +113,10 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
 
   const topbar = document.createElement('header');
   topbar.className = 'topbar phonics-topbar';
-  const home = makeHomeButton({ onHome: opts.onHome });
+  const home = makeHomeButton({
+    onHome: opts.onHome,
+    onLongPress: () => openParentSettings({ section: buildPhonicsMasterySection() }),
+  });
   const topSpacer = document.createElement('div');
   topSpacer.className = 'phonics-topbar-spacer';
   const mute = makeMuteButton();
