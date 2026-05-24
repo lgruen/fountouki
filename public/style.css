@@ -463,7 +463,27 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(clamp(120px, 22vw, 220px), 1fr));
   gap: clamp(14px, 2vw, 28px);
   width: 100%;
-  max-width: 720px;
+  /* Cap that scales with the surface: tight on phones (cards stay
+     thumb-reachable), generous on iPad portrait where the previous
+     720px hard cap left the cards floating in a sea of empty
+     background. */
+  max-width: clamp(560px, 88vw, 960px);
+}
+/* Tablet portrait: bump card padding and icon sizes so the cards
+   actually fill the surface they're given instead of looking like
+   they were designed for a phone. */
+@media (orientation: portrait) and (min-width: 540px) {
+  .picker-card { padding: clamp(28px, 4.5vw, 48px); gap: clamp(12px, 2.2vh, 22px); }
+  .picker-icon { font-size: clamp(72px, 11vw, 120px); }
+  .picker-icon-cell { font-size: clamp(40px, 7vw, 72px); }
+  .picker-icon-cell.picker-icon-slot {
+    font-size: clamp(32px, 5.5vw, 56px);
+    width: clamp(50px, 7.5vw, 76px);
+    height: clamp(50px, 7.5vw, 76px);
+  }
+  .picker-phonics-rainbow { font-size: clamp(64px, 10vw, 108px); }
+  .picker-phonics-frog { font-size: clamp(42px, 7vw, 72px); }
+  .picker-label { font-size: clamp(16px, 2.2vw, 22px); }
 }
 .picker-card {
   border: 0;
@@ -641,6 +661,12 @@ body {
 .phonics-arcs {
   display: block;
   width: clamp(220px, 44vw, 360px);
+  /* Explicit aspect-ratio (matches the SVG viewBox 240×80) belt-and-
+     braces over `height: auto`. Some older WebKit versions ignored the
+     viewBox-implied ratio on an SVG sized via CSS width alone, and
+     defaulted to a 300×150 fallback height — which on phonics' iPad
+     portrait broke the play-area centering. */
+  aspect-ratio: 240 / 80;
   height: auto;
   margin-bottom: clamp(4px, 1vh, 12px);
   overflow: visible;
@@ -697,6 +723,12 @@ body {
   gap: clamp(18px, 3vh, 36px);
   margin-top: auto;
   margin-bottom: auto;
+}
+/* The rainbow lives in .phonics-play (sibling to .phonics-card) so
+   unfilled arcs don't reserve flow space inside the card. Close the
+   gap between rainbow and card so they still read as one unit. */
+.phonics-play > .phonics-arcs {
+  margin-bottom: clamp(-32px, -2.5vh, -10px);
 }
 .phonics-card {
   background: var(--card);
