@@ -567,7 +567,9 @@ body {
 
 /* Build stamp — tiny, low-contrast, parked at the bottom edge. Just
    enough to confirm "yes, I'm on the freshest deploy" without
-   distracting from the cards. */
+   distracting from the cards. Long-press triggers a service-worker
+   update check (see picker.ts); the button chrome is stripped so it
+   still reads as a passive label. */
 .picker-version {
   position: absolute;
   bottom: 6px;
@@ -579,9 +581,21 @@ body {
   opacity: 0.5;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
-  pointer-events: none;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+  cursor: default;
+  appearance: none;
+  -webkit-appearance: none;
 }
+.picker-version:focus { outline: none; }
+.picker-version:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
 
 .home-btn { color: var(--ink); }
 .home-btn > svg {

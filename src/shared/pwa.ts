@@ -7,6 +7,8 @@ export function buildId(): string {
   return __BUILD_ID__;
 }
 
+let swRegistration: ServiceWorkerRegistration | null = null;
+
 export function registerServiceWorker(): void {
   if (!('serviceWorker' in navigator)) return;
 
@@ -39,12 +41,41 @@ export function registerServiceWorker(): void {
     void navigator.serviceWorker
       .register('./sw.js')
       .then((reg) => {
+        swRegistration = reg;
         void reg.update();
       })
       .catch(() => {
         /* offline-only registration failure is fine */
       });
   });
+}
+
+export type UpdateCheck =
+  | { state: 'unsupported' }
+  | { state: 'no-registration' }
+  | { state: 'error' }
+  | { state: 'current' }
+  | { state: 'updating' };
+
+// Force a fresh check against the server for a new service worker. Resolves
+// once `registration.update()` settles; if the SW byte-diffs, the install →
+// activate → `controllerchange` flow already wired up in
+// `registerServiceWorker` will reload the page on its own.
+export async function checkForUpdate(): Promise<UpdateCheck> {
+  if (!('serviceWorker' in navigator)) return { state: 'unsupported' };
+  const reg = swRegistration ?? (await navigator.serviceWorker.getRegistration()) ?? null;
+  if (!reg) return { state: 'no-registration' };
+  try {
+    await reg.update();
+  } catch {
+    return { state: 'error' };
+  }
+  // After update(): `installing` is set if a byte-diff was found and the new
+  // worker is downloading/installing; `waiting` is set if one was already
+  // installed but parked behind the active SW. Either means an update is in
+  // flight and our controllerchange listener will reload shortly.
+  if (reg.installing || reg.waiting) return { state: 'updating' };
+  return { state: 'current' };
 }
 
 export function tryLockLandscape(): void {
