@@ -9,7 +9,7 @@ import { mkdir } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { launchChromium } from './_chrome.mjs';
+import { launchBrowser, BROWSER } from './_browser.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -45,7 +45,8 @@ await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
 const url = `http://127.0.0.1:${port}/`;
 
-const browser = await launchChromium();
+console.log(`[playtest] browser=${BROWSER}`);
+const browser = await launchBrowser();
 const ctx = await browser.newContext({
   // Landscape: that's the play orientation; a rotate-me overlay hides
   // the game in portrait.

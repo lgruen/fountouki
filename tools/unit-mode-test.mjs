@@ -14,7 +14,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import assert from 'node:assert/strict';
-import { launchChromium } from './_chrome.mjs';
+import { launchBrowser, BROWSER } from './_browser.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -49,7 +49,8 @@ await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
 const url = `http://127.0.0.1:${port}/`;
 
-const browser = await launchChromium();
+console.log(`[unit-mode-test] browser=${BROWSER}`);
+const browser = await launchBrowser();
 const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 1 });
 await ctx.addInitScript(() => {
   let s = 9001;

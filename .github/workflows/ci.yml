@@ -15,7 +15,17 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+      # Render the full screenshot matrix (chromium + webkit + iOS device
+      # profiles) and upload as an artifact so iOS-specific layout
+      # regressions can be eyeballed on the PR before merge.
+      - run: npm run screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: screenshots/
+          retention-days: 14

@@ -5,14 +5,18 @@
   title + short summary. No test plan needed.
 - Develop on the branch the session was started on; never push to `main`.
 - Before pushing: `npm run check` (typecheck + build), `npm test`
-  (Playwright). Visuals: also `npm run screenshots` and eyeball the
-  output. Red tests block deploy — fix them even if unrelated.
+  (Playwright — runs every spec on Chromium AND WebKit). Visuals: also
+  `npm run screenshots` and eyeball the output. Red tests block deploy
+  — fix them even if unrelated.
 - Fresh sandbox? `npm ci` first. After install, `git checkout --
   package-lock.json` if it churned (cross-platform libc metadata) —
   don't commit that drift.
-- `npm run screenshots` needs Chromium. If `npx playwright install
-  chromium` can't reach the network, say so and skip rather than
-  faking visual sign-off.
+- `npm test` / `npm run screenshots` need both engines: `npx playwright
+  install --with-deps chromium webkit`. If the network can't reach
+  Playwright's CDN, say so and skip rather than faking visual sign-off.
+- Single-engine debugging: `BROWSER=webkit node tools/phonics-test.mjs`
+  (or `BROWSER=chromium`); `ONLY=webkit npm run screenshots` skips the
+  chromium pass.
 
 ## Working style
 
@@ -23,6 +27,11 @@
 - Visual changes: run `npm run screenshots` and eyeball at phone
   landscape / tablet portrait / tablet landscape; consider iPhone Pro
   Max landscape (932×430) for safe-area edge cases.
+- **Always compare chromium vs webkit output** for the same scene
+  (`screenshots/chromium/` vs `screenshots/webkit/`) and also check
+  `screenshots/webkit-ios/<device>/` for iOS-device-emulated layouts.
+  iPad / iPhone Safari quirks (100dvh, safe-area, flexbox rounding)
+  only show on the WebKit pass.
 - Tokens are cheap; bug reports are not.
 
 ### Delegate noisy work to subagents
@@ -134,6 +143,11 @@
 
 ## PR descriptions
 - For visual / UI work, attach a couple of representative screenshots
-  to the PR body (under `## Screenshots`). Use `gh pr create` with
-  `--body` referencing files from `screenshots/`, or upload via the GH
-  web UI after the PR is open.
+  to the PR body (under `## Screenshots`). Prefer pairs (chromium next
+  to webkit at the same scene) so iOS regressions are obvious. Files
+  live under `screenshots/<engine>/` (or `screenshots/webkit-ios/<device>/`).
+  Use `gh pr create` with `--body` referencing those paths, or upload
+  via the GH web UI after the PR is open.
+- CI uploads the full `screenshots/` tree as an artifact on every PR
+  build (the `screenshots` artifact). Download from the CI run page if
+  you didn't generate them locally.

@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { launchChromium } from './_chrome.mjs';
+import { launchBrowser, BROWSER } from './_browser.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -46,7 +46,8 @@ await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
 const url = `http://127.0.0.1:${port}/`;
 
-const browser = await launchChromium();
+console.log(`[sw-offline-test] browser=${BROWSER}`);
+const browser = await launchBrowser();
 // Landscape viewport — the rotate-to-landscape overlay hides the game
 // in portrait orientation.
 const ctx = await browser.newContext({ viewport: { width: 844, height: 390 } });
@@ -92,15 +93,24 @@ for (const [name, keys] of Object.entries(cached)) {
   for (const k of keys) console.log(`       ${k}`);
 }
 
-console.log('2) go offline, reload, expect game to still work...');
-await ctx.setOffline(true);
-// Reload without ?sw=force — already registered — but keep the hash so
-// patterns mounts directly and exercises the bundled JS, not just the picker.
-await page.goto(`${url}#/patterns`, { waitUntil: 'load' });
-await page.waitForSelector('.cell', { timeout: 5000 });
-const cellCount = await page.locator('.cell').count();
-const choiceCount = await page.locator('.choice').count();
-console.log(`   offline render OK — ${cellCount} cells, ${choiceCount} choices ✓`);
+// Playwright's WebKit + setOffline + navigation throws "WebKit
+// encountered an internal error". Service-worker plumbing is largely
+// engine-independent at this layer, so the chromium pass is enough —
+// just skip the offline-reload step on WebKit instead of asserting a
+// browser-bug.
+if (BROWSER === 'webkit') {
+  console.log('2) skip offline reload check on WebKit (playwright limitation)');
+} else {
+  console.log('2) go offline, reload, expect game to still work...');
+  await ctx.setOffline(true);
+  // Reload without ?sw=force — already registered — but keep the hash so
+  // patterns mounts directly and exercises the bundled JS, not just the picker.
+  await page.goto(`${url}#/patterns`, { waitUntil: 'load' });
+  await page.waitForSelector('.cell', { timeout: 5000 });
+  const cellCount = await page.locator('.cell').count();
+  const choiceCount = await page.locator('.choice').count();
+  console.log(`   offline render OK — ${cellCount} cells, ${choiceCount} choices ✓`);
+}
 
 await browser.close();
 server.close();
