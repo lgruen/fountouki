@@ -128,10 +128,12 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
   const play = document.createElement('div');
   play.className = 'phonics-play';
 
-  const card = document.createElement('div');
-  card.className = 'phonics-card';
-
-  // Rainbow arcs (SVG) — visual hero, grow from inner-out as stars accumulate.
+  // Rainbow arcs (SVG) — visual hero, grow from inner-out as stars
+  // accumulate. Sits ABOVE the card (sibling, not child) so unfilled
+  // arcs don't reserve flow space inside the card and push the letter
+  // off-center — a problem most visible on iPad-sized viewports where
+  // the card grows but the letter would otherwise hang in the lower
+  // half waiting for a rainbow that hasn't been earned yet.
   const arcSvg = document.createElementNS(SVG_NS, 'svg');
   arcSvg.setAttribute('viewBox', '0 0 240 80');
   arcSvg.setAttribute('class', 'phonics-arcs');
@@ -147,7 +149,10 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     arcSvg.append(path);
     arcPaths.push(path);
   }
-  card.append(arcSvg);
+  play.append(arcSvg);
+
+  const card = document.createElement('div');
+  card.className = 'phonics-card';
 
   const letterEl = document.createElement('div');
   letterEl.className = 'phonics-letter';
