@@ -40,6 +40,22 @@ function renderPatternsIcon(container: HTMLElement): void {
   container.append(seq);
 }
 
+function renderPhonicsIcon(container: HTMLElement): void {
+  // Preview the reward scene — rainbow above, frog peeking below — so the
+  // picker tile teases what's waiting at the end of a session. Same
+  // characters the kid meets on the rainbow splash; sets expectation.
+  const scene = document.createElement('div');
+  scene.className = 'picker-icon-phonics';
+  const rainbow = document.createElement('span');
+  rainbow.className = 'picker-phonics-rainbow';
+  rainbow.textContent = '🌈';
+  const frog = document.createElement('span');
+  frog.className = 'picker-phonics-frog';
+  frog.textContent = '🐸';
+  scene.append(rainbow, frog);
+  container.append(scene);
+}
+
 export const GAMES: GameDef[] = [
   {
     id: 'patterns',
@@ -48,5 +64,12 @@ export const GAMES: GameDef[] = [
     renderIcon: renderPatternsIcon,
     mount: mountPatterns,
   },
-  { id: 'phonics', label: 'phonics', emoji: '🌈', mount: mountPhonics },
+  {
+    id: 'phonics',
+    label: 'phonics',
+    // `emoji` is the aria/fallback only — renderIcon owns the visual.
+    emoji: '🌈🐸',
+    renderIcon: renderPhonicsIcon,
+    mount: mountPhonics,
+  },
 ];

@@ -115,14 +115,46 @@ await page.waitForSelector('.phonics-done:not([hidden])', { timeout: 5000 });
 const stars7 = await page.evaluate(() => window.__phonics?.stars);
 assert.equal(stars7, 7, 'session done at 7 stars');
 
-console.log('7) play again → stars reset, card visible');
+console.log('6b) rainbow-done scene: frog + garden + no mastery grid');
+// Frog mascot is present and tappable.
+const frogVisible = await page.locator('.phonics-frog').isVisible();
+assert(frogVisible, 'frog mascot rendered in rainbow-done scene');
+// Plants render (procedural garden — 5 or 6 plants per session).
+const plantCount = await page.locator('.phonics-plant').count();
+assert(plantCount >= 5 && plantCount <= 6, `expected 5-6 plants, got ${plantCount}`);
+// Mastery dots removed from the modal (parent settings still has them).
+const masteryInModal = await page.locator('.phonics-done .mastery-dot').count();
+assert.equal(masteryInModal, 0, 'mastery dots no longer rendered inside rainbow-done');
+// Big done-scene rainbow renders 7 arcs.
+const doneArcs = await page.locator('.phonics-done-arcs .phonics-arc-path').count();
+assert.equal(doneArcs, 7, 'done-scene rainbow has 7 arcs');
+
+console.log('6c) tap frog → reaction class added, counter increments');
+const beforeFrogTaps = await page.evaluate(() => window.__phonics?.frogTaps ?? 0);
+// Force-click bypasses Playwright's stability wait (the frog's perpetual
+// idle animation otherwise blocks it).
+await page.click('.phonics-frog', { force: true });
+await page.waitForFunction(
+  (before) => (window.__phonics?.frogTaps ?? 0) > before,
+  beforeFrogTaps,
+);
+const afterFrogTap = await page.evaluate(() => window.__phonics?.frogTaps);
+assert.equal(afterFrogTap, beforeFrogTaps + 1, 'frog tap counter incremented');
+const reactionClass = await page.evaluate(() => {
+  const f = document.querySelector('.phonics-frog');
+  return [...(f?.classList ?? [])].some((c) => c.startsWith('react-'));
+});
+assert(reactionClass, 'frog tap added a react-* class');
+
+console.log('7) play again → stars reset, card visible, frog taps reset');
 await page.click('.phonics-done-again');
 await page.waitForSelector('.phonics-done', { state: 'hidden' });
 const afterAgain = await page.evaluate(() => window.__phonics);
 assert.equal(afterAgain.stars, 0, 'play again resets stars');
+assert.equal(afterAgain.frogTaps, 0, 'play again resets frog tap counter');
 const letterAgain = await page.locator('.phonics-letter').textContent();
 assert(letterAgain && /^[a-z]$/.test(letterAgain), 'card visible again');
 
 await browser.close();
 server.close();
-console.log('\nOK — phonics card flow, miss-reveal, persistence, session-done.');
+console.log('\nOK — phonics card flow, miss-reveal, persistence, session-done, rainbow-done scene.');

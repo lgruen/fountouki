@@ -99,3 +99,15 @@ export function playLevelUp(): void {
 export function playTap(): void {
   playNotes([{ freq: 660, start: 0, dur: 0.05, type: 'sine', gain: 0.08 }]);
 }
+
+/** Two-syllable "ri-bbit" for the phonics rainbow-done frog mascot.
+ *  Low triangle waves with a rapid up-bend per syllable. Kept at or
+ *  below the level-up ceiling so the modal doesn't outshine in-game wins. */
+export function playFrog(): void {
+  playNotes([
+    { freq: 220, start: 0.0,  dur: 0.09, type: 'triangle', gain: 0.16 },
+    { freq: 300, start: 0.05, dur: 0.08, type: 'triangle', gain: 0.14 },
+    { freq: 200, start: 0.18, dur: 0.10, type: 'triangle', gain: 0.16 },
+    { freq: 280, start: 0.22, dur: 0.09, type: 'triangle', gain: 0.14 },
+  ]);
+}

@@ -527,6 +527,38 @@ body {
   justify-content: center;
   font-weight: 900;
 }
+
+/* Phonics picker tile: rainbow above, frog peeking below — same
+   characters as the reward scene so the tile teases what's waiting at
+   the end of a session. Vertical stack with the frog tucked under the
+   rainbow so they read as a single scene, not two glyphs. */
+.picker-icon-phonics {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+}
+.picker-phonics-rainbow {
+  font-size: clamp(44px, 7.5vw, 78px);
+  line-height: 1;
+  animation: picker-phonics-rainbow-sway 4s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+.picker-phonics-frog {
+  font-size: clamp(28px, 5vw, 50px);
+  line-height: 1;
+  margin-top: clamp(-10px, -1.2vw, -6px);
+  animation: picker-phonics-frog-bob 2.4s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+@keyframes picker-phonics-rainbow-sway {
+  0%, 100% { transform: rotate(-2deg); }
+  50%      { transform: rotate(2deg); }
+}
+@keyframes picker-phonics-frog-bob {
+  0%, 100% { transform: translateY(0)    scale(1, 1); }
+  50%      { transform: translateY(-3px) scale(1.04, 0.96); }
+}
 .picker-label {
   font-size: clamp(14px, 1.6vw, 18px);
   color: var(--muted);
@@ -783,79 +815,312 @@ body {
   .phonics-miss { width: clamp(68px, 8vw, 96px); height: clamp(68px, 8vw, 96px); font-size: clamp(32px, 4vw, 48px); }
 }
 
+/* ---------- phonics: rainbow-done scene ----------
+   Full-viewport scene (not a modal card): soft sky above, green ground
+   below, big rainbow drawn across the middle, frog mascot on the ground
+   among a randomly-picked little garden. Rainbow draws → rain falls →
+   plants sprout, frog reacts. Buttons sit in bottom corners and are
+   visible from t=0 so a kid in a rush can leave anytime. */
 .phonics-done {
   position: fixed;
   inset: 0;
-  background: linear-gradient(135deg, #ef476f, #ff8c42, #ffd166, #06d6a0, #118ab2, #9b5de5);
-  background-size: 300% 300%;
-  animation: rainbow-shift 6s ease infinite;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 20;
-  padding: 16px;
+  overflow: hidden;
+  background: linear-gradient(to bottom, #cdefff 0%, #e6f6ff 55%, #fff7d6 100%);
 }
 .phonics-done[hidden] { display: none; }
-.phonics-done-card {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: var(--radius);
-  padding: 28px clamp(28px, 6vw, 56px);
-  text-align: center;
-  box-shadow: var(--shadow);
+
+.phonics-done-sky {
+  position: absolute;
+  inset: 0 0 28% 0;
+  pointer-events: none;
 }
-.phonics-done-card h2 {
-  margin: 8px 0 18px;
-  font-size: clamp(24px, 3vw, 32px);
+.phonics-done-sun {
+  position: absolute;
+  top: 8%;
+  left: 8%;
+  width: clamp(70px, 12vw, 130px);
+  height: clamp(70px, 12vw, 130px);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff3a8 0%, #ffd76b 55%, #ffb347 100%);
+  box-shadow: 0 0 28px rgba(255, 196, 73, 0.55);
+  animation: phonics-sun-pulse 4s ease-in-out infinite;
 }
-.phonics-done-rainbow {
-  font-size: clamp(72px, 11vw, 110px);
-  line-height: 1;
-  animation: rainbow-bounce 1.6s ease-in-out infinite;
+@keyframes phonics-sun-pulse {
+  0%, 100% { transform: scale(1);    box-shadow: 0 0 22px rgba(255, 196, 73, 0.45); }
+  50%      { transform: scale(1.06); box-shadow: 0 0 36px rgba(255, 196, 73, 0.65); }
 }
-@keyframes rainbow-bounce {
-  0%, 100% { transform: translateY(0) rotate(-2deg); }
-  50%      { transform: translateY(-8px) rotate(2deg); }
+.phonics-done-cloud {
+  position: absolute;
+  width: clamp(90px, 13vw, 160px);
+  height: clamp(32px, 5vw, 56px);
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 999px;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.06));
+  animation: phonics-cloud-drift 42s linear infinite;
 }
-.phonics-done-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
+/* Two puffs per cloud — one upper-left, one upper-right — so each cloud
+   reads as a chubby cumulus, not a capsule. Pixel offsets, not %. */
+.phonics-done-cloud::before,
+.phonics-done-cloud::after {
+  content: '';
+  position: absolute;
+  background: inherit;
+  border-radius: 50%;
 }
-.phonics-done-actions button {
-  font: inherit;
-  font-weight: 700;
-  padding: 12px 18px;
-  border-radius: 12px;
-  border: 0;
-  cursor: pointer;
+.phonics-done-cloud::before {
+  width: 60%;
+  height: 130%;
+  top: -55%;
+  left: 10%;
 }
-.phonics-done-actions .secondary {
-  background: var(--card);
-  color: var(--ink);
-  box-shadow: inset 0 0 0 2px #e6e1d3;
+.phonics-done-cloud::after {
+  width: 48%;
+  height: 100%;
+  top: -38%;
+  left: 48%;
+}
+/* Cloud positions: stagger top % across the visible sky and start each
+   at a *different negative left* so they're already mid-drift across
+   the viewport when the scene opens (rather than all entering as a
+   stack from the left edge at t=0). */
+.phonics-done-cloud.cloud-a { top: 12%; left: 40%;  animation-duration: 46s; animation-delay: -10s; }
+.phonics-done-cloud.cloud-b { top: 38%; left: 18%;  animation-duration: 62s; animation-delay: -28s; transform: scale(0.82); }
+.phonics-done-cloud.cloud-c { top: 4%;  left: 72%;  animation-duration: 78s; animation-delay: -54s; transform: scale(1.1); }
+.phonics-done-cloud.cloud-d { top: 52%; left: 64%;  animation-duration: 54s; animation-delay: -38s; transform: scale(0.72); }
+.phonics-done-cloud.cloud-e { top: 22%; left: -8%;  animation-duration: 86s; animation-delay: -6s;  transform: scale(0.95); }
+@keyframes phonics-cloud-drift {
+  from { transform: translateX(0); }
+  to   { transform: translateX(130vw); }
 }
 
-/* Per-letter mastery dots on the rainbow-done splash. Bigger than the
-   parent-panel dots — this is a celebratory display, not a status bar. */
-.phonics-mastery {
-  display: grid;
-  grid-template-columns: repeat(13, 1fr);
-  gap: 6px;
-  justify-items: center;
-  margin: 8px auto 18px;
-  max-width: 360px;
-  width: 100%;
+/* Big done-scene rainbow. Same arc geometry as the in-game card but
+   blown up to fill the scene. `max(80vw, 60vh)` makes the rainbow grow
+   on tall (portrait) viewports so it doesn't look anaemic above a huge
+   empty sky. The SVG's viewBox is 240×80 with arcs ending at y=70, so
+   ~12.5% of the SVG height below the lowest arc end is empty padding —
+   `bottom: 26%` puts the arc chord just above the 28% ground top so
+   arc ends sit visibly above the horizon (not clipped behind it). */
+.phonics-done-arcs {
+  position: absolute;
+  left: 50%;
+  bottom: 26%;
+  width: clamp(320px, max(80vw, 60vh), 1100px);
+  height: auto;
+  transform: translateX(-50%);
+  overflow: visible;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.12));
 }
-.phonics-mastery .mastery-dot {
-  width: clamp(14px, 1.8vw, 18px);
-  height: clamp(14px, 1.8vw, 18px);
+.phonics-done-arcs .phonics-arc-path {
+  stroke-width: 10;
+}
+.phonics-done-arcs .phonics-arc-path.just-drawing {
+  animation: phonics-done-arc-pop 700ms cubic-bezier(0.34, 1.6, 0.64, 1);
+}
+@keyframes phonics-done-arc-pop {
+  0%   { stroke-width: 10; opacity: 0; }
+  40%  { stroke-width: 22; opacity: 1; }
+  100% { stroke-width: 10; opacity: 1; }
+}
+
+/* Raindrops fall from under the rainbow to where each plant will sprout. */
+.phonics-done-rain {
+  position: absolute;
+  inset: 28% 0 28% 0;
+  pointer-events: none;
+}
+.phonics-raindrop {
+  position: absolute;
+  top: 0;
+  width: clamp(8px, 1vw, 12px);
+  height: clamp(14px, 1.8vw, 20px);
+  background: linear-gradient(to bottom, rgba(120, 200, 255, 0.0) 0%, #6cc6ff 60%, #3aa8ee 100%);
+  border-radius: 50% 50% 50% 50% / 40% 40% 60% 60%;
+  transform: translate(-50%, -100%);
   opacity: 0;
-  animation: dot-in 320ms ease forwards;
+  animation: phonics-raindrop-fall 700ms cubic-bezier(0.4, 0.0, 0.6, 1) forwards;
+  animation-delay: var(--drop-delay, 600ms);
 }
-@keyframes dot-in {
-  from { opacity: 0; transform: scale(0.4); }
-  to   { opacity: 1; transform: scale(1); }
+@keyframes phonics-raindrop-fall {
+  0%   { opacity: 0; transform: translate(-50%, -120%) scale(0.7); }
+  25%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, 110%)  scale(0.9); }
 }
+
+/* Ground strip: green grass below, slight darker band at the very top
+   so the horizon reads as ground rather than a hard line. */
+.phonics-done-ground {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 28%;
+  background:
+    linear-gradient(to bottom, #6fcf6f 0%, #4caf4c 60%, #3a8c3a 100%);
+  border-top: 3px solid #2f7d2f;
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.18);
+}
+
+.phonics-done-garden {
+  position: absolute;
+  inset: 0;
+}
+.phonics-plant {
+  position: absolute;
+  bottom: 14%;
+  transform: translate(-50%, var(--plant-y, 0)) scale(0);
+  font-size: clamp(40px, 7vw, 84px);
+  line-height: 1;
+  pointer-events: none; /* decor only — frog is the single tappable focal */
+  animation: phonics-plant-sprout 550ms cubic-bezier(0.34, 1.6, 0.64, 1) forwards;
+  animation-delay: var(--sprout-delay, 600ms);
+  /* drop-shadow lifts the plant off the green ground; otherwise small
+     plants (🍓, 🌷) read as dark blobs against the grass. */
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.18));
+}
+@keyframes phonics-plant-sprout {
+  0%   { transform: translate(-50%, calc(var(--plant-y, 0px) + 30px)) scale(0)    rotate(-8deg); }
+  60%  { transform: translate(-50%, calc(var(--plant-y, 0px) - 8px))  scale(1.18) rotate(4deg); }
+  100% { transform: translate(-50%, var(--plant-y, 0px))              scale(1)    rotate(0deg); }
+}
+
+.phonics-frog {
+  position: absolute;
+  left: 50%;
+  bottom: 6%;
+  transform: translate(-50%, 0);
+  font-size: clamp(58px, 11vw, 130px);
+  line-height: 1;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 6px;
+  -webkit-tap-highlight-color: transparent;
+  /* Gentle breathing while idle so the mascot feels alive without being
+     distracting once the kid moves on. */
+  animation: phonics-frog-idle 3.4s ease-in-out infinite;
+  transform-origin: 50% 100%;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.18));
+}
+.phonics-frog:focus-visible { outline: 3px solid rgba(255, 255, 255, 0.9); border-radius: 50%; }
+@keyframes phonics-frog-idle {
+  0%, 100% { transform: translate(-50%, 0)     scale(1, 1);     }
+  50%      { transform: translate(-50%, -2px)  scale(1.02, 0.98); }
+}
+.phonics-frog.react-hop {
+  animation: phonics-frog-hop 600ms cubic-bezier(0.34, 1.6, 0.64, 1);
+}
+.phonics-frog.react-big {
+  animation: phonics-frog-bighop 700ms cubic-bezier(0.34, 1.6, 0.64, 1);
+}
+.phonics-frog.react-ribbit {
+  animation: phonics-frog-ribbit 600ms ease-in-out;
+}
+.phonics-frog.react-blink {
+  animation: phonics-frog-blink 600ms ease;
+}
+@keyframes phonics-frog-hop {
+  0%   { transform: translate(-50%, 0)     scale(1, 1); }
+  20%  { transform: translate(-50%, 0)     scale(1.18, 0.82); }
+  55%  { transform: translate(-50%, -38px) scale(0.92, 1.12); }
+  85%  { transform: translate(-50%, 0)     scale(1.10, 0.92); }
+  100% { transform: translate(-50%, 0)     scale(1, 1); }
+}
+@keyframes phonics-frog-bighop {
+  0%   { transform: translate(-50%, 0)     scale(1, 1)    rotate(0deg); }
+  15%  { transform: translate(-50%, 0)     scale(1.25, 0.78) rotate(0deg); }
+  55%  { transform: translate(-50%, -70px) scale(0.9, 1.16)  rotate(-8deg); }
+  80%  { transform: translate(-50%, -10px) scale(1.05, 0.95) rotate(4deg); }
+  100% { transform: translate(-50%, 0)     scale(1, 1)    rotate(0deg); }
+}
+@keyframes phonics-frog-ribbit {
+  0%   { transform: translate(-50%, 0)    scale(1, 1); }
+  40%  { transform: translate(-50%, -4px) scale(1.18, 1.10); }
+  70%  { transform: translate(-50%, -2px) scale(1.10, 1.06); }
+  100% { transform: translate(-50%, 0)    scale(1, 1); }
+}
+@keyframes phonics-frog-blink {
+  0%   { transform: translate(-50%, 0)    scale(1, 1)    rotate(0deg); }
+  50%  { transform: translate(-50%, -3px) scale(1.06, 0.94) rotate(-3deg); }
+  100% { transform: translate(-50%, 0)    scale(1, 1)    rotate(0deg); }
+}
+.phonics-frog:active { transform: translate(-50%, 4px) scale(0.96, 0.94); }
+
+.phonics-done-critter {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.phonics-critter-bug {
+  position: absolute;
+  top: 30%;
+  left: -10%;
+  font-size: clamp(28px, 4vw, 48px);
+  line-height: 1;
+  animation: phonics-critter-drift 7s ease-in-out 2.4s forwards;
+}
+@keyframes phonics-critter-drift {
+  0%   { transform: translate(0, 0)      rotate(-6deg); opacity: 0; }
+  8%   {                                                 opacity: 1; }
+  25%  { transform: translate(28vw, -22px) rotate(8deg); }
+  50%  { transform: translate(50vw, 10px)  rotate(-6deg); }
+  75%  { transform: translate(80vw, -18px) rotate(10deg); }
+  92%  {                                                 opacity: 1; }
+  100% { transform: translate(120vw, 4px)  rotate(0deg);  opacity: 0; }
+}
+
+/* Floating bottom-corner buttons. Round, white, low visual weight so the
+   scene isn't dominated by chrome — the rainbow + frog are the heroes. */
+.phonics-done-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: clamp(10px, 2vh, 18px);
+  display: flex;
+  justify-content: space-between;
+  padding: 0 clamp(14px, 3vw, 32px);
+  pointer-events: none;
+  z-index: 2; /* always above plants on narrow viewports */
+}
+.phonics-done-actions button {
+  pointer-events: auto;
+  width: clamp(56px, 7vw, 80px);
+  height: clamp(56px, 7vw, 80px);
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--ink);
+  font: inherit;
+  font-size: clamp(28px, 3.4vw, 40px);
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18), inset 0 0 0 2px rgba(0, 0, 0, 0.04);
+  -webkit-tap-highlight-color: transparent;
+}
+.phonics-done-actions button:active { transform: scale(0.94); }
+
+/* Portrait viewports (mostly tablets — phones in portrait get the
+   rotate overlay). Bump ground proportion so the garden gets real
+   breathing room, lift the rainbow so it sits near the upper third,
+   and pull frog + plants up to the horizon line (otherwise they hug
+   the bottom of an enormous green strip and most of the ground reads
+   as empty). */
+@media (orientation: portrait) {
+  .phonics-done-sky    { inset: 0 0 40% 0; }
+  .phonics-done-ground { height: 40%; }
+  .phonics-done-rain   { inset: 30% 0 40% 0; }
+  /* Same chord-vs-horizon math as landscape: ground top at 40%, arcs
+     end ~12.5% of SVG height above the SVG bottom, so `bottom: 41%`
+     keeps arc ends visibly above the horizon. */
+  .phonics-done-arcs   { bottom: 41%; width: clamp(320px, max(86vw, 56vh), 1100px); }
+  .phonics-done-sun    { top: 6%; left: 6%; width: clamp(90px, 18vw, 180px); height: clamp(90px, 18vw, 180px); }
+  .phonics-plant       { bottom: 62%; font-size: clamp(48px, 9vw, 110px); }
+  .phonics-frog        { bottom: 56%; font-size: clamp(72px, 14vw, 180px); }
+}
+
+/* Mastery dot atoms still used by the parent-settings panel. */
 .mastery-dot {
   width: clamp(10px, 1.4vw, 14px);
   height: clamp(10px, 1.4vw, 14px);
@@ -899,8 +1164,4 @@ body {
   gap: 5px;
   justify-items: center;
   margin: 6px 0;
-}
-@keyframes rainbow-shift {
-  0%, 100% { background-position: 0% 50%; }
-  50%      { background-position: 100% 50%; }
 }
