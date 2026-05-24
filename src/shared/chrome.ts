@@ -14,12 +14,13 @@ export interface HomeOpts {
 export function makeHomeButton(opts: HomeOpts): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.className = 'icon-btn home-btn';
-  // No inner content: the chevron is drawn by the CSS `.home-btn::before`
-  // pseudo-element (a rotated bordered square). Inline SVG sized via
-  // any combination of percent / em / explicit width attributes
-  // rendered as an empty circle on the maintainer's iPad — replacing it
-  // with a CSS border shape sidesteps every iOS Safari SVG-sizing edge
-  // case in one move.
+  // No inner content: the chevron is drawn by .home-btn::before +
+  // .home-btn::after — two absolutely-positioned bars meeting at a
+  // left-side tip. Inline SVG rendered as an empty button on iPad
+  // (flex-item SVG sizing); border-left + border-bottom on a rotated
+  // square then rendered as a single diagonal slash (iOS dropped one
+  // of the two adjacent borders). Two independent bars are the same
+  // pattern that works for the phonics ✗ mark — see style.css.
   btn.setAttribute('aria-label', 'Home');
 
   let pressTimer: number | null = null;

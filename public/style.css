@@ -603,34 +603,45 @@ body {
 .picker-version:focus { outline: none; }
 .picker-version:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
 
-.home-btn { color: var(--ink); }
-/* CSS-drawn back chevron: small square with left+bottom borders, rotated
-   45° to read as `<`. Inline SVG sized via percent / em / explicit
-   attributes rendered as an empty button on the maintainer's iPad
-   (iOS Safari's flex-item SVG sizing path is busted in ways I couldn't
-   work around). Pure CSS borders sidestep every SVG quirk — no replaced
-   element, no intrinsic-size fallback, no font-size resolution on a
-   foreign element. Explicit pixel sizes (no percent / em) so the
-   chevron stays visible even if the font-size cascade breaks. The
-   translate nudges the rotated square so its visual midpoint lands at
-   the button center (a plain rotated square has its mass to the
-   lower-right of its layout box). */
-.home-btn::before {
+.home-btn { color: var(--ink); position: relative; }
+/* Back chevron: two bars meeting at a left-side tip, drawn as ::before
+   and ::after pseudo-elements. Round three of this fix —
+   `border-left + border-bottom` on a rotated square (round two) rendered
+   as a single diagonal line on the maintainer's iPad, i.e. iOS Safari
+   dropped one of the two adjacent borders on a small box with a
+   `border-bottom-left-radius` join. No combination of border widths /
+   radius / box size avoided it.
+
+   Two independent absolutely-positioned bars sidestep the entire
+   adjacent-borders-meet-at-a-corner code path — exactly the same
+   construction the phonics ✗ mark already uses successfully on iPad.
+   No flex sizing, no inline SVG, no two borders sharing a corner. */
+.home-btn::before,
+.home-btn::after {
   content: "";
-  display: block;
+  position: absolute;
+  top: 50%;
+  left: 50%;
   width: 12px;
-  height: 12px;
-  border-left: 3px solid currentColor;
-  border-bottom: 3px solid currentColor;
-  border-bottom-left-radius: 2px;
-  transform: rotate(45deg) translate(12%, -12%);
+  height: 3px;
+  /* Bar's natural top-left sits at the button centre; nudge it so the
+     pivot (left-centre of the bar, via transform-origin) ends up at
+     (centre − 4px, centre). With both arms rotated ±45° around this
+     pivot, the chevron's visual midpoint then lands on the button
+     centre rather than skewing right. */
+  margin-top: -1.5px;
+  margin-left: -4px;
+  background: currentColor;
+  border-radius: 999px;
+  transform-origin: 0 50%;
 }
+.home-btn::before { transform: rotate(-45deg); } /* top arm — up-right from tip */
+.home-btn::after  { transform: rotate(45deg);  } /* bottom arm — down-right from tip */
 @media (min-width: 540px) {
-  .home-btn::before {
+  .home-btn::before,
+  .home-btn::after {
     width: 14px;
-    height: 14px;
-    border-left-width: 3px;
-    border-bottom-width: 3px;
+    margin-left: -5px;
   }
 }
 /* Apple Color Emoji at the parent's font-size renders a fairly small

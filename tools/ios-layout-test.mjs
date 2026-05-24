@@ -94,23 +94,31 @@ for (const p of PROFILES) {
       return el ? el.getBoundingClientRect() : null;
     };
     const home = document.querySelector('.home-btn');
-    const homeBefore = home ? window.getComputedStyle(home, '::before') : null;
+    const homeRect = home ? home.getBoundingClientRect() : null;
+    const readArm = (which) => {
+      if (!home) return null;
+      const cs = window.getComputedStyle(home, which);
+      return {
+        content: cs.content,
+        position: cs.position,
+        width: parseFloat(cs.width),
+        height: parseFloat(cs.height),
+        topPx: parseFloat(cs.top),
+        leftPx: parseFloat(cs.left),
+        marginLeft: parseFloat(cs.marginLeft),
+        marginTop: parseFloat(cs.marginTop),
+        background: cs.backgroundColor,
+        transform: cs.transform,
+        transformOrigin: cs.transformOrigin,
+      };
+    };
     const muteSound = document.querySelector('.mute-btn .icon-sound');
     return {
       vp: { w: window.innerWidth, h: window.innerHeight },
-      home: r('.home-btn'),
-      homeChevron: homeBefore
-        ? {
-            content: homeBefore.content,
-            width: parseFloat(homeBefore.width),
-            height: parseFloat(homeBefore.height),
-            borderLeftWidth: parseFloat(homeBefore.borderLeftWidth),
-            borderBottomWidth: parseFloat(homeBefore.borderBottomWidth),
-            borderLeftColor: homeBefore.borderLeftColor,
-            borderBottomColor: homeBefore.borderBottomColor,
-            display: homeBefore.display,
-          }
-        : null,
+      home: homeRect,
+      homeColor: home ? window.getComputedStyle(home).color : null,
+      homeChevronBefore: readArm('::before'),
+      homeChevronAfter:  readArm('::after'),
       mute: r('.mute-btn'),
       muteSound: muteSound ? r('.mute-btn .icon-sound') : null,
       card: r('.phonics-card'),
@@ -129,32 +137,62 @@ for (const p of PROFILES) {
     }
   };
 
-  // Back-button chevron is now drawn by the .home-btn::before
-  // pseudo-element (CSS borders, no SVG). Assert that:
-  //   - the pseudo-element exists and has rendered content
-  //   - it has reasonable pixel dimensions (>=8px square)
-  //   - the borders that draw the chevron are non-zero and visible
-  //     (not transparent, not matching the button background).
-  // This is the layer that broke on the real iPad — the inline-SVG
-  // approach rendered as 0×0 / invisible; the pseudo-element render
-  // path is much more uniform across WebKit versions.
-  check(info.homeChevron !== null, 'back-button ::before pseudo-element present');
-  if (info.homeChevron) {
-    const c = info.homeChevron;
-    // `content` is set to `""` so it computed as `"none"` would mean the
-    // pseudo-element is suppressed.
-    check(c.display !== 'none' && c.content !== 'none', `chevron rendered (display=${c.display}, content=${c.content})`);
-    check(c.width >= 8, `chevron width >= 8px (got ${c.width})`);
-    check(c.height >= 8, `chevron height >= 8px (got ${c.height})`);
-    const aspect = c.width / c.height;
-    check(Math.abs(aspect - 1) < 0.05, `chevron square (aspect ${aspect.toFixed(3)})`);
-    check(c.borderLeftWidth >= 2, `chevron left border drawn (${c.borderLeftWidth}px)`);
-    check(c.borderBottomWidth >= 2, `chevron bottom border drawn (${c.borderBottomWidth}px)`);
-    // Border color must be non-transparent and not the page background
-    // (#fef6e4) — that's the only way a stroked chevron is actually
-    // visible on the white button face.
-    const opaque = !/^rgba\(.*,\s*0\)$/.test(c.borderLeftColor) && c.borderLeftColor !== 'transparent';
-    check(opaque, `chevron border color opaque (${c.borderLeftColor})`);
+  // Back chevron is drawn by .home-btn::before + ::after — two
+  // absolutely-positioned bars meeting at a left-side tip. Round two
+  // (border-left + border-bottom on a rotated square) rendered as a
+  // single diagonal line — i.e. a slash — on the maintainer's iPad,
+  // because iOS Safari dropped one of the two adjacent borders. Two
+  // independent bars means there are no two-borders-sharing-a-corner
+  // for iOS Safari to mishandle. Assert both arms render with a
+  // non-zero filled bar shape anchored at the button centre.
+  const arms = [
+    ['::before', info.homeChevronBefore],
+    ['::after',  info.homeChevronAfter ],
+  ];
+  for (const [which, c] of arms) {
+    check(c !== null, `back-button ${which} pseudo-element present`);
+    if (!c) continue;
+    // `content: ""` computes to a non-`none`/non-`normal` value when
+    // the pseudo-element is actually generated.
+    check(c.content !== 'none' && c.content !== 'normal',
+      `chevron ${which} rendered (content=${c.content})`);
+    check(c.position === 'absolute',
+      `chevron ${which} absolutely positioned (got ${c.position})`);
+    // Bar is a thin horizontal rectangle (~12×3px on phones, ~14×3 on
+    // tablets) — assert it's a clearly-non-square filled bar, not a
+    // collapsed 0×0 box.
+    check(c.width >= 10,  `chevron ${which} bar width >= 10px (got ${c.width})`);
+    check(c.height >= 2,  `chevron ${which} bar height >= 2px (got ${c.height})`);
+    check(c.width > c.height * 2,
+      `chevron ${which} reads as a bar, not a square (${c.width}×${c.height})`);
+    // Bar is filled with currentColor — must be opaque and not match
+    // the page background (otherwise it'd be invisible on the button).
+    const opaque = !/^rgba\(.*,\s*0\)$/.test(c.background) && c.background !== 'transparent';
+    check(opaque, `chevron ${which} bar background opaque (${c.background})`);
+    // The bar's anchor (top/left, with margin offsets) places the
+    // ROTATION PIVOT at (centre − ~4px, centre). transform-origin is
+    // `0 50%` of the bar — i.e. the bar's left-centre. Verify the
+    // resolved pivot lands at the button's vertical midline (margin-top
+    // = -height/2) and just left of horizontal midline (margin-left
+    // negative).
+    const pivotY = c.topPx + c.marginTop + c.height / 2;
+    const pivotX = c.leftPx + c.marginLeft;
+    const dPivotY = Math.abs(pivotY - info.home.height / 2);
+    check(dPivotY < 1,
+      `chevron ${which} pivot on button vertical midline (got ${pivotY}px, expected ~${info.home.height / 2}px)`);
+    check(pivotX < info.home.width / 2 && pivotX > info.home.width / 2 - 8,
+      `chevron ${which} pivot just left of button centre (got ${pivotX}px, button half ${info.home.width / 2}px)`);
+    // Transform must include a rotation — without it the bar would
+    // render as a flat horizontal stripe, not an arrow arm.
+    check(c.transform !== 'none' && c.transform !== '',
+      `chevron ${which} has rotation transform (got ${c.transform})`);
+  }
+  // Sanity: the two arms must have DIFFERENT transforms — one rotates
+  // +45°, the other -45°. Identical transforms would collapse the two
+  // bars into a single visible stripe (still not an arrow).
+  if (info.homeChevronBefore && info.homeChevronAfter) {
+    check(info.homeChevronBefore.transform !== info.homeChevronAfter.transform,
+      `chevron arms have distinct transforms (before=${info.homeChevronBefore.transform}, after=${info.homeChevronAfter.transform})`);
   }
 
   // Home button fully visible and at expected min size.
