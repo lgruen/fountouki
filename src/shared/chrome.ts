@@ -14,8 +14,12 @@ export interface HomeOpts {
 export function makeHomeButton(opts: HomeOpts): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.className = 'icon-btn home-btn';
+  // Explicit width/height attributes on the SVG — without them, WebKit
+  // in a flex container sizes the SVG from its (undefined) intrinsic
+  // dimensions instead of the CSS percentage, producing a tiny non-square
+  // chevron on iPad / iOS Safari. The CSS still scales it via 1em.
   btn.innerHTML =
-    '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+    '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
     '<path d="M14 6l-6 6 6 6" fill="none" stroke="currentColor" ' +
     'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' +
     '</svg>';
