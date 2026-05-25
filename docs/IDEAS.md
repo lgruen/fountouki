@@ -42,11 +42,23 @@ details (see `CLAUDE.md`).
   roof tile, pipe) via a tradie-installs animation. Session arc =
   one finished house (~5 min, ~6–10 letters/digits). Finished houses
   optionally accrete into a street on the picker across sessions.
-- Curriculum: Handwriting Without Tears — capitals first
+- Letterforms: **Victorian Modern Cursive** (unjoined / print form),
+  the typeface taught in Victorian state schools. CC BY, bundled at
+  `/public/fonts/vicmodcursive/` and already wired into Phonics so
+  recognition and production share one canonical shape (single-story
+  a, single-story g, exit-flick tails, etc.). The joined cursive
+  variant is for a much later phase.
+- Sequencing borrowed from Handwriting Without Tears: capitals first
   (Frog-Jump → Starting-Corner → Center-Starter groups), then
-  lowercase, then digits. HWT stroke conventions per letter:
-  numbered start dots, direction arrows, HWT "big line / little
-  line" vocabulary in prompts.
+  lowercase, then digits — the developmental order, not VMC's
+  school-curriculum order. Verify each VMC capital lands in the
+  right HWT group at build time; most will, since the grouping is
+  about start position.
+- Per-letter presentation also borrowed from HWT: numbered start
+  dots, direction arrows, plus the kid-friendly stroke vocabulary —
+  "big line / little line / big curve / little curve / magic c" plus
+  **"tail"** for VMC's exit flick (HWT has no equivalent term since
+  HWT print has no flick).
 - Drip-in + Leitner, same shape as Phonics. Per-letter
   `{ box, due, lastSeen }`, 5-box Leitner. At most
   `NEW_LETTER_BUFFER` unsettled letters in rotation; a new letter

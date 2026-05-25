@@ -1,3 +1,24 @@
+/* Victorian Modern Cursive (unjoined / print).
+   Source + license: /public/fonts/vicmodcursive/ATTRIBUTION.md
+   The canonical letterform across this app — phonics stimulus and (later)
+   writing-game reference share the same shapes so the kid never has to
+   reconcile two different "a"s (single-story handwritten vs two-story
+   typographic). */
+@font-face {
+  font-family: 'VicModernCursive';
+  src: url('./fonts/vicmodcursive/VicModernCursive-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'VicModernCursive';
+  src: url('./fonts/vicmodcursive/VicModernCursive-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #fef6e4;
   --card: #fffdf6;
@@ -814,9 +835,13 @@ body {
    identical to the prompt — slight warm tint, no alarm-red. */
 .phonics-card.miss { background: #fff6ef; }
 .phonics-letter {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Comic Sans MS", "Comic Sans", system-ui, sans-serif;
+  /* Victorian Modern Cursive (unjoined) is the canonical letterform —
+     single-story a, single-story g, etc. — matching how the kid will
+     learn to write. System sans is a fallback while the webfont loads.
+     Bold weight matches the previous visual heft. */
+  font-family: 'VicModernCursive', -apple-system, BlinkMacSystemFont, "Segoe UI", "Comic Sans MS", "Comic Sans", system-ui, sans-serif;
   font-size: clamp(96px, 20vw, 200px);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
   color: var(--ink);
   transition: opacity 250ms ease;
