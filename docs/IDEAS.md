@@ -36,41 +36,40 @@ details (see `CLAUDE.md`).
   any arithmetic. Pedagogy research needed before designing — early
   numeracy has a wide research base.
 
-## Letter & number drawing (future)
-- Touch / stylus tracing → free draw. Auto or parent grading.
-- Useful complement to Phonics: recognition vs production.
-- See "Construction writing" below for a concrete first cut.
-
 ## Construction writing (future)
-- Touch / stylus tracing, lowercase letters + digits first. Construction
-  wrapper: each correct letter unlocks a pre-made house part (window,
-  door, roof tile, pipe) via a tradie-installs animation. Session arc
-  = one finished house (~5 min, ~6–10 letters/digits). Optionally
-  finished houses accrete into a street on the picker / progress
-  screen across sessions.
-- Curriculum: Handwriting Without Tears stroke conventions per
-  letter (start dots, numbered strokes, direction arrows). Sequence
-  departs from HWT's capitals-first ordering: lowercase + digits
-  first to mirror Phonics (kid needs lowercase for reading day-to-day).
-  Capitals as a later pass if useful.
-- Grading = coaching, not pass/fail (errorless):
-  - Animated ghost reference plays first (numbered start dots +
-    direction arrows, HWT style).
-  - Kid traces over a faded guide; guide fades across sessions.
-  - Per-stroke check: start zone, end zone, dominant direction,
-    distance from reference curve. Wrong start / direction → gentle
-    redirect (highlight the dot, replay that stroke), never a "wrong"
-    state.
-  - Tolerances tuned permissive; the teaching is the reference + the
-    in-line nudges, not the grade.
-- Parent-grade fallback toggle in the parent menu for letters where
-  auto is unhelpful. Mirrors Phonics parent-grade pattern.
-- Implementation cost: auto-grade mechanics ~1–2 weeks; real cost is
-  tuning tolerances against actual play (expect 2–3 iteration rounds).
-  Parent-graded MVP would be ~3 days if the auto path stalls.
-- Symbolic "drawing unlocks a pre-made part" chosen over literal
-  "stroke morphs into plank" — easier to render consistently, keeps
-  the visual on-brand.
+- Touch / stylus tracing of letters + digits. Construction wrapper:
+  each correct letter unlocks a pre-made house part (window, door,
+  roof tile, pipe) via a tradie-installs animation. Session arc =
+  one finished house (~5 min, ~6–10 letters/digits). Finished houses
+  optionally accrete into a street on the picker across sessions.
+- Curriculum: Handwriting Without Tears — capitals first
+  (Frog-Jump → Starting-Corner → Center-Starter groups), then
+  lowercase, then digits. HWT stroke conventions per letter:
+  numbered start dots, direction arrows, HWT "big line / little
+  line" vocabulary in prompts.
+- Drip-in + Leitner, same shape as Phonics. Per-letter
+  `{ box, due, lastSeen }`, 5-box Leitner. At most
+  `NEW_LETTER_BUFFER` unsettled letters in rotation; a new letter
+  unlocks when an existing one reaches box ≥ 1. Already-introduced
+  letters stay active if HWT ordering is later refined.
+- Grading: parent-graded MVP, mirror Phonics (✓ / ✗ after each
+  attempt). Auto-grade deferred.
+- Auto-grade (later, optional): per-stroke start zone, end zone,
+  dominant direction, distance from reference curve. Design as
+  coaching not pass/fail — wrong start or direction → gentle
+  in-line redirect (highlight the dot, replay that stroke), never a
+  "wrong" state. Permissive tolerances; teaching lives in the
+  animated reference, not the grade. ~1–2 weeks for mechanics; real
+  cost is tuning against real play (expect 2–3 rounds).
+- Each card: animated HWT reference plays first (numbered start
+  dots + direction arrows), then a faded guide for tracing. Guide
+  fades across boxes.
+- Finger vs stylus: finger covers the cognitive side (order,
+  direction, shape). A cheap silicone-tip stylus closes most of the
+  motor/grip gap; Apple Pencil is overkill. Don't gate the build on
+  stylus. Pencil-on-paper practice belongs alongside the app
+  regardless — HWT itself uses crayons as primary, app as
+  supplement.
 
 ## Grammar (future)
 - Pronouns (he / she / I / you), SVO vs VSO word order for statements
