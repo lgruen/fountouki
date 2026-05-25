@@ -39,6 +39,38 @@ details (see `CLAUDE.md`).
 ## Letter & number drawing (future)
 - Touch / stylus tracing → free draw. Auto or parent grading.
 - Useful complement to Phonics: recognition vs production.
+- See "Construction writing" below for a concrete first cut.
+
+## Construction writing (future)
+- Touch / stylus tracing, lowercase letters + digits first. Construction
+  wrapper: each correct letter unlocks a pre-made house part (window,
+  door, roof tile, pipe) via a tradie-installs animation. Session arc
+  = one finished house (~5 min, ~6–10 letters/digits). Optionally
+  finished houses accrete into a street on the picker / progress
+  screen across sessions.
+- Curriculum: Handwriting Without Tears stroke conventions per
+  letter (start dots, numbered strokes, direction arrows). Sequence
+  departs from HWT's capitals-first ordering: lowercase + digits
+  first to mirror Phonics (kid needs lowercase for reading day-to-day).
+  Capitals as a later pass if useful.
+- Grading = coaching, not pass/fail (errorless):
+  - Animated ghost reference plays first (numbered start dots +
+    direction arrows, HWT style).
+  - Kid traces over a faded guide; guide fades across sessions.
+  - Per-stroke check: start zone, end zone, dominant direction,
+    distance from reference curve. Wrong start / direction → gentle
+    redirect (highlight the dot, replay that stroke), never a "wrong"
+    state.
+  - Tolerances tuned permissive; the teaching is the reference + the
+    in-line nudges, not the grade.
+- Parent-grade fallback toggle in the parent menu for letters where
+  auto is unhelpful. Mirrors Phonics parent-grade pattern.
+- Implementation cost: auto-grade mechanics ~1–2 weeks; real cost is
+  tuning tolerances against actual play (expect 2–3 iteration rounds).
+  Parent-graded MVP would be ~3 days if the auto path stalls.
+- Symbolic "drawing unlocks a pre-made part" chosen over literal
+  "stroke morphs into plank" — easier to render consistently, keeps
+  the visual on-brand.
 
 ## Grammar (future)
 - Pronouns (he / she / I / you), SVO vs VSO word order for statements
