@@ -214,7 +214,10 @@ body {
   box-shadow: inset 0 0 0 2px rgba(0,0,0,0.04);
   position: relative;
   font-weight: 700;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* Match the phonics letterform (Victorian Modern Cursive: single-story
+     a/g) so the letters/numbers themes teach the same shapes. Emoji and
+     shape items are unaffected — they fall through to the emoji font. */
+  font-family: 'VicModernCursive', -apple-system, BlinkMacSystemFont, "Segoe UI", "Comic Sans MS", "Comic Sans", system-ui, sans-serif;
 }
 .cell.shape { font-size: 0; }
 .cell.shape::after {
@@ -257,7 +260,7 @@ body {
   min-height: clamp(var(--tap), 13vh, 140px);
   font-size: clamp(38px, 5.5vw, 72px);
   font-weight: 700;
-  font-family: inherit;
+  font-family: 'VicModernCursive', -apple-system, BlinkMacSystemFont, "Segoe UI", "Comic Sans MS", "Comic Sans", system-ui, sans-serif;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
