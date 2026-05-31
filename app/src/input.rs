@@ -1,4 +1,5 @@
-//! Unified pointer (mouse or first touch) with press/release edges, held time,
+//! Unified pointer over macroquad's mouse API (touch is mirrored onto the mouse
+//! in logical coordinates), with press/release edges, held time,
 //! long-press detection (500ms), and hit-testing. A completed long-press
 //! suppresses the trailing tap. Built so a scripted Pointer can be injected for
 //! deterministic play-tests.
@@ -19,32 +20,19 @@ pub struct Pointer {
     pub long_fired: bool,
     /// This release follows a long-press → suppress the synthetic tap.
     suppress_tap: bool,
-    /// We're driving from touch (not mouse) — so a release where `touches()`
-    /// has gone empty is reported at the last touch position, not the mouse.
-    is_touch: bool,
 }
 
 impl Pointer {
-    /// Evolve from the previous frame by reading macroquad (touch preferred).
+    /// Evolve from the previous frame. Reads ONLY the mouse API: macroquad
+    /// mirrors touch onto the mouse in **logical** (screen_width) coordinates
+    /// (`simulate_mouse_with_touch`, on by default), while raw `touches()`
+    /// positions come back in **physical/DPR** pixels. Mixing the two is what
+    /// broke hit-testing on mobile — taps landed at a ~DPR× offset, missing
+    /// every target. The mouse path is the same space the layout uses.
     pub fn poll(prev: &Pointer, dt: f32) -> Pointer {
-        let ts = touches();
-        let (pos, down, is_touch) = if let Some(t) = ts.first() {
-            // Active touch (Started/Moved/Stationary) → down; Ended/Cancelled →
-            // released this frame, but the position is still valid.
-            let active = matches!(
-                t.phase,
-                TouchPhase::Started | TouchPhase::Moved | TouchPhase::Stationary
-            );
-            (t.position, active, true)
-        } else if prev.is_touch && prev.down {
-            // The touch ended and was already removed from `touches()` this
-            // frame. Report the release at the LAST touch position — falling
-            // back to the (stale/0,0) mouse here is what broke taps on iPad.
-            (prev.pos, false, true)
-        } else {
-            let mp = mouse_position();
-            (vec2(mp.0, mp.1), is_mouse_button_down(MouseButton::Left), false)
-        };
+        let mp = mouse_position();
+        let pos = vec2(mp.0, mp.1);
+        let down = is_mouse_button_down(MouseButton::Left);
         let just_pressed = down && !prev.down;
         let just_released = !down && prev.down;
         let press_pos = if just_pressed { pos } else { prev.press_pos };
@@ -66,7 +54,6 @@ impl Pointer {
             held,
             long_fired,
             suppress_tap,
-            is_touch,
         }
     }
 
