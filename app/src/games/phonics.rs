@@ -41,7 +41,12 @@ pub struct PhonicsScene {
     phase: Phase,
     reveal: Option<deck::Exemplar>,
     hop_time: f32,
-    frog_hop: f32,
+    /// Time since the last frog tap (drives the reaction); large = idle.
+    frog_t: f32,
+    /// Which reaction is playing (cycles through `REACTIONS`).
+    frog_kind: usize,
+    /// Total frog taps this session (selects + cycles the reaction).
+    frog_taps: u32,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
 }
@@ -70,7 +75,9 @@ impl PhonicsScene {
             phase: Phase::Card,
             reveal: None,
             hop_time: 99.0,
-            frog_hop: 99.0,
+            frog_t: 99.0,
+            frog_kind: 0,
+            frog_taps: 0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x00c0_ffee),
             sync,
         }
@@ -80,7 +87,9 @@ impl PhonicsScene {
         self.stars = 0;
         self.streak = 0;
         self.phase = Phase::Card;
-        self.frog_hop = 99.0;
+        self.frog_t = 99.0;
+        self.frog_kind = 0;
+        self.frog_taps = 0;
         self.hop_time = 99.0;
         self.queue = srs::build_queue(&self.state, now, &mut self.rng);
         srs::avoid_repeat(&mut self.queue, self.last);
@@ -97,8 +106,12 @@ impl PhonicsScene {
                 self.sync.flush();
                 return Nav::Home;
             } else if input::hit_circle(pt.pos, frog_c.x, frog_c.y, fr) {
-                self.frog_hop = 0.0;
+                // Cycle to the next reaction (does not escalate) + a sparkle.
+                self.frog_taps += 1;
+                self.frog_kind = (self.frog_taps as usize - 1) % REACTIONS.len();
+                self.frog_t = 0.0;
                 ctx.audio.frog();
+                self.confetti.burst(vec2(frog_c.x, frog_c.y - fr * 0.95), 16, fr * 0.55);
             }
         }
         Nav::Stay
@@ -115,12 +128,13 @@ impl PhonicsScene {
         draw_line(0.0, gy, f.w, gy, 3.0, palette::hex(0x2f7d2f));
         draw::plant(f.w * 0.28, gy, f.vmin(0.06));
         draw::plant(f.w * 0.74, gy, f.vmin(0.05));
-        let hop = if self.frog_hop < 0.5 {
-            -(fr * 0.5) * ((self.frog_hop / 0.5) * std::f32::consts::PI).sin()
+        let rx = &REACTIONS[self.frog_kind];
+        let pose = if self.frog_t < rx.dur {
+            react_pose(rx, self.frog_t, fr)
         } else {
-            0.0
+            idle_pose(ctx.time)
         };
-        draw::frog(frog_c.x, frog_c.y, fr, palette::RAINBOW[3], hop);
+        draw::frog(frog_c.x, frog_c.y, fr, palette::RAINBOW[3], pose);
         let white = Color::new(1.0, 1.0, 1.0, 0.94);
         draw::circle_btn(replay.x, replay.y, br, white);
         draw::replay_icon(replay.x, replay.y, br, palette::INK);
@@ -195,13 +209,19 @@ impl PhonicsScene {
     pub(crate) fn miss_center(&self, f: &crate::layout::Frame) -> Vec2 {
         plan(f).miss.0
     }
+    pub(crate) fn frog_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        done_layout(f).0
+    }
+    pub(crate) fn frog_taps(&self) -> u32 {
+        self.frog_taps
+    }
 }
 
 impl Scene for PhonicsScene {
     fn update(&mut self, ctx: &Ctx) -> Nav {
         self.hop_time += ctx.dt;
         self.confetti.update(ctx.dt);
-        self.frog_hop += ctx.dt;
+        self.frog_t += ctx.dt;
         // Drive cross-device sync: send debounced pushes, and merge the remote
         // blob once the initial pull lands (non-yanking — just updates state).
         self.sync.drive(ctx.now);
@@ -386,6 +406,64 @@ fn done_rainbow(f: &crate::layout::Frame, gy: f32) -> (f32, f32, f32, f32) {
     let fit = ((horizon - 12.0) / 72.0).max(0.2);
     let scale = desired.min(fit);
     (f.w / 2.0, horizon, scale, (14.0 * scale).max(10.0))
+}
+
+/// One frog reaction — a *real jump* (the frog leaves the ground). Tapping the
+/// frog cycles through these in order; it does not escalate. Heights are in frog
+/// radii so the jump tracks the frog's size across devices.
+struct Reaction {
+    dur: f32,
+    height: f32, // apex, in frog radii
+    turns: f32,  // full spins, signed (a backflip is negative)
+    tilt: f32,   // peak mid-air lean, radians
+    squash: f32, // crouch-on-launch / thud-on-land depth
+    tongue: bool,
+}
+
+const REACTIONS: [Reaction; 5] = [
+    Reaction { dur: 0.55, height: 1.05, turns: 0.0, tilt: 0.0, squash: 0.20, tongue: false }, // hop
+    Reaction { dur: 0.60, height: 1.10, turns: 0.0, tilt: -0.36, squash: 0.20, tongue: false }, // twist
+    Reaction { dur: 0.70, height: 1.85, turns: 0.0, tilt: -0.16, squash: 0.30, tongue: true }, // big hop + tongue
+    Reaction { dur: 0.72, height: 1.55, turns: 1.0, tilt: 0.0, squash: 0.22, tongue: false }, // spin
+    Reaction { dur: 0.80, height: 1.70, turns: -1.0, tilt: 0.0, squash: 0.24, tongue: false }, // backflip
+];
+
+/// Pose at time `t` into reaction `rx` for a frog of radius `r`. The spin lands
+/// upright (ease-out → an integer number of turns); the squash anticipates the
+/// launch and thuds on landing.
+fn react_pose(rx: &Reaction, t: f32, r: f32) -> draw::FrogPose {
+    use std::f32::consts::{PI, TAU};
+    let p = (t / rx.dur).clamp(0.0, 1.0);
+    // Airborne arc: 0 at launch, 1 at apex, 0 at landing.
+    let fly = (((p - 0.12) / 0.74).clamp(0.0, 1.0) * PI).sin();
+    let dy = -fly * rx.height * r;
+    // Crouch on launch, thud on landing.
+    let crouch = (1.0 - p / 0.13).clamp(0.0, 1.0);
+    let land = (1.0 - (p - 0.86).abs() / 0.12).clamp(0.0, 1.0);
+    let squash = crouch.max(land) * rx.squash;
+    let stretch = fly * 0.22;
+    let sy = 1.0 + stretch - squash;
+    let sx = 1.0 - stretch * 0.55 + squash * 0.9;
+    let rot = rx.turns * TAU * crate::anim::ease_out_cubic(p) + rx.tilt * (p * PI).sin();
+    let tongue = if rx.tongue { (1.0 - (p - 0.5).abs() / 0.24).clamp(0.0, 1.0) } else { 0.0 };
+    // Eyes squint with joy at the peak of a tongue or spin jump.
+    let blink = (tongue * 0.6).max(if rx.turns != 0.0 { fly * 0.35 } else { 0.0 });
+    draw::FrogPose { dy, rot, sx, sy, blink, tongue }
+}
+
+/// Resting frog: a gentle breathing squash + an occasional blink, so the mascot
+/// feels alive between taps. Driven by the scene clock (deterministic in golds).
+fn idle_pose(time: f32) -> draw::FrogPose {
+    use std::f32::consts::PI;
+    let breathe = (time * 1.85).sin();
+    let bt = time.rem_euclid(3.4);
+    let blink = if bt < 0.16 { (bt / 0.16 * PI).sin() } else { 0.0 };
+    draw::FrogPose {
+        sx: 1.0 - 0.025 * breathe,
+        sy: 1.0 + 0.03 * breathe,
+        blink,
+        ..Default::default()
+    }
 }
 
 fn plan(f: &crate::layout::Frame) -> PLayout {
