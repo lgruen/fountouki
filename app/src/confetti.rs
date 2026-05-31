@@ -22,11 +22,18 @@ struct Chip {
 pub struct Confetti {
     chips: Vec<Chip>,
     rng: Mulberry32,
+    /// Separate stream for the steady `rain`, so a celebratory drizzle can't
+    /// perturb the deterministic `burst` sequence (keeps goldens reproducible).
+    rain_rng: Mulberry32,
 }
 
 impl Confetti {
     pub fn new(seed: u32) -> Confetti {
-        Confetti { chips: Vec::new(), rng: Mulberry32::new(seed) }
+        Confetti {
+            chips: Vec::new(),
+            rng: Mulberry32::new(seed),
+            rain_rng: Mulberry32::new(seed ^ 0x9e37_79b9),
+        }
     }
 
     pub fn burst(&mut self, at: Vec2, n: usize, spread_x: f32) {
@@ -40,6 +47,26 @@ impl Confetti {
                 size: self.rng.range(6.0, 10.0),
                 color,
                 life: LIFE,
+            });
+        }
+    }
+
+    /// Gentle celebratory rain: spawn `n` chips spread across the top edge
+    /// `[0,width]`, drifting *down* (vs `burst`'s upward fan). Longer-lived so
+    /// they fall most of the screen before fading — for a sustained finale
+    /// trickle, call a few each frame.
+    pub fn rain(&mut self, width: f32, top_y: f32, n: usize) {
+        for _ in 0..n {
+            let r = &mut self.rain_rng;
+            let color = palette::hex(COLORS[r.below(COLORS.len())]);
+            self.chips.push(Chip {
+                p: vec2(r.range(0.0, width), top_y - r.range(0.0, 40.0)),
+                v: vec2(r.range(-50.0, 50.0), r.range(40.0, 130.0)),
+                rot: r.range(0.0, std::f32::consts::TAU),
+                vrot: r.range(-5.0, 5.0),
+                size: r.range(6.0, 11.0),
+                color,
+                life: LIFE * r.range(1.6, 2.6),
             });
         }
     }
