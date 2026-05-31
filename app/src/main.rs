@@ -115,6 +115,25 @@ async fn main() {
                 sc.stars = 7;
                 Box::new(sc)
             }
+            "patterns-unit" => {
+                {
+                    let mut kv = db.borrow_kv_mut();
+                    let mut ps = fountouki_core::settings::PatternsSettings::default();
+                    ps.theme_choice = "shapes".to_string();
+                    ps.mode = "unit".to_string();
+                    fountouki_core::settings::save_patterns(&mut **kv, &ps);
+                }
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = PatternsScene::new(db.clone(), 7, now);
+                sc.level = 2;
+                let ulen = sc.round().unit_len.min(sc.round().visible.len());
+                for i in 0..ulen {
+                    let ptr = tap(sc.cell_center(&frame, i));
+                    let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                Box::new(sc)
+            }
             "picker" => Box::new(PickerScene::new()),
             "phonics-done" => {
                 // Play 7 correct rounds to reach the rainbow-done garden scene.

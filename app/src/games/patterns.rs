@@ -40,6 +40,8 @@ pub struct PatternsScene {
     result: Option<bool>, // Some(true)=correct, Some(false)=wrong
     fb_time: f32,
     advance_in: Option<f32>,
+    /// Unit mode: the currently-selected contiguous cell range [start, end).
+    sel: Option<(usize, usize)>,
     confetti: crate::confetti::Confetti,
 }
 
@@ -70,6 +72,7 @@ impl PatternsScene {
             result: None,
             fb_time: 0.0,
             advance_in: None,
+            sel: None,
             confetti: crate::confetti::Confetti::new(seed ^ 0x00c0_ffee),
         }
     }
@@ -80,6 +83,7 @@ impl PatternsScene {
         self.result = None;
         self.fb_time = 0.0;
         self.advance_in = None;
+        self.sel = None;
     }
 
     fn on_choice(&mut self, i: usize, ctx: &Ctx) {
@@ -88,23 +92,70 @@ impl PatternsScene {
         }
         let correct = self.round.choices[i].id() == self.round.answer.id();
         self.selected = Some(i);
-        self.result = Some(correct);
         self.fb_time = 0.0;
         if correct {
-            let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1);
-            self.confetti.burst(vec2(p.seq.x + p.seq.w / 2.0, p.seq.y + p.seq.h / 2.0), 80, p.seq.w / 4.0);
-            self.stars += 1;
-            self.streak += 1;
-            self.correct_count += 1;
-            ctx.audio.correct(self.streak);
-            if self.correct_count % CORRECT_PER_LEVEL == 0 && self.level < MAX_LEVEL {
-                self.level += 1;
-                ctx.audio.level_up();
-            }
-            self.advance_in = Some(ADVANCE_DELAY);
+            self.score_correct(ctx);
         } else {
+            self.result = Some(false);
             self.streak = 0;
             ctx.audio.incorrect();
+        }
+    }
+
+    fn score_correct(&mut self, ctx: &Ctx) {
+        let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1);
+        self.confetti.burst(vec2(p.seq.x + p.seq.w / 2.0, p.seq.y + p.seq.h / 2.0), 80, p.seq.w / 4.0);
+        self.stars += 1;
+        self.streak += 1;
+        self.correct_count += 1;
+        ctx.audio.correct(self.streak);
+        if self.correct_count % CORRECT_PER_LEVEL == 0 && self.level < MAX_LEVEL {
+            self.level += 1;
+            ctx.audio.level_up();
+        }
+        self.result = Some(true);
+        self.advance_in = Some(ADVANCE_DELAY);
+    }
+
+    /// Unit mode: tap cell `i` to start / extend / shrink the contiguous range.
+    fn unit_tap(&mut self, i: usize) {
+        if self.advance_in.is_some() {
+            return;
+        }
+        let n = self.round.visible.len();
+        self.sel = Some(match self.sel {
+            None => (i, i + 1),
+            Some((s, e)) => {
+                if i == e && e < n {
+                    (s, e + 1) // extend right
+                } else if i + 1 == s {
+                    (s - 1, e) // extend left
+                } else if i + 1 == e && e - s > 1 {
+                    (s, e - 1) // shrink right
+                } else if i == s && e - s > 1 {
+                    (s + 1, e) // shrink left
+                } else {
+                    return; // non-adjacent: ignore
+                }
+            }
+        });
+    }
+
+    /// Unit mode: check the selection length against the period.
+    fn unit_submit(&mut self, ctx: &Ctx) {
+        if self.advance_in.is_some() {
+            return;
+        }
+        if let Some((s, e)) = self.sel {
+            if e - s == self.round.unit_len {
+                self.score_correct(ctx);
+            } else {
+                self.streak = 0;
+                self.result = Some(false);
+                self.fb_time = 0.0;
+                self.sel = None;
+                ctx.audio.incorrect();
+            }
         }
     }
 
@@ -124,6 +175,15 @@ impl PatternsScene {
         let r = p.choices[i];
         vec2(r.x + r.w / 2.0, r.y + r.h / 2.0)
     }
+    pub(crate) fn cell_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        let p = plan(f, self.round.choices.len(), self.round.visible.len() + 1);
+        let (x, y) = p.cell_center(i);
+        vec2(x, y)
+    }
+}
+
+fn unit_fab(f: &crate::layout::Frame) -> (Vec2, f32) {
+    (vec2(f.w / 2.0, f.h * 0.78), (f.w * 0.06).clamp(60.0, 90.0))
 }
 
 fn gen(level: u32, choice: ThemeChoice, mode: GameMode, diff: Difficulty, rng: &mut Mulberry32) -> Round {
@@ -163,10 +223,28 @@ impl Scene for PatternsScene {
             ctx.audio.set_muted(!ctx.audio.muted());
             return Nav::Stay;
         }
-        for (i, r) in p.choices.iter().enumerate() {
-            if input::hit_rect(pt.pos, r.x, r.y, r.w, r.h) {
-                self.on_choice(i, ctx);
-                break;
+        match self.mode {
+            GameMode::Next => {
+                for (i, r) in p.choices.iter().enumerate() {
+                    if input::hit_rect(pt.pos, r.x, r.y, r.w, r.h) {
+                        self.on_choice(i, ctx);
+                        break;
+                    }
+                }
+            }
+            GameMode::Unit => {
+                let fab = unit_fab(&ctx.frame);
+                if self.sel.is_some() && input::hit_circle(pt.pos, fab.0.x, fab.0.y, fab.1) {
+                    self.unit_submit(ctx);
+                } else {
+                    for i in 0..self.round.visible.len() {
+                        let (cx, cy) = p.cell_center(i);
+                        if input::hit_rect(pt.pos, cx - p.cell / 2.0, cy - p.cell / 2.0, p.cell, p.cell) {
+                            self.unit_tap(i);
+                            break;
+                        }
+                    }
+                }
             }
         }
         Nav::Stay
@@ -183,39 +261,61 @@ impl Scene for PatternsScene {
         draw::speaker(p.mute.0.x, p.mute.0.y, p.mute.1 * 0.9, palette::INK, ctx.audio.muted());
         draw_hud(&p, self.stars, self.level, ctx);
 
-        // Sequence bar: visible cells + the pink `?` slot.
+        // Sequence bar.
         draw::card(p.seq.x, p.seq.y, p.seq.w, p.seq.h, palette::CARD);
         let pulse = 1.0 + 0.06 * crate::anim::pulse(ctx.time, 1.6).max(0.0);
         for (i, item) in self.round.visible.iter().enumerate() {
             let (cx, cy) = p.cell_center(i);
-            draw_cell(cx, cy, p.cell, palette::WHITE);
+            let selected = matches!(self.sel, Some((s, e)) if i >= s && i < e);
+            if selected {
+                draw::rounded_rect(
+                    cx - p.cell / 2.0 - 4.0, cy - p.cell / 2.0 - 4.0,
+                    p.cell + 8.0, p.cell + 8.0, p.cell * 0.2, palette::ACCENT,
+                );
+                draw_cell(cx, cy, p.cell, palette::ACCENT_SOFT);
+            } else {
+                draw_cell(cx, cy, p.cell, palette::WHITE);
+            }
             draw_item(item, cx, cy, p.cell * 0.78, ctx);
         }
-        // slot
-        let (sx, sy) = p.cell_center(self.round.visible.len());
-        draw_cell(sx, sy, p.cell * pulse, palette::ACCENT_SOFT);
-        text::draw_centered("?", sx, sy, (p.cell * 0.7) as u16, &ctx.fonts.cursive, palette::ACCENT);
 
-        // Choices.
-        for (i, r) in p.choices.iter().enumerate() {
-            let mut fill = palette::CARD;
-            let mut dy = 0.0;
-            if self.selected == Some(i) {
-                match self.result {
-                    Some(true) => {
-                        fill = palette::OK;
-                        let prog = (self.fb_time / 0.4).clamp(0.0, 1.0);
-                        dy = -10.0 * crate::anim::back_out(prog).min(1.2) * (1.0 - prog);
+        match self.mode {
+            GameMode::Next => {
+                // The pink `?` slot to fill.
+                let (sx, sy) = p.cell_center(self.round.visible.len());
+                draw_cell(sx, sy, p.cell * pulse, palette::ACCENT_SOFT);
+                text::draw_centered("?", sx, sy, (p.cell * 0.7) as u16, &ctx.fonts.cursive, palette::ACCENT);
+                // Choice buttons.
+                for (i, r) in p.choices.iter().enumerate() {
+                    let mut fill = palette::CARD;
+                    let mut dy = 0.0;
+                    if self.selected == Some(i) {
+                        match self.result {
+                            Some(true) => {
+                                fill = palette::OK;
+                                let prog = (self.fb_time / 0.4).clamp(0.0, 1.0);
+                                dy = -10.0 * crate::anim::back_out(prog).min(1.2) * (1.0 - prog);
+                            }
+                            Some(false) => {
+                                fill = palette::BAD;
+                                dy = (self.fb_time * 40.0).sin() * 6.0 * (1.0 - (self.fb_time / RETRY_DELAY)).max(0.0);
+                            }
+                            None => {}
+                        }
                     }
-                    Some(false) => {
-                        fill = palette::BAD;
-                        dy = (self.fb_time * 40.0).sin() * 6.0 * (1.0 - (self.fb_time / RETRY_DELAY)).max(0.0);
-                    }
-                    None => {}
+                    draw::card(r.x, r.y + dy, r.w, r.h, fill);
+                    draw_item(&self.round.choices[i], r.x + r.w / 2.0, r.y + r.h / 2.0 + dy, r.h * 0.5, ctx);
                 }
             }
-            draw::card(r.x, r.y + dy, r.w, r.h, fill);
-            draw_item(&self.round.choices[i], r.x + r.w / 2.0, r.y + r.h / 2.0 + dy, r.h * 0.5, ctx);
+            GameMode::Unit => {
+                // Submit FAB appears once a selection exists.
+                if self.sel.is_some() {
+                    let fab = unit_fab(&ctx.frame);
+                    let s = 1.0 + 0.05 * crate::anim::pulse(ctx.time, 1.4).max(0.0);
+                    draw::circle_btn(fab.0.x, fab.0.y, fab.1 * s, palette::OK);
+                    draw::mark_check(fab.0.x, fab.0.y, fab.1, palette::OK_STRONG);
+                }
+            }
         }
 
         self.confetti.draw();
