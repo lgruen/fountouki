@@ -20,7 +20,10 @@ use fountouki_core::{
 };
 use macroquad::prelude::*;
 
-const CORRECT_PER_LEVEL: u32 = 4;
+/// Consecutive correct answers needed to level up. The streak resets on a
+/// wrong answer, so a level only advances on a clean run (mastery), never on a
+/// mistake-then-correct. Stars stay monotonic regardless.
+const LEVEL_UP_STREAK: u32 = 4;
 const ADVANCE_DELAY: f32 = 0.85;
 const RETRY_DELAY: f32 = 0.55;
 
@@ -34,7 +37,6 @@ pub struct PatternsScene {
     pub level: u32,
     pub stars: u32,
     streak: u32,
-    correct_count: u32,
     round: Round,
     selected: Option<usize>,
     result: Option<bool>, // Some(true)=correct, Some(false)=wrong
@@ -66,7 +68,6 @@ impl PatternsScene {
             level: 1,
             stars: 0,
             streak: 0,
-            correct_count: 0,
             round,
             selected: None,
             result: None,
@@ -120,9 +121,9 @@ impl PatternsScene {
         self.confetti.burst(origin, 80, spread);
         self.stars += 1;
         self.streak += 1;
-        self.correct_count += 1;
         ctx.audio.correct(self.streak);
-        if self.correct_count % CORRECT_PER_LEVEL == 0 && self.level < MAX_LEVEL {
+        if self.streak >= LEVEL_UP_STREAK && self.level < MAX_LEVEL {
+            self.streak = 0;
             self.level += 1;
             ctx.audio.level_up();
         }

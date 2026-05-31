@@ -273,6 +273,52 @@ async fn main() {
                 fails += 1;
             }
         }
+        // patterns: a level only advances on a CLEAN streak of LEVEL_UP_STREAK
+        // correct in a row. A wrong answer breaks the streak, so
+        // mistake-then-correct must NOT bump the level (stars still climb
+        // monotonically). Regression guard: the old code counted cumulative
+        // correct answers, so a mistake mid-run still leveled up.
+        {
+            let mut sc = PatternsScene::new(Db::mem(), 21, now);
+            // Tap the correct choice, then settle past the advance animation so
+            // the next round is generated.
+            let play_correct = |sc: &mut PatternsScene| {
+                let ci = sc.correct_index();
+                let ptr = tap(sc.choice_center(&frame, ci));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let idle = Pointer::default();
+                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            };
+            // Tap a wrong choice, then settle past the retry delay (errorless).
+            let play_wrong = |sc: &mut PatternsScene| {
+                let ci = sc.correct_index();
+                let n = sc.round().choices.len();
+                let wrong = (ci + 1) % n;
+                let ptr = tap(sc.choice_center(&frame, wrong));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let idle = Pointer::default();
+                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            };
+            // Three clean correct: one short of a level-up.
+            for _ in 0..3 { play_correct(&mut sc); }
+            let lvl = sc.level;
+            // A mistake breaks the run, so the very next correct must NOT advance.
+            play_wrong(&mut sc);
+            play_correct(&mut sc);
+            let held = sc.level == lvl;
+            // A fresh clean run of LEVEL_UP_STREAK then does advance.
+            for _ in 0..4 { play_correct(&mut sc); }
+            if held && sc.level == lvl + 1 && sc.stars == 8 {
+                println!("PASS patterns-level-streak");
+            } else {
+                println!("FAIL patterns-level-streak (held={}, level {}->{}, stars={})", held, lvl, sc.level, sc.stars);
+                fails += 1;
+            }
+        }
         println!("PLAYTEST done, {fails} failure(s)");
         std::process::exit(if fails == 0 { 0 } else { 1 });
     }
