@@ -371,8 +371,16 @@ export function mount(container: HTMLElement, opts: MountOpts): () => void {
     // letter is graded — so a newly mastered letter frees a slot for
     // the next intro on the next drain, not mid-queue.
     if (queue.length === 0) queue = buildQueue(state);
-    const next = queue.shift();
-    if (!next) return;
+    let next = queue.shift();
+    // Never show the same letter twice in a row when there's a real
+    // alternative — a fresh shuffle can put the just-graded letter first
+    // again at the queue seam, which reads as a glitch. Swap it deeper.
+    if (next !== undefined && next === currentLetter && queue.length > 0) {
+      const alt = queue.shift()!;
+      queue.splice(Math.min(REQUEUE_GAP, queue.length), 0, next);
+      next = alt;
+    }
+    if (next === undefined) return;
     currentLetter = next;
     inMissReveal = false;
     letterEl.textContent = next;

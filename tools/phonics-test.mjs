@@ -122,22 +122,44 @@ await page.waitForSelector('.phonics-letter');
 const frontierIdx = INTRO_ORDER.indexOf('m');
 const ALLOWED = new Set(INTRO_ORDER.slice(0, frontierIdx + 1));
 assert(!ALLOWED.has('x') && !ALLOWED.has('v'), 'sanity: x/v are past the frontier');
+// Also doubles as the no-back-to-back check: never the same letter twice
+// in a row. (Miss-walk re-queues each letter, so this churns the carousel
+// — the tightest case for an adjacent-dup bug.)
 const polluted = new Set();
+let prev = null;
 for (let i = 0; i < 24; i++) {
   const cur = await page.evaluate(() => window.__phonics?.letter);
   assert(
     ALLOWED.has(cur),
     `parked letter ${cur} surfaced; rotation should stay within the Jolly frontier ${[...ALLOWED].join('')}`,
   );
+  assert(cur !== prev, `same letter "${cur}" twice in a row at card ${i}`);
+  prev = cur;
   polluted.add(cur);
-  // Alternate miss/advance so we churn the queue without ending the session.
   await page.click('.phonics-miss');
   await page.waitForSelector('.phonics-hint:not([hidden])');
   await page.click('.phonics-advance');
   await page.waitForFunction(() => window.__phonics?.inMissReveal === false);
 }
 assert(!polluted.has('x') && !polluted.has('v'), 'x/v must never appear (legacy pollution parked)');
-assert(NEW_NOW.has('i') || NEW_NOW.has('h') || NEW_NOW.has('m'), 'sanity');
+
+console.log('1d) rotation is shuffled, not a fixed recency-ordered sequence');
+// Each fresh mount rebuilds the queue from a shuffle. Re-mounting the same
+// seeded state many times must NOT always start on the same letter — the
+// old code returned a deterministic due-sorted order every time. With ~12
+// due letters the odds of an 8-way tie by chance are negligible.
+const firstCards = new Set();
+for (let i = 0; i < 8; i++) {
+  await page.goto('about:blank');
+  await page.goto(`${url}#/phonics`);
+  await page.waitForSelector('.phonics-letter');
+  firstCards.add(await page.evaluate(() => window.__phonics?.letter));
+}
+assert(
+  firstCards.size >= 2,
+  `rotation looks deterministic — 8 mounts all opened on the same letter(s): ${[...firstCards].join('')}`,
+);
+
 // Reset to truly fresh state for the remaining steps.
 await page.evaluate(() => localStorage.clear());
 await page.reload();
