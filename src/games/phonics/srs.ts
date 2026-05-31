@@ -163,25 +163,38 @@ export function activeLetters(state: PhonicsState): string[] {
   return active;
 }
 
-/** Build a session queue from the active set: letters with due <= now,
- *  sorted by due asc. If none are due, fall back to all active letters
- *  sorted by box asc → due asc so the kid can always practice. */
-export function buildQueue(state: PhonicsState, now = Date.now()): string[] {
-  const active = activeLetters(state);
-  const due: Array<[string, LetterState]> = [];
-  for (const l of active) {
-    const s = state.letters[l];
-    if (s && s.due <= now) due.push([l, s]);
+/** Fisher–Yates shuffle in place. rng injectable for deterministic tests. */
+function shuffle<T>(arr: T[], rng: () => number): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j]!, arr[i]!];
   }
-  if (due.length > 0) {
-    due.sort((a, b) => a[1].due - b[1].due);
-    return due.map(([l]) => l);
-  }
-  const all: Array<[string, LetterState]> = [];
-  for (const l of active) {
-    const s = state.letters[l];
-    if (s) all.push([l, s]);
-  }
-  all.sort((a, b) => a[1].box - b[1].box || a[1].due - b[1].due);
-  return all.map(([l]) => l);
+  return arr;
+}
+
+/** Build a session queue from the active set.
+ *
+ *  A queue is a *permutation* of the relevant active letters, so every
+ *  pass shows each letter once before any repeats — coverage + spacing
+ *  for free. Order is shuffled (not due-sorted) so consecutive sessions
+ *  don't replay the same recency-ordered sequence, which reads as
+ *  mechanical rather than playful.
+ *
+ *  Letters with due <= now are preferred (genuine SRS spacing across a
+ *  day). When none are due — the impatient same-session case — fall back
+ *  to all active letters so there's never dead air, lightly biased toward
+ *  weaker (lower-box) letters via a stable sort that keeps within-box
+ *  order shuffled. Avoiding the *same letter twice in a row* across queue
+ *  rebuilds is the caller's job (it knows the last card shown). */
+export function buildQueue(
+  state: PhonicsState,
+  now = Date.now(),
+  rng: () => number = Math.random,
+): string[] {
+  const active = activeLetters(state).filter((l) => state.letters[l]);
+  const due = active.filter((l) => state.letters[l]!.due <= now);
+  if (due.length > 0) return shuffle(due, rng);
+  shuffle(active, rng);
+  active.sort((a, b) => state.letters[a]!.box - state.letters[b]!.box);
+  return active;
 }
