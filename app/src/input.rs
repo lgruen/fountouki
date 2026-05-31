@@ -1,6 +1,7 @@
-//! Unified pointer (mouse or first touch) with press/release edges, held time
-//! (for 500ms long-press), and hit-testing. Built so a scripted Pointer can be
-//! injected for deterministic play-tests instead of reading macroquad.
+//! Unified pointer (mouse or first touch) with press/release edges, held time,
+//! long-press detection (500ms), and hit-testing. A completed long-press
+//! suppresses the trailing tap. Built so a scripted Pointer can be injected for
+//! deterministic play-tests.
 use macroquad::prelude::*;
 
 pub const LONG_PRESS_SECS: f32 = 0.5;
@@ -14,6 +15,10 @@ pub struct Pointer {
     pub press_pos: Vec2,
     /// Seconds the current press has been held (0 when up).
     pub held: f32,
+    /// True the single frame a held press crosses the long-press threshold.
+    pub long_fired: bool,
+    /// This release follows a long-press → suppress the synthetic tap.
+    suppress_tap: bool,
 }
 
 impl Pointer {
@@ -38,17 +43,25 @@ impl Pointer {
         } else {
             0.0
         };
-        Pointer { pos, down, just_pressed, just_released, press_pos, held }
+        let was_long_prev = prev.down && prev.held >= LONG_PRESS_SECS;
+        let is_long_now = down && held >= LONG_PRESS_SECS;
+        let long_fired = is_long_now && !was_long_prev;
+        let suppress_tap = just_released && was_long_prev;
+        Pointer {
+            pos,
+            down,
+            just_pressed,
+            just_released,
+            press_pos,
+            held,
+            long_fired,
+            suppress_tap,
+        }
     }
 
-    /// True on the frame a held press crosses the long-press threshold.
-    pub fn long_press_crossed(&self, prev_held: f32) -> bool {
-        self.down && prev_held < LONG_PRESS_SECS && self.held >= LONG_PRESS_SECS
-    }
-
-    /// A "tap" = released without travelling far and without a long-press.
+    /// A "tap" = released without travelling far and not following a long-press.
     pub fn tapped(&self) -> bool {
-        self.just_released && (self.pos - self.press_pos).length() < 16.0
+        self.just_released && (self.pos - self.press_pos).length() < 16.0 && !self.suppress_tap
     }
 }
 

@@ -134,6 +134,9 @@ impl Scene for PhonicsScene {
         self.hop_time += ctx.dt;
         let p = plan(&ctx.frame);
         let pt = ctx.pointer;
+        if pt.long_fired && input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
+            return Nav::OpenParent;
+        }
         if !pt.tapped() {
             return Nav::Stay;
         }

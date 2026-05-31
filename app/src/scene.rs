@@ -20,6 +20,8 @@ pub enum Nav {
     Stay,
     Home,
     Game(String),
+    /// Long-press on ← : open the parent settings panel for the current scene.
+    OpenParent,
 }
 
 pub trait Scene {

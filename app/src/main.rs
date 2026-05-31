@@ -18,6 +18,7 @@ mod text;
 
 use games::patterns::PatternsScene;
 use games::phonics::PhonicsScene;
+use games::picker::PickerScene;
 use input::Pointer;
 use layout::{Frame, Insets};
 use scene::{Ctx, Nav, Scene};
@@ -37,6 +38,15 @@ fn window_conf() -> Conf {
 
 fn now_ms() -> i64 {
     (macroquad::miniquad::date::now() * 1000.0) as i64
+}
+
+/// The game registry: route id → a fresh scene. Adding a game = one arm here
+/// plus an entry in `games::picker::GAMES`.
+fn build_game(id: &str, db: &Db, now: i64) -> Box<dyn Scene> {
+    match id {
+        "patterns" => Box::new(PatternsScene::new(db.clone(), now as u32 ^ 0x1234_5678, now)),
+        _ => Box::new(PhonicsScene::new(db.clone(), now as u32 ^ 0x5bd1_e995, now)),
+    }
 }
 
 fn capture_camera(rt: &RenderTarget, w: f32, h: f32) -> Camera2D {
@@ -90,6 +100,7 @@ async fn main() {
                 sc.stars = 7;
                 Box::new(sc)
             }
+            "picker" => Box::new(PickerScene::new()),
             _ => {
                 let mut sc = PhonicsScene::new(db.clone(), 7, now);
                 sc.stars = 3; // mid-session for a representative shot
@@ -127,8 +138,7 @@ async fn main() {
         fountouki_core::settings::load_shared(&**kv).muted
     };
     let audio = Audio::load(muted).await;
-    let mut scene: Box<dyn Scene> =
-        Box::new(PhonicsScene::new(db.clone(), now_ms() as u32, now_ms()));
+    let mut scene: Box<dyn Scene> = Box::new(PickerScene::new());
     let mut ptr = Pointer::default();
 
     loop {
@@ -146,10 +156,10 @@ async fn main() {
         };
         let nav = scene.update(&ctx);
         match nav {
-            Nav::Home => {
-                scene = Box::new(PhonicsScene::new(db.clone(), now_ms() as u32, now_ms()));
-            }
-            Nav::Game(_) | Nav::Stay => {}
+            Nav::Home => scene = Box::new(PickerScene::new()),
+            Nav::Game(id) => scene = build_game(&id, &db, now_ms()),
+            Nav::OpenParent => { /* parent settings panel — wired next */ }
+            Nav::Stay => {}
         }
         scene.draw(&ctx);
         if is_key_pressed(KeyCode::Escape) {

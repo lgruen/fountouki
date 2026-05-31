@@ -127,10 +127,13 @@ impl Scene for PatternsScene {
         }
 
         let pt = ctx.pointer;
+        let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1);
+        if pt.long_fired && input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
+            return Nav::OpenParent;
+        }
         if !pt.tapped() {
             return Nav::Stay;
         }
-        let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1);
         if input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
             return Nav::Home;
         }

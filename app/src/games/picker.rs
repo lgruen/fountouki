@@ -1,0 +1,116 @@
+//! Home picker: large tiles, one per game, with drawn icon teasers (no emoji,
+//! no acorn — the acorn is the launcher icon only). Tap a tile → open that game.
+use crate::{
+    draw, input,
+    palette,
+    scene::{Ctx, Nav, Scene},
+    text,
+};
+use macroquad::prelude::*;
+
+/// (route id, label). Order = display order. Adding a game = add an entry +
+/// a match arm in `draw_icon` and `main::build_game`.
+pub const GAMES: &[(&str, &str)] = &[("patterns", "patterns"), ("phonics", "phonics")];
+
+pub struct PickerScene;
+
+impl PickerScene {
+    pub fn new() -> PickerScene {
+        PickerScene
+    }
+}
+
+impl Scene for PickerScene {
+    fn update(&mut self, ctx: &Ctx) -> Nav {
+        let pt = ctx.pointer;
+        if !pt.tapped() {
+            return Nav::Stay;
+        }
+        let (m, mr) = mute_pos(&ctx.frame);
+        if input::hit_circle(pt.pos, m.x, m.y, mr) {
+            ctx.audio.set_muted(!ctx.audio.muted());
+            return Nav::Stay;
+        }
+        for (i, (id, _)) in GAMES.iter().enumerate() {
+            let r = tile_rect(&ctx.frame, i);
+            if input::hit_rect(pt.pos, r.x, r.y, r.w, r.h) {
+                return Nav::Game(id.to_string());
+            }
+        }
+        Nav::Stay
+    }
+
+    fn draw(&mut self, ctx: &Ctx) {
+        clear_background(palette::BG);
+        let (m, mr) = mute_pos(&ctx.frame);
+        draw::circle_btn(m.x, m.y, mr, palette::CARD);
+        draw::speaker(m.x, m.y, mr * 0.9, palette::INK, ctx.audio.muted());
+
+        for (i, (id, label)) in GAMES.iter().enumerate() {
+            let r = tile_rect(&ctx.frame, i);
+            draw::card(r.x, r.y, r.w, r.h, palette::CARD);
+            draw_icon(id, r, ctx);
+            text::draw_centered(
+                label,
+                r.x + r.w / 2.0,
+                r.y + r.h * 0.84,
+                (r.w * 0.13) as u16,
+                &ctx.fonts.cursive,
+                palette::MUTED,
+            );
+        }
+    }
+}
+
+fn mute_pos(f: &crate::layout::Frame) -> (Vec2, f32) {
+    let tb = f.topbar();
+    let ir = f.icon_btn() / 2.0;
+    (vec2(tb.x + tb.w - ir, tb.y + ir), ir)
+}
+
+fn tile_rect(f: &crate::layout::Frame, i: usize) -> Rect {
+    let n = GAMES.len() as f32;
+    let tw = (f.w * 0.24).clamp(170.0, 260.0);
+    let th = tw * 1.12;
+    let gap = (f.w * 0.04).clamp(20.0, 60.0);
+    let total = n * tw + (n - 1.0) * gap;
+    let x0 = f.w / 2.0 - total / 2.0;
+    let y = f.h / 2.0 - th / 2.0;
+    Rect::new(x0 + i as f32 * (tw + gap), y, tw, th)
+}
+
+/// Drawn icon teaser per game (mechanic preview without reading).
+fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
+    let cx = r.x + r.w / 2.0;
+    let cy = r.y + r.h * 0.42;
+    match id {
+        "patterns" => {
+            // mini sequence: circle, triangle, pink ?
+            let s = r.w * 0.18;
+            let gap = s * 0.5;
+            let x0 = cx - (s + gap);
+            draw_circle(x0, cy, s / 2.0, palette::RAINBOW[3]);
+            draw_triangle(
+                vec2(x0 + s + gap, cy - s / 2.0),
+                vec2(x0 + s + gap - s / 2.0, cy + s / 2.0),
+                vec2(x0 + s + gap + s / 2.0, cy + s / 2.0),
+                palette::RAINBOW[1],
+            );
+            draw::rounded_rect(x0 + 2.0 * (s + gap) - s / 2.0, cy - s / 2.0, s, s, s * 0.2, palette::ACCENT_SOFT);
+            text::draw_centered("?", x0 + 2.0 * (s + gap), cy, (s * 0.9) as u16, &ctx.fonts.cursive, palette::ACCENT);
+        }
+        "phonics" => {
+            // mini rainbow + a little frog blob
+            let scale = r.w / 240.0 * 0.9;
+            draw::rainbow(cx, cy + r.w * 0.12, scale, (8.0 * scale).max(5.0), 7);
+            let fr = r.w * 0.12;
+            let fy = cy + r.w * 0.18;
+            draw_circle(cx, fy, fr, palette::RAINBOW[3]);
+            draw_circle(cx - fr * 0.4, fy - fr * 0.5, fr * 0.28, palette::WHITE);
+            draw_circle(cx + fr * 0.4, fy - fr * 0.5, fr * 0.28, palette::WHITE);
+            draw_circle(cx - fr * 0.4, fy - fr * 0.5, fr * 0.12, palette::INK);
+            draw_circle(cx + fr * 0.4, fy - fr * 0.5, fr * 0.12, palette::INK);
+        }
+        _ => {}
+    }
+}
