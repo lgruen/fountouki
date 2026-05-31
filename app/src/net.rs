@@ -13,6 +13,10 @@ pub struct SyncClient {
     game: &'static str,
     pull: Option<Request>,
     pulled: bool,
+    /// Token the current pull was started for. Re-pull when this changes so a
+    /// token entered/edited mid-session fetches its stored state without a
+    /// scene remount. `None` = not configured (nothing to pull).
+    pulled_token: Option<String>,
     pushes: Vec<Request>,
     deb: Debouncer,
 }
@@ -24,11 +28,12 @@ impl SyncClient {
             db,
             game,
             pull: None,
-            pulled: false,
+            pulled: true,
+            pulled_token: None,
             pushes: Vec::new(),
             deb: Debouncer::new(),
         };
-        c.begin_pull();
+        c.start_pull();
         c
     }
 
@@ -47,18 +52,32 @@ impl SyncClient {
         Some((endpoint, token))
     }
 
-    fn begin_pull(&mut self) {
-        if let Some((ep, token)) = self.cfg() {
-            let url = sync::sync_url(Some(&ep), &token, self.game);
-            self.pull = Some(RequestBuilder::new(&url).send());
-        } else {
-            self.pulled = true; // not configured — nothing to pull
+    /// (Re)start the pull for the currently-configured token, recording it in
+    /// `pulled_token`. With no token it's a no-op pull (nothing to fetch).
+    fn start_pull(&mut self) {
+        match self.cfg() {
+            Some((ep, token)) => {
+                let url = sync::sync_url(Some(&ep), &token, self.game);
+                self.pull = Some(RequestBuilder::new(&url).send());
+                self.pulled = false;
+                self.pulled_token = Some(token);
+            }
+            None => {
+                self.pull = None;
+                self.pulled = true; // not configured — nothing to pull
+                self.pulled_token = None;
+            }
         }
     }
 
-    /// Returns the remote blob exactly once, when the initial pull completes.
-    /// The caller merges it into local state.
+    /// Returns the remote blob once per (re)pull, when it completes. The caller
+    /// merges it into local state. A token change since the last pull — e.g. one
+    /// just entered in the parent menu — restarts the pull against it.
     pub fn poll_pull(&mut self) -> Option<String> {
+        let token = self.cfg().map(|(_, t)| t);
+        if token != self.pulled_token {
+            self.start_pull();
+        }
         if self.pulled {
             return None;
         }
