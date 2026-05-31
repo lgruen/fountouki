@@ -103,8 +103,21 @@ impl PatternsScene {
     }
 
     fn score_correct(&mut self, ctx: &Ctx) {
-        let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1);
-        self.confetti.burst(vec2(p.seq.x + p.seq.w / 2.0, p.seq.y + p.seq.h / 2.0), 80, p.seq.w / 4.0);
+        let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1, self.mode);
+        // Burst from the thing the kid just touched (the picked choice, or the
+        // unit submit FAB) so the celebration reads as a reaction to the tap —
+        // chips fan upward from there across to the sequence above.
+        let (origin, spread) = match (self.mode, self.selected) {
+            (GameMode::Next, Some(i)) => {
+                let r = p.choices[i];
+                (vec2(r.x + r.w / 2.0, r.y + r.h / 2.0), r.w / 2.0)
+            }
+            _ => {
+                let fab = unit_fab(&ctx.frame);
+                (fab.0, fab.1)
+            }
+        };
+        self.confetti.burst(origin, 80, spread);
         self.stars += 1;
         self.streak += 1;
         self.correct_count += 1;
@@ -171,12 +184,12 @@ impl PatternsScene {
             .unwrap_or(0)
     }
     pub(crate) fn choice_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
-        let p = plan(f, self.round.choices.len(), self.round.visible.len() + 1);
+        let p = plan(f, self.round.choices.len(), self.round.visible.len() + 1, self.mode);
         let r = p.choices[i];
         vec2(r.x + r.w / 2.0, r.y + r.h / 2.0)
     }
     pub(crate) fn cell_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
-        let p = plan(f, self.round.choices.len(), self.round.visible.len() + 1);
+        let p = plan(f, self.round.choices.len(), self.round.visible.len() + 1, self.mode);
         let (x, y) = p.cell_center(i);
         vec2(x, y)
     }
@@ -209,7 +222,7 @@ impl Scene for PatternsScene {
         }
 
         let pt = ctx.pointer;
-        let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1);
+        let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1, self.mode);
         if pt.long_fired && input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
             return Nav::OpenParent;
         }
@@ -254,7 +267,7 @@ impl Scene for PatternsScene {
 
     fn draw(&mut self, ctx: &Ctx) {
         clear_background(palette::BG);
-        let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1);
+        let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1, self.mode);
 
         // Topbar: home, stars + level pips, mute.
         draw::circle_btn(p.home.0.x, p.home.0.y, p.home.1, palette::CARD);
@@ -410,17 +423,17 @@ impl PLayout {
     }
 }
 
-fn plan(f: &crate::layout::Frame, n_choices: usize, seq_cells: usize) -> PLayout {
+fn plan(f: &crate::layout::Frame, n_choices: usize, seq_cells: usize, mode: GameMode) -> PLayout {
     let tb = f.topbar();
     let ir = f.icon_btn() / 2.0;
+    let content = f.content();
 
     let seq_h = (f.h * 0.16).clamp(90.0, 150.0);
     let seq_w = (f.w * 0.8).clamp(300.0, 900.0);
-    let seq = Rect::new(f.w / 2.0 - seq_w / 2.0, f.h * 0.30 - seq_h / 2.0, seq_w, seq_h);
 
     // Fit all sequence cells (incl. the `?` slot) across 92% of the bar.
     let n = seq_cells.max(1) as f32;
-    let cell = ((seq.w * 0.92) / (n * 1.16)).clamp(28.0, 104.0).min(seq_h * 0.78);
+    let cell = ((seq_w * 0.92) / (n * 1.16)).clamp(28.0, 104.0).min(seq_h * 0.78);
 
     // Choices row (2- or 3-up grid) below the sequence.
     let cols = (if n_choices > 4 { 3 } else { 2 }).min(n_choices.max(1));
@@ -428,7 +441,28 @@ fn plan(f: &crate::layout::Frame, n_choices: usize, seq_cells: usize) -> PLayout
     let cw = (f.w * 0.2).clamp(140.0, 240.0);
     let ch = (f.h * 0.16).clamp(96.0, 180.0);
     let cgap = 20.0;
-    let gy0 = f.h * 0.62;
+    let choices_h = rows as f32 * ch + (rows as f32 - 1.0) * cgap;
+
+    // Place the sequence + the choices below it. In `next` mode we keep them as
+    // one [sequence | gap | choices] group with a controlled gap, biased toward
+    // the upper third of the play region (below the topbar, above the safe
+    // bottom). This keeps the pattern in its familiar reading position while
+    // pulling the choices up close to it — no big mid-screen void on short
+    // phone-landscape. Unit mode keeps its own anchor (sequence high, FAB low).
+    let (seq_y, gy0) = match mode {
+        GameMode::Next => {
+            let group_gap = (f.h * 0.07).clamp(36.0, 110.0);
+            let group_h = seq_h + group_gap + choices_h;
+            let region_top = tb.y + tb.h;
+            let region_bot = content.y + content.h;
+            let slack = (region_bot - region_top - group_h).max(0.0);
+            let top = region_top + slack * 0.34;
+            (top, top + seq_h + group_gap)
+        }
+        GameMode::Unit => (f.h * 0.30 - seq_h / 2.0, f.h * 0.62),
+    };
+    let seq = Rect::new(f.w / 2.0 - seq_w / 2.0, seq_y, seq_w, seq_h);
+
     let mut choices = Vec::new();
     for i in 0..n_choices {
         let r = i / cols;
