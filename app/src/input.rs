@@ -19,21 +19,31 @@ pub struct Pointer {
     pub long_fired: bool,
     /// This release follows a long-press → suppress the synthetic tap.
     suppress_tap: bool,
+    /// We're driving from touch (not mouse) — so a release where `touches()`
+    /// has gone empty is reported at the last touch position, not the mouse.
+    is_touch: bool,
 }
 
 impl Pointer {
     /// Evolve from the previous frame by reading macroquad (touch preferred).
     pub fn poll(prev: &Pointer, dt: f32) -> Pointer {
         let ts = touches();
-        let (pos, down) = if let Some(t) = ts.first() {
+        let (pos, down, is_touch) = if let Some(t) = ts.first() {
+            // Active touch (Started/Moved/Stationary) → down; Ended/Cancelled →
+            // released this frame, but the position is still valid.
             let active = matches!(
                 t.phase,
                 TouchPhase::Started | TouchPhase::Moved | TouchPhase::Stationary
             );
-            (t.position, active)
+            (t.position, active, true)
+        } else if prev.is_touch && prev.down {
+            // The touch ended and was already removed from `touches()` this
+            // frame. Report the release at the LAST touch position — falling
+            // back to the (stale/0,0) mouse here is what broke taps on iPad.
+            (prev.pos, false, true)
         } else {
             let mp = mouse_position();
-            (vec2(mp.0, mp.1), is_mouse_button_down(MouseButton::Left))
+            (vec2(mp.0, mp.1), is_mouse_button_down(MouseButton::Left), false)
         };
         let just_pressed = down && !prev.down;
         let just_released = !down && prev.down;
@@ -56,6 +66,7 @@ impl Pointer {
             held,
             long_fired,
             suppress_tap,
+            is_touch,
         }
     }
 
