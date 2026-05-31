@@ -11,6 +11,7 @@ mod games;
 mod input;
 mod layout;
 mod palette;
+mod parent;
 mod scene;
 mod sound;
 mod store;
@@ -19,6 +20,7 @@ mod text;
 use games::patterns::PatternsScene;
 use games::phonics::PhonicsScene;
 use games::picker::PickerScene;
+use parent::{ParentPanel, PanelResult};
 use input::Pointer;
 use layout::{Frame, Insets};
 use scene::{Ctx, Nav, Scene};
@@ -107,6 +109,11 @@ async fn main() {
                 Box::new(sc)
             }
         };
+        let mut panel_opt: Option<ParentPanel> = match which {
+            "parent-patterns" => Some(ParentPanel::open(db.clone(), "patterns", now, 99)),
+            "parent-phonics" => Some(ParentPanel::open(db.clone(), "phonics", now, 99)),
+            _ => None,
+        };
 
         let rt = render_target(w, h);
         rt.texture.set_filter(FilterMode::Linear);
@@ -123,6 +130,9 @@ async fn main() {
             audio: &audio,
         };
         scene.draw(&ctx);
+        if let Some(p) = panel_opt.as_mut() {
+            p.draw(&ctx);
+        }
         set_default_camera();
         clear_background(palette::BG);
         next_frame().await;
@@ -139,6 +149,8 @@ async fn main() {
     };
     let audio = Audio::load(muted).await;
     let mut scene: Box<dyn Scene> = Box::new(PickerScene::new());
+    let mut current_game: Option<String> = None;
+    let mut panel: Option<ParentPanel> = None;
     let mut ptr = Pointer::default();
 
     loop {
@@ -154,14 +166,42 @@ async fn main() {
             fonts: &fonts,
             audio: &audio,
         };
-        let nav = scene.update(&ctx);
-        match nav {
-            Nav::Home => scene = Box::new(PickerScene::new()),
-            Nav::Game(id) => scene = build_game(&id, &db, now_ms()),
-            Nav::OpenParent => { /* parent settings panel — wired next */ }
-            Nav::Stay => {}
+
+        let mut close_rebuild: Option<bool> = None;
+        if let Some(p) = panel.as_mut() {
+            scene.draw(&ctx); // frozen scene as backdrop
+            let res = p.update(&ctx);
+            p.draw(&ctx);
+            if let PanelResult::Close { rebuild } = res {
+                close_rebuild = Some(rebuild || p.took_start_over());
+            }
+        } else {
+            match scene.update(&ctx) {
+                Nav::Home => {
+                    scene = Box::new(PickerScene::new());
+                    current_game = None;
+                }
+                Nav::Game(id) => {
+                    current_game = Some(id.clone());
+                    scene = build_game(&id, &db, now_ms());
+                }
+                Nav::OpenParent => {
+                    let g = current_game.clone().unwrap_or_default();
+                    panel = Some(ParentPanel::open(db.clone(), &g, now_ms(), now_ms() as u32));
+                }
+                Nav::Stay => {}
+            }
+            scene.draw(&ctx);
         }
-        scene.draw(&ctx);
+        if let Some(rebuild) = close_rebuild {
+            panel = None;
+            if rebuild {
+                if let Some(id) = &current_game {
+                    scene = build_game(id, &db, now_ms());
+                }
+            }
+        }
+
         if is_key_pressed(KeyCode::Escape) {
             break;
         }

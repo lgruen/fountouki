@@ -47,3 +47,20 @@ pub fn draw_centered(text: &str, cx: f32, cy: f32, size: u16, font: &Font, color
         },
     );
 }
+
+/// Draw text left-aligned at `x`, vertically centered on `cy`.
+pub fn draw_centered_left(text: &str, x: f32, cy: f32, size: u16, font: &Font, color: Color) {
+    let dim = measure_text(text, Some(font), size, 1.0);
+    let y = cy + dim.offset_y / 2.0;
+    draw_text_ex(
+        text,
+        x,
+        y,
+        TextParams {
+            font: Some(font),
+            font_size: size,
+            color,
+            ..Default::default()
+        },
+    );
+}
