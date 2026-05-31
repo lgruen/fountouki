@@ -121,6 +121,21 @@ impl PhonicsScene {
         let f = &ctx.frame;
         let (frog_c, fr, replay, home_b, br, gy) = done_layout(f);
         draw::vgradient(0.0, 0.0, f.w, gy, palette::SKY_TOP, palette::SKY_BOT);
+        // Ambient drifting clouds (behind the sun + rainbow). They wrap across
+        // the sky; deterministic in goldens since ctx.time is fixed in capture.
+        let cloud_r = f.vmin(0.05).max(24.0);
+        let span = f.w + cloud_r * 8.0;
+        // (height as fraction of the sky band, scale mult, speed px/s, phase 0..1)
+        for &(hy, sc, spd, ph) in &[
+            (0.16f32, 1.15f32, 8.0f32, 0.05f32),
+            (0.40, 0.78, 13.0, 0.33),
+            (0.10, 0.95, 6.0, 0.56),
+            (0.52, 0.66, 17.0, 0.74),
+            (0.28, 1.0, 10.0, 0.88),
+        ] {
+            let x = (ctx.time * spd + ph * span).rem_euclid(span) - cloud_r * 4.0;
+            draw::cloud(x, gy * hy, cloud_r * sc);
+        }
         draw::sun(f.w * 0.17, gy * 0.34, f.vmin(0.07).max(40.0));
         let (rcx, rhoriz, rscale, rstroke) = done_rainbow(f, gy);
         draw::rainbow(rcx, rhoriz, rscale, rstroke, 7);
