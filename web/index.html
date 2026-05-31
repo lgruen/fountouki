@@ -36,6 +36,9 @@
     <!-- Hidden-<input> bridge so mobile soft keyboards work for the parent-menu
          text fields (the canvas alone can't raise one). Reuses sapp_jsutils. -->
     <script src="text_input.js"></script>
+    <!-- localStorage persistence (sync token, mute, local progress). Reuses
+         sapp_jsutils, so it must load after it. -->
+    <script src="storage.js"></script>
     <script>
       load("fountouki.wasm");
       if ("serviceWorker" in navigator) {
