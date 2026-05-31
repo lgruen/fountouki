@@ -6,3 +6,8 @@ screenshots/
 .vscode/
 .idea/
 .wrangler/
+
+# Rust
+/target
+app/smoke.png
+app/out.png

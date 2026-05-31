@@ -1,0 +1,7 @@
+# WASM-only linker flags. macroquad's runtime symbols (now, gl*, console_log, …)
+# are provided by its JS bundle at load time; since Rust stopped passing
+# --allow-undefined to wasm-ld by default (2026), we must opt back in so those
+# undefined symbols become wasm imports. --export-table exposes the indirect
+# function table the JS bundle calls back into. Native targets are unaffected.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--import-undefined", "-C", "link-arg=--export-table"]

@@ -10,22 +10,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium webkit
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm test
-      # Render the full screenshot matrix (chromium + webkit + iOS device
-      # profiles) and upload as an artifact so iOS-specific layout
-      # regressions can be eyeballed on the PR before merge.
-      - run: npm run screenshots
+
+      # macroquad's native (winit/glutin/alsa) deps + xvfb for a headless GL
+      # context. The playtests/goldens run the real renderer offscreen.
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev pkg-config xvfb
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      # Pure-logic core tests (~120) + any app unit tests.
+      - name: Test workspace
+        run: cargo test --workspace
+
+      # Scripted gameplay assertions. Needs a virtual display + software GL
+      # because there's no GPU on the runner.
+      - name: Playtest
+        run: LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a cargo run -p fountouki -- --playtest
+
+      # Golden screenshot matrix (offscreen render-target -> PNG via the same
+      # renderer that ships). Uploaded so layout regressions can be eyeballed.
+      - name: Golden screenshots
+        run: LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a bash tools/goldens.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: screenshots
-          path: screenshots/
+          path: screenshots/golden
           retention-days: 14
+
+      # Make sure the wasm build (the actual deploy target) still links.
+      - name: WASM build check
+        run: cargo build --release -p fountouki --target wasm32-unknown-unknown

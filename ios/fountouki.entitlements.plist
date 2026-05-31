@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Entitlements for codesigning the hand-built fountouki.app on a physical
+     device (macOS Sonoma+ codesign flow). Replace TEAMID with your 10-char
+     Apple Developer Team ID, and the bundle id if you changed it. The
+     application-identifier MUST match the App ID in your provisioning
+     profile, or install/launch will fail with a profile-mismatch error. -->
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>TEAMID.org.gruenschloss.fountouki</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>TEAMID</string>
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>

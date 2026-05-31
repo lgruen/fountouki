@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="theme-color" content="#fef6e4" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="fountouki" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icon-180.png" />
+    <title>fountouki</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #fef6e4; }
+      canvas { display: block; width: 100%; height: 100%; outline: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="glcanvas" tabindex="1"></canvas>
+    <!-- macroquad's JS shim provides the runtime imports the wasm expects. -->
+    <script src="mq_js_bundle.js"></script>
+    <!-- quad-net HTTP plugin (cross-device sync). Order matters: the macroquad
+         bundle defines miniquad_add_plugin; sapp_jsutils must register before
+         quad-net (which uses its JsObject helpers); then load() runs the wasm. -->
+    <script src="sapp_jsutils.js"></script>
+    <script src="quad-net.js"></script>
+    <script>
+      load("fountouki.wasm");
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+      }
+    </script>
+  </body>
+</html>
