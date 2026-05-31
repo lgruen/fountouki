@@ -101,7 +101,7 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
             let scale = r.w / 240.0 * 0.9;
             draw::rainbow(cx, cy + r.w * 0.1, scale, (8.0 * scale).max(5.0), 7);
             let fr = r.w * 0.12;
-            let fy = cy + r.w * 0.10;
+            let fy = cy + r.w * 0.20;
             draw::frog(cx, fy, fr, palette::RAINBOW[3], draw::FrogPose::default());
         }
         _ => {}
