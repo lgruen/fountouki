@@ -9,6 +9,26 @@ const SIN75: f32 = 0.965_926;
 const COS75: f32 = 0.258_819;
 const RAD75: f32 = 1.308_997;
 
+/// Clip subsequent draws to a logical-coordinate rect (for scroll viewports).
+/// macroquad's scissor wants *framebuffer* pixels: the default pass is
+/// logical×dpi, but a capture render-target pass is 1:1 — so scale by dpi only
+/// when no render pass is active (interactive), not in capture. Reset with
+/// [`pop_clip`].
+pub fn push_clip(x: f32, y: f32, w: f32, h: f32) {
+    unsafe {
+        let gl = get_internal_gl().quad_gl;
+        let s = if gl.get_active_render_pass().is_some() { 1.0 } else { screen_dpi_scale() };
+        gl.scissor(Some(((x * s) as i32, (y * s) as i32, (w * s).ceil() as i32, (h * s).ceil() as i32)));
+    }
+}
+
+/// Remove any clip set by [`push_clip`].
+pub fn pop_clip() {
+    unsafe {
+        get_internal_gl().quad_gl.scissor(None);
+    }
+}
+
 /// Filled rounded rectangle.
 pub fn rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32, color: Color) {
     let r = r.min(w / 2.0).min(h / 2.0);
