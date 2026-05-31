@@ -103,6 +103,23 @@ impl PatternsScene {
             ctx.audio.incorrect();
         }
     }
+
+    // Test hooks (used by --playtest).
+    pub(crate) fn round(&self) -> &Round {
+        &self.round
+    }
+    pub(crate) fn correct_index(&self) -> usize {
+        self.round
+            .choices
+            .iter()
+            .position(|c| c.id() == self.round.answer.id())
+            .unwrap_or(0)
+    }
+    pub(crate) fn choice_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        let p = plan(f, self.round.choices.len(), self.round.visible.len() + 1);
+        let r = p.choices[i];
+        vec2(r.x + r.w / 2.0, r.y + r.h / 2.0)
+    }
 }
 
 fn gen(level: u32, choice: ThemeChoice, mode: GameMode, diff: Difficulty, rng: &mut Mulberry32) -> Round {

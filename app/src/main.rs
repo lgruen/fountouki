@@ -42,6 +42,15 @@ fn now_ms() -> i64 {
     (macroquad::miniquad::date::now() * 1000.0) as i64
 }
 
+/// Build a synthetic "tap released here" pointer for scripted play-tests.
+fn tap(pos: Vec2) -> Pointer {
+    let mut p = Pointer::default();
+    p.pos = pos;
+    p.just_released = true;
+    p.press_pos = pos;
+    p
+}
+
 /// The game registry: route id → a fresh scene. Adding a game = one arm here
 /// plus an entry in `games::picker::GAMES`.
 fn build_game(id: &str, db: &Db, now: i64) -> Box<dyn Scene> {
@@ -84,7 +93,10 @@ async fn main() {
             .get(2)
             .cloned()
             .unwrap_or_else(|| "/Users/leo/fountouki/app/out.png".to_string());
-        let (w, h) = (1194u32, 834u32); // iPad Pro 11 landscape CSS px
+        // iPad Pro 11 landscape CSS px by default; overridable for the golden
+        // matrix (--capture <path> <scene> [w] [h]).
+        let w = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(1194u32);
+        let h = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(834u32);
         let audio = Audio::silent();
         let db = Db::mem();
         let now = 1_717_000_000_000i64;
@@ -139,6 +151,65 @@ async fn main() {
         save_capture(&rt, w, h, &path);
         println!("CAPTURE_OK {path}");
         std::process::exit(0);
+    }
+
+    // Scripted play-tests: drive the real scenes with synthetic taps and assert
+    // gameplay invariants. No rendering needed; exits non-zero on any failure.
+    if args.get(1).map(|s| s == "--playtest").unwrap_or(false) {
+        let audio = Audio::silent();
+        let frame = Frame::new(1194.0, 834.0, Insets::default());
+        let now = 1_717_000_000_000i64;
+        let mut fails = 0;
+
+        // phonics: 7 "got it" taps complete the rainbow.
+        {
+            let mut sc = PhonicsScene::new(Db::mem(), 7, now);
+            for _ in 0..7 {
+                let ptr = tap(sc.got_center(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if sc.stars == 7 && sc.is_done() {
+                println!("PASS phonics-session");
+            } else {
+                println!("FAIL phonics-session (stars={}, done={})", sc.stars, sc.is_done());
+                fails += 1;
+            }
+        }
+        // patterns: the correct choice scores a star.
+        {
+            let mut sc = PatternsScene::new(Db::mem(), 7, now);
+            let ci = sc.correct_index();
+            let s0 = sc.stars;
+            let ptr = tap(sc.choice_center(&frame, ci));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if sc.stars == s0 + 1 {
+                println!("PASS patterns-correct");
+            } else {
+                println!("FAIL patterns-correct (stars {}->{})", s0, sc.stars);
+                fails += 1;
+            }
+        }
+        // patterns: a wrong choice does NOT score (errorless).
+        {
+            let mut sc = PatternsScene::new(Db::mem(), 13, now);
+            let ci = sc.correct_index();
+            let n = sc.round().choices.len();
+            let wrong = (ci + 1) % n;
+            let s0 = sc.stars;
+            let ptr = tap(sc.choice_center(&frame, wrong));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if wrong != ci && sc.stars == s0 {
+                println!("PASS patterns-errorless");
+            } else {
+                println!("FAIL patterns-errorless (wrong={}, correct={}, stars {}->{})", wrong, ci, s0, sc.stars);
+                fails += 1;
+            }
+        }
+        println!("PLAYTEST done, {fails} failure(s)");
+        std::process::exit(if fails == 0 { 0 } else { 1 });
     }
 
     // Interactive.

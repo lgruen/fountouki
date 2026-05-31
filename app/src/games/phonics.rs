@@ -127,6 +127,14 @@ impl PhonicsScene {
         let mut kv = self.db.borrow_kv_mut();
         fountouki_core::settings::save_shared(&mut **kv, &s);
     }
+
+    // Test hooks (used by --playtest).
+    pub(crate) fn is_done(&self) -> bool {
+        self.phase == Phase::Done
+    }
+    pub(crate) fn got_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        plan(f).got.0
+    }
 }
 
 impl Scene for PhonicsScene {
