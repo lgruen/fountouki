@@ -16,6 +16,7 @@ mod sound;
 mod store;
 mod text;
 
+use games::patterns::PatternsScene;
 use games::phonics::PhonicsScene;
 use input::Pointer;
 use layout::{Frame, Insets};
@@ -75,8 +76,26 @@ async fn main() {
         let audio = Audio::silent();
         let db = Db::mem();
         let now = 1_717_000_000_000i64;
-        let mut sc = PhonicsScene::new(db, 7, now);
-        sc.stars = 3; // mid-session for a representative shot
+        let which = args.get(3).map(|s| s.as_str()).unwrap_or("phonics");
+        let mut scene: Box<dyn Scene> = match which {
+            "patterns" => {
+                {
+                    let mut kv = db.borrow_kv_mut();
+                    let mut ps = fountouki_core::settings::PatternsSettings::default();
+                    ps.theme_choice = "shapes".to_string();
+                    fountouki_core::settings::save_patterns(&mut **kv, &ps);
+                }
+                let mut sc = PatternsScene::new(db.clone(), 7, now);
+                sc.level = 3;
+                sc.stars = 7;
+                Box::new(sc)
+            }
+            _ => {
+                let mut sc = PhonicsScene::new(db.clone(), 7, now);
+                sc.stars = 3; // mid-session for a representative shot
+                Box::new(sc)
+            }
+        };
 
         let rt = render_target(w, h);
         rt.texture.set_filter(FilterMode::Linear);
@@ -92,7 +111,7 @@ async fn main() {
             fonts: &fonts,
             audio: &audio,
         };
-        sc.draw(&ctx);
+        scene.draw(&ctx);
         set_default_camera();
         clear_background(palette::BG);
         next_frame().await;
