@@ -227,6 +227,18 @@ async fn main() {
                 println!("FAIL phonics-session (stars={}, done={})", sc.stars, sc.is_done());
                 fails += 1;
             }
+            // Done scene: tapping the frog plays a reaction (frog_taps++), and
+            // the scene stays on the celebration (not navigated away).
+            let before = sc.frog_taps();
+            let ptr = tap(sc.frog_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if sc.is_done() && sc.frog_taps() == before + 1 {
+                println!("PASS phonics-frog-react");
+            } else {
+                println!("FAIL phonics-frog-react (done={}, taps {}->{})", sc.is_done(), before, sc.frog_taps());
+                fails += 1;
+            }
         }
         // patterns: the correct choice scores a star.
         {

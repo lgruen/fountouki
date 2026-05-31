@@ -97,16 +97,12 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
             text::draw_centered("?", x0 + 2.0 * (s + gap), cy, (s * 0.9) as u16, &ctx.fonts.cursive, palette::ACCENT);
         }
         "phonics" => {
-            // mini rainbow + a little frog blob
+            // mini rainbow swaying above the frog mascot
             let scale = r.w / 240.0 * 0.9;
-            draw::rainbow(cx, cy + r.w * 0.12, scale, (8.0 * scale).max(5.0), 7);
+            draw::rainbow(cx, cy + r.w * 0.1, scale, (8.0 * scale).max(5.0), 7);
             let fr = r.w * 0.12;
-            let fy = cy + r.w * 0.18;
-            draw_circle(cx, fy, fr, palette::RAINBOW[3]);
-            draw_circle(cx - fr * 0.4, fy - fr * 0.5, fr * 0.28, palette::WHITE);
-            draw_circle(cx + fr * 0.4, fy - fr * 0.5, fr * 0.28, palette::WHITE);
-            draw_circle(cx - fr * 0.4, fy - fr * 0.5, fr * 0.12, palette::INK);
-            draw_circle(cx + fr * 0.4, fy - fr * 0.5, fr * 0.12, palette::INK);
+            let fy = cy + r.w * 0.10;
+            draw::frog(cx, fy, fr, palette::RAINBOW[3], draw::FrogPose::default());
         }
         _ => {}
     }
