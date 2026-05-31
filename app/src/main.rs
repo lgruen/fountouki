@@ -148,6 +148,19 @@ async fn main() {
                 }
                 Box::new(PatternsScene::new(db.clone(), 5, now))
             }
+            "patterns-hard" => {
+                // Hard pins 4 choices (correct + unit-mate + pool distractors) —
+                // exercises the single-row choice layout. emoji-animals has a big
+                // pool so the count is always the full 4.
+                {
+                    let mut kv = db.borrow_kv_mut();
+                    let mut ps = fountouki_core::settings::PatternsSettings::default();
+                    ps.theme_choice = "emoji-animals".to_string();
+                    ps.difficulty = "hard".to_string();
+                    fountouki_core::settings::save_patterns(&mut **kv, &ps);
+                }
+                Box::new(PatternsScene::new(db.clone(), 5, now))
+            }
             "phonics-miss" => {
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = PhonicsScene::new(db.clone(), 7, now);

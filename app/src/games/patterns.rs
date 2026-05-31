@@ -435,13 +435,16 @@ fn plan(f: &crate::layout::Frame, n_choices: usize, seq_cells: usize, mode: Game
     let n = seq_cells.max(1) as f32;
     let cell = ((seq_w * 0.92) / (n * 1.16)).clamp(28.0, 104.0).min(seq_h * 0.78);
 
-    // Choices row (2- or 3-up grid) below the sequence.
-    let cols = (if n_choices > 4 { 3 } else { 2 }).min(n_choices.max(1));
-    let rows = (n_choices + cols - 1) / cols;
-    let cw = (f.w * 0.2).clamp(140.0, 240.0);
-    let ch = (f.h * 0.16).clamp(96.0, 180.0);
+    // Choices: a single row below the sequence — never wrap to a grid, so a
+    // preschooler tracks one left-to-right strip of options (mirrors the
+    // sequence bar above). Keep the familiar per-tile width, but shrink it if
+    // needed so all `n_choices` fit across the play width on one line.
     let cgap = 20.0;
-    let choices_h = rows as f32 * ch + (rows as f32 - 1.0) * cgap;
+    let nf = n_choices.max(1) as f32;
+    let fit_w = (f.w * 0.92 - (nf - 1.0) * cgap) / nf;
+    let cw = (f.w * 0.2).clamp(140.0, 240.0).min(fit_w);
+    let ch = (f.h * 0.16).clamp(96.0, 180.0);
+    let choices_h = ch;
 
     // Place the sequence + the choices below it. In `next` mode we keep them as
     // one [sequence | gap | choices] group with a controlled gap, biased toward
@@ -463,19 +466,11 @@ fn plan(f: &crate::layout::Frame, n_choices: usize, seq_cells: usize, mode: Game
     };
     let seq = Rect::new(f.w / 2.0 - seq_w / 2.0, seq_y, seq_w, seq_h);
 
+    let row_w = nf * cw + (nf - 1.0) * cgap;
+    let x0 = f.w / 2.0 - row_w / 2.0;
     let mut choices = Vec::new();
     for i in 0..n_choices {
-        let r = i / cols;
-        let c = i % cols;
-        let row_n = if r == rows - 1 { n_choices - r * cols } else { cols };
-        let row_w = row_n as f32 * cw + (row_n as f32 - 1.0) * cgap;
-        let x0 = f.w / 2.0 - row_w / 2.0;
-        choices.push(Rect::new(
-            x0 + c as f32 * (cw + cgap),
-            gy0 + r as f32 * (ch + cgap),
-            cw,
-            ch,
-        ));
+        choices.push(Rect::new(x0 + i as f32 * (cw + cgap), gy0, cw, ch));
     }
 
     PLayout {
