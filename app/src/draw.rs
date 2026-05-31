@@ -168,6 +168,84 @@ pub fn speaker(cx: f32, cy: f32, r: f32, color: Color, muted: bool) {
     }
 }
 
+/// Vertical gradient fill (macroquad has no gradient primitive — band it).
+pub fn vgradient(x: f32, y: f32, w: f32, h: f32, top: Color, bot: Color) {
+    const BANDS: usize = 48;
+    let bh = h / BANDS as f32;
+    for i in 0..BANDS {
+        let t = i as f32 / (BANDS as f32 - 1.0);
+        let c = Color::new(
+            crate::anim::lerp(top.r, bot.r, t),
+            crate::anim::lerp(top.g, bot.g, t),
+            crate::anim::lerp(top.b, bot.b, t),
+            1.0,
+        );
+        draw_rectangle(x, y + i as f32 * bh, w, bh + 1.0, c);
+    }
+}
+
+/// Soft glowing sun.
+pub fn sun(cx: f32, cy: f32, r: f32) {
+    draw_circle(cx, cy, r * 1.6, Color::new(1.0, 0.84, 0.4, 0.22));
+    draw_circle(cx, cy, r, palette::SUN_EDGE);
+    draw_circle(cx, cy, r * 0.82, palette::SUN_MID);
+    draw_circle(cx - r * 0.18, cy - r * 0.18, r * 0.5, palette::SUN_CORE);
+}
+
+/// A drawn frog character (the brand mascot — vector, not emoji, so it's
+/// identical everywhere and can be animated). `hop` shifts it vertically.
+pub fn frog(cx: f32, cy: f32, r: f32, color: Color, hop: f32) {
+    let cy = cy + hop;
+    // feet
+    draw_circle(cx - r * 0.55, cy + r * 0.62, r * 0.3, color);
+    draw_circle(cx + r * 0.55, cy + r * 0.62, r * 0.3, color);
+    // body
+    draw_circle(cx, cy, r, color);
+    // eyes (bulging on top)
+    for sx in [-1.0_f32, 1.0] {
+        let ex = cx + sx * r * 0.5;
+        let ey = cy - r * 0.72;
+        draw_circle(ex, ey, r * 0.36, color);
+        draw_circle(ex, ey - r * 0.04, r * 0.27, palette::WHITE);
+        draw_circle(ex, ey, r * 0.13, palette::INK);
+        draw_circle(ex - r * 0.05, ey - r * 0.08, r * 0.05, palette::WHITE);
+    }
+    // smile
+    arc(cx, cy + r * 0.04, r * 0.5, 0.35, std::f32::consts::PI - 0.35, (r * 0.09).max(2.0), palette::INK);
+}
+
+/// A simple drawn flower-plant rising from `ground_y`.
+pub fn plant(cx: f32, ground_y: f32, size: f32) {
+    draw_line(cx, ground_y, cx, ground_y - size, (size * 0.12).max(2.0), palette::GROUND_BOT);
+    let fy = ground_y - size;
+    for k in 0..5 {
+        let a = k as f32 / 5.0 * std::f32::consts::TAU;
+        draw_circle(cx + a.cos() * size * 0.3, fy + a.sin() * size * 0.3, size * 0.22, palette::RAINBOW[0]);
+    }
+    draw_circle(cx, fy, size * 0.22, palette::RAINBOW[2]);
+}
+
+/// Circular-arrow "replay" glyph.
+pub fn replay_icon(cx: f32, cy: f32, r: f32, color: Color) {
+    let w = (r * 0.16).max(2.5);
+    arc(cx, cy, r * 0.5, -2.0, 1.6, w, color);
+    let a = 1.6_f32;
+    let ex = cx + r * 0.5 * a.cos();
+    let ey = cy + r * 0.5 * a.sin();
+    draw_triangle(
+        vec2(ex - r * 0.18, ey - r * 0.04),
+        vec2(ex + r * 0.12, ey - r * 0.16),
+        vec2(ex + r * 0.04, ey + r * 0.2),
+        color,
+    );
+}
+
+/// Little house "home" glyph.
+pub fn house_icon(cx: f32, cy: f32, r: f32, color: Color) {
+    draw_triangle(vec2(cx, cy - r * 0.5), vec2(cx - r * 0.55, cy), vec2(cx + r * 0.55, cy), color);
+    draw_rectangle(cx - r * 0.38, cy, r * 0.76, r * 0.5, color);
+}
+
 /// First milestone scene: a static Phonics card with rainbow + action buttons,
 /// composed against the visual spec at the given pixel size. (Layout is
 /// hardcoded for now; generalized into a layout system once it looks right.)

@@ -41,6 +41,8 @@ pub struct PhonicsScene {
     phase: Phase,
     reveal: Option<deck::Exemplar>,
     hop_time: f32,
+    frog_hop: f32,
+    confetti: crate::confetti::Confetti,
 }
 
 impl PhonicsScene {
@@ -66,7 +68,60 @@ impl PhonicsScene {
             phase: Phase::Card,
             reveal: None,
             hop_time: 99.0,
+            frog_hop: 99.0,
+            confetti: crate::confetti::Confetti::new(seed ^ 0x00c0_ffee),
         }
+    }
+
+    fn restart_session(&mut self, now: i64) {
+        self.stars = 0;
+        self.streak = 0;
+        self.phase = Phase::Card;
+        self.frog_hop = 99.0;
+        self.hop_time = 99.0;
+        self.queue = srs::build_queue(&self.state, now, &mut self.rng);
+        srs::avoid_repeat(&mut self.queue, self.last);
+        self.qi = 0;
+    }
+
+    fn update_done(&mut self, ctx: &Ctx) -> Nav {
+        let (frog_c, fr, replay, home_b, br, _gy) = done_layout(&ctx.frame);
+        let pt = ctx.pointer;
+        if pt.tapped() {
+            if input::hit_circle(pt.pos, replay.x, replay.y, br) {
+                self.restart_session(ctx.now);
+            } else if input::hit_circle(pt.pos, home_b.x, home_b.y, br) {
+                return Nav::Home;
+            } else if input::hit_circle(pt.pos, frog_c.x, frog_c.y, fr) {
+                self.frog_hop = 0.0;
+                ctx.audio.frog();
+            }
+        }
+        Nav::Stay
+    }
+
+    fn draw_done(&self, ctx: &Ctx) {
+        let f = &ctx.frame;
+        let (frog_c, fr, replay, home_b, br, gy) = done_layout(f);
+        draw::vgradient(0.0, 0.0, f.w, gy, palette::SKY_TOP, palette::SKY_BOT);
+        draw::sun(f.w * 0.17, gy * 0.34, f.vmin(0.07).max(40.0));
+        let scale = 0.72 * f.w / 169.4;
+        draw::rainbow(f.w / 2.0, gy * 0.95, scale, (14.0 * scale).max(10.0), 7);
+        draw::vgradient(0.0, gy, f.w, f.h - gy, palette::GROUND_TOP, palette::GROUND_BOT);
+        draw_line(0.0, gy, f.w, gy, 3.0, palette::hex(0x2f7d2f));
+        draw::plant(f.w * 0.28, gy, f.vmin(0.06));
+        draw::plant(f.w * 0.74, gy, f.vmin(0.05));
+        let hop = if self.frog_hop < 0.5 {
+            -(fr * 0.5) * ((self.frog_hop / 0.5) * std::f32::consts::PI).sin()
+        } else {
+            0.0
+        };
+        draw::frog(frog_c.x, frog_c.y, fr, palette::RAINBOW[3], hop);
+        let white = Color::new(1.0, 1.0, 1.0, 0.94);
+        draw::circle_btn(replay.x, replay.y, br, white);
+        draw::replay_icon(replay.x, replay.y, br, palette::INK);
+        draw::circle_btn(home_b.x, home_b.y, br, white);
+        draw::house_icon(home_b.x, home_b.y, br, palette::INK);
     }
 
     fn current(&self) -> char {
@@ -92,6 +147,8 @@ impl PhonicsScene {
     }
 
     fn on_got(&mut self, ctx: &Ctx) {
+        let p = plan(&ctx.frame);
+        self.confetti.burst(vec2(p.rb_cx, p.card.y), 70, p.card.w / 3.0);
         let c = self.current();
         srs::grade_got_it(&mut self.state, c, ctx.now);
         self.stars = (self.stars + 1).min(GOAL);
@@ -140,6 +197,11 @@ impl PhonicsScene {
 impl Scene for PhonicsScene {
     fn update(&mut self, ctx: &Ctx) -> Nav {
         self.hop_time += ctx.dt;
+        self.confetti.update(ctx.dt);
+        self.frog_hop += ctx.dt;
+        if self.phase == Phase::Done {
+            return self.update_done(ctx);
+        }
         let p = plan(&ctx.frame);
         let pt = ctx.pointer;
         if pt.long_fired && input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
@@ -174,6 +236,11 @@ impl Scene for PhonicsScene {
     }
 
     fn draw(&mut self, ctx: &Ctx) {
+        if self.phase == Phase::Done {
+            self.draw_done(ctx);
+            self.confetti.draw();
+            return;
+        }
         clear_background(palette::BG);
         let p = plan(&ctx.frame);
 
@@ -253,6 +320,8 @@ impl Scene for PhonicsScene {
                 );
             }
         }
+
+        self.confetti.draw();
     }
 }
 
@@ -268,6 +337,20 @@ struct PLayout {
     miss: (Vec2, f32),
     got: (Vec2, f32),
     advance: (Vec2, f32),
+}
+
+/// Done-scene geometry shared by update + draw.
+/// Returns (frog_center, frog_radius, replay_btn, home_btn, btn_radius, ground_y).
+fn done_layout(f: &crate::layout::Frame) -> (Vec2, f32, Vec2, Vec2, f32, f32) {
+    let ground = if f.is_portrait() { 0.40 } else { 0.30 };
+    let gy = f.h * (1.0 - ground);
+    let fr = f.vmin(0.11).clamp(58.0, 140.0);
+    let frog_c = vec2(f.w / 2.0, gy - fr * 0.55);
+    let br = f.icon_btn() / 2.0 * 1.2;
+    let m = 30.0 + f.safe.bottom.max(0.0);
+    let replay = vec2(f.safe.left + 30.0 + br, f.h - m - br);
+    let home_b = vec2(f.w - (f.safe.right + 30.0 + br), f.h - m - br);
+    (frog_c, fr, replay, home_b, br, gy)
 }
 
 fn plan(f: &crate::layout::Frame) -> PLayout {

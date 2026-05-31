@@ -40,6 +40,7 @@ pub struct PatternsScene {
     result: Option<bool>, // Some(true)=correct, Some(false)=wrong
     fb_time: f32,
     advance_in: Option<f32>,
+    confetti: crate::confetti::Confetti,
 }
 
 impl PatternsScene {
@@ -69,6 +70,7 @@ impl PatternsScene {
             result: None,
             fb_time: 0.0,
             advance_in: None,
+            confetti: crate::confetti::Confetti::new(seed ^ 0x00c0_ffee),
         }
     }
 
@@ -89,6 +91,8 @@ impl PatternsScene {
         self.result = Some(correct);
         self.fb_time = 0.0;
         if correct {
+            let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1);
+            self.confetti.burst(vec2(p.seq.x + p.seq.w / 2.0, p.seq.y + p.seq.h / 2.0), 80, p.seq.w / 4.0);
             self.stars += 1;
             self.streak += 1;
             self.correct_count += 1;
@@ -130,6 +134,7 @@ fn gen(level: u32, choice: ThemeChoice, mode: GameMode, diff: Difficulty, rng: &
 impl Scene for PatternsScene {
     fn update(&mut self, ctx: &Ctx) -> Nav {
         self.fb_time += ctx.dt;
+        self.confetti.update(ctx.dt);
         if let Some(t) = self.advance_in {
             let t = t - ctx.dt;
             if t <= 0.0 {
@@ -212,6 +217,8 @@ impl Scene for PatternsScene {
             draw::card(r.x, r.y + dy, r.w, r.h, fill);
             draw_item(&self.round.choices[i], r.x + r.w / 2.0, r.y + r.h / 2.0 + dy, r.h * 0.5, ctx);
         }
+
+        self.confetti.draw();
     }
 }
 

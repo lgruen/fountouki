@@ -1,35 +1,71 @@
-# fountouki 🌰
+# fountouki
 
-Tiny static web app with kid-sized games. TypeScript → esbuild → `dist/`, no
-runtime deps. Deploys to GitHub Pages from `main`.
+- Preschool learning games as a PWA — a Rust + [macroquad](https://macroquad.rs)
+  rewrite of the original TypeScript app.
+- Renders **identically** on iOS / Android / desktop / web because it draws
+  every pixel itself (one GL renderer, no DOM/CSS divergence). The old WebKit
+  layout-quirk class of bug is gone by construction.
 
+## Layout
+
+- `core/` — `fountouki-core`: pure logic + unit tests. SRS, decks, themes,
+  patterns generation, settings, storage/sync model, route ids, audio-fx
+  params, rng. No rendering, no platform deps.
+- `app/` — `fountouki` binary: macroquad rendering, scenes, input, layout,
+  palette, fonts, sound, parent panel. Depends on `core`.
+- `web/` — web shell: `index.html` + macroquad's `mq_js_bundle.js`. The built
+  `fountouki.wasm` is copied in alongside for the Pages deploy.
+- `server/` — Cloudflare Worker for cross-device sync. **Unchanged** from the
+  TS app. See `server/README.md` for the live URL + deploy.
+- `tools/goldens.sh` — golden-screenshot matrix (see below).
+- `docs/port-spec/` — behavioral spec extracted from the old app (`shell`,
+  `phonics`, `patterns`, `visual`, `audio-fx`, `storage-sync`). Source of
+  truth for "what should this do" during the port.
+- `ios/`, `android/` — native wrapper scaffolds + build docs (see their
+  READMEs). On-device install is a manual step (TestFlight / sideloaded APK).
+
+## Dev commands
+
+```sh
+cargo run -p fountouki                  # desktop interactive (native window)
+cargo test --workspace                  # core logic tests + any app tests
+cargo run -p fountouki -- --playtest    # scripted assertions; non-zero on fail
+bash tools/goldens.sh                   # capture golden PNGs → screenshots/golden/
+
+# WASM build (repo .cargo/config.toml supplies the wasm-ld flags):
+cargo build --release -p fountouki --target wasm32-unknown-unknown
+# then copy target/wasm32-unknown-unknown/release/fountouki.wasm → web/
 ```
-npm install
-npm run dev       # build + serve on http://localhost:5173
-```
 
-Other scripts: `build`, `typecheck`, `check` (typecheck + build),
-`screenshots`, `icons`, `test`.
+- Native packaging / on-device builds: see `ios/README.md` and
+  `android/README.md`.
 
-## Games
+## Binary modes
 
-- **Patterns** — "what comes next?" sequence completion + find-the-
-  repeating-piece. Themes (animals / fruit / shapes / letters / …),
-  auto-scaling difficulty.
-- **Phonics** *(in progress)* — parent-graded lowercase-letter → sound
-  flashcards with a Leitner SRS, rainbow accumulator, and cross-device
-  sync. Worker source + deploy in `server/`.
+The `fountouki` binary has two non-interactive modes (otherwise it runs the
+interactive app loop):
 
-Future game wishlist in `docs/IDEAS.md`.
+- `--capture <png> <scene> [w] [h]` — render one scene offscreen to a PNG.
+  Same renderer that ships native, so the output reflects the device, not an
+  emulator. `[w] [h]` default to a standard size if omitted.
+- `--playtest` — drive the real scenes with synthetic taps and assert; exits
+  non-zero on failure. Used in CI.
 
-## Parent menu
+Scene ids (for `--capture` and `tools/goldens.sh`):
+`picker`, `phonics`, `patterns`, `parent-patterns`, `parent-phonics`.
 
-Long-press the in-game ← (~500ms) to open the parent settings panel:
-sync token + endpoint always, plus any per-game knobs (theme, mode,
-mastery view, …) the current game contributes. Kids tap ← briefly →
-home; parents hold ← → settings. No visible gear in the topbar.
+## Goldens
 
-## Audience
+- `tools/goldens.sh` captures every scene at iPad landscape/portrait + phone
+  landscape into `screenshots/golden/`. Eyeball them; CI uploads them as
+  artifacts.
+- Local (macOS): real GL. CI (Linux): runs under `xvfb-run` with software GL.
+- **Determinism caveat:** the WASM/CI software-GL path is not pixel-identical
+  to native GL (AA, gradients, text hinting differ). Goldens are for eyeballing
+  regressions, not byte-exact diffing across the native↔CI boundary.
 
-Built for two specific preschoolers on their devices — public repo,
-not a general-purpose product. Working agreements: see `CLAUDE.md`.
+## Deploy
+
+- Web → GitHub Pages (`.github/workflows/deploy.yml`): build wasm, assemble
+  `web/`, publish.
+- Sync server: `server/` (Cloudflare Worker) — deployed independently.

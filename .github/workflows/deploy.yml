@@ -5,31 +5,51 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least-privilege token + the OIDC id-token Pages deployment needs.
 permissions:
   contents: read
   pages: write
   id-token: write
 
+# Only one in-flight Pages deploy; let a running one finish.
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: github-pages
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-          cache: 'npm'
+
+      # Native deps for the build toolchain (linker / alsa headers etc.).
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev pkg-config xvfb
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build wasm (release)
+        run: cargo build --release -p fountouki --target wasm32-unknown-unknown
+
+      # Assemble the static site: web shell + the macroquad js loader + the
+      # freshly built wasm. manifest/icons are copied only if present.
+      - name: Assemble dist/
+        run: |
+          mkdir -p dist
+          cp web/index.html dist/
+          cp web/mq_js_bundle.js dist/
+          [ -f web/manifest.webmanifest ] && cp web/manifest.webmanifest dist/ || true
+          cp web/icon* dist/ 2>/dev/null || true
+          cp target/wasm32-unknown-unknown/release/fountouki.wasm dist/fountouki.wasm
+
       - uses: actions/configure-pages@v5
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium webkit
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm test
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
@@ -41,4 +61,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@v4
