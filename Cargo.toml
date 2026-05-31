@@ -5,3 +5,10 @@ resolver = "2"
 [profile.release]
 opt-level = 3
 lto = true
+
+# We only use quad-net's `http_request`. Upstream's native websocket support
+# (`qws`) pulls in `url 1.7.2 -> idna 0.1.5` (RUSTSEC-2024-0421), unfixable on
+# the 0.1 line. Point at a trimmed in-tree fork that drops the unused
+# websocket/socket modules, removing that chain from the lockfile entirely.
+[patch.crates-io]
+quad-net = { path = "vendor/quad-net" }
