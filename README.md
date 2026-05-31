@@ -91,12 +91,19 @@ cargo build --release -p fountouki --target wasm32-unknown-unknown   # web build
 - Rendering rule: keep layout **ours** (compute from `Frame`); never reintroduce
   platform-delegated/CSS-style layout — that's the bug class the rewrite fixed.
 
+## Cross-device sync
+- Wired in `app/src/net.rs` (poll-based HTTP via `quad-net`): phonics **pulls +
+  last-seen-wins merges on mount**, **debounce-pushes on each grade**, and
+  **flushes on leaving**. Talks to the unchanged CF Worker at
+  `<endpoint>/<token>/<game>` (one family token, set in the parent menu).
+- The WASM build needs quad-net's JS plugins — `web/sapp_jsutils.js` +
+  `web/quad-net.js`, loaded (in that order) before `load()` in `index.html`.
+- **Caveat:** the in-browser HTTP round-trip can't be headless-tested here;
+  verify on first deploy by setting the same token in two devices' parent menus.
+  The protocol + merge are unit-tested in `core`; the app is offline-first and
+  recovers from local storage regardless.
+
 ## Known follow-ups
-- **Cross-device sync transport is not wired** into the app. The protocol +
-  merge logic live in `core::sync`/`core::srs` and are unit-tested; the app is
-  offline-first (state persists locally) and recovers, but it does not yet
-  pull/push to the Worker. Wire a `SyncTransport` (browser `fetch` for wasm)
-  into phonics: pull+merge on mount, debounced push on grade, flush on hide.
 - Native `ios/`/`android/` scaffolds are best-effort + unverified end-to-end
   (need Xcode + an Apple Developer account / Android NDK). WASM-PWA is the
   supported target.

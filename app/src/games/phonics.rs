@@ -43,6 +43,7 @@ pub struct PhonicsScene {
     hop_time: f32,
     frog_hop: f32,
     confetti: crate::confetti::Confetti,
+    sync: crate::net::SyncClient,
 }
 
 impl PhonicsScene {
@@ -56,6 +57,7 @@ impl PhonicsScene {
         let mut rng = Mulberry32::new(seed);
         let mut queue = srs::build_queue(&state, now, &mut rng);
         srs::avoid_repeat(&mut queue, None);
+        let sync = crate::net::SyncClient::new(db.clone(), "phonics");
         PhonicsScene {
             db,
             state,
@@ -70,6 +72,7 @@ impl PhonicsScene {
             hop_time: 99.0,
             frog_hop: 99.0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x00c0_ffee),
+            sync,
         }
     }
 
@@ -91,6 +94,7 @@ impl PhonicsScene {
             if input::hit_circle(pt.pos, replay.x, replay.y, br) {
                 self.restart_session(ctx.now);
             } else if input::hit_circle(pt.pos, home_b.x, home_b.y, br) {
+                self.sync.flush();
                 return Nav::Home;
             } else if input::hit_circle(pt.pos, frog_c.x, frog_c.y, fr) {
                 self.frog_hop = 0.0;
@@ -156,6 +160,7 @@ impl PhonicsScene {
         ctx.audio.correct(self.streak);
         self.hop_time = 0.0;
         self.save();
+        self.sync.queue_push(&self.state.serialize_json(), ctx.now);
         if self.stars >= GOAL {
             self.phase = Phase::Done;
         } else {
@@ -171,6 +176,7 @@ impl PhonicsScene {
         self.reveal = deck::exemplar(c);
         self.phase = Phase::Miss;
         self.save();
+        self.sync.queue_push(&self.state.serialize_json(), ctx.now);
     }
 
     fn toggle_mute(&self, ctx: &Ctx) {
@@ -196,6 +202,15 @@ impl Scene for PhonicsScene {
         self.hop_time += ctx.dt;
         self.confetti.update(ctx.dt);
         self.frog_hop += ctx.dt;
+        // Drive cross-device sync: send debounced pushes, and merge the remote
+        // blob once the initial pull lands (non-yanking — just updates state).
+        self.sync.drive(ctx.now);
+        if let Some(remote) = self.sync.poll_pull() {
+            if let Some(rstate) = srs::validate(&remote) {
+                self.state = srs::merge(&self.state, &rstate, ctx.now);
+                self.save();
+            }
+        }
         if self.phase == Phase::Done {
             return self.update_done(ctx);
         }
@@ -208,6 +223,7 @@ impl Scene for PhonicsScene {
             return Nav::Stay;
         }
         if input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
+            self.sync.flush();
             return Nav::Home;
         }
         if input::hit_circle(pt.pos, p.mute.0.x, p.mute.0.y, p.mute.1) {

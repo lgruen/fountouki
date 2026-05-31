@@ -100,10 +100,10 @@ minimal. The constraints below remove *noise around the target*, not the joy.
 - Mute is shared (one toggle). Per-game settings under
   `fountouki.<area>.<name>.v1` (JSON, via `core::storage`/`core::settings`).
 - Scores/streak/level are session-only — never persisted.
-- Sync: one family token; `core::sync` defines the CF Worker protocol + merge
-  (last-seen-wins). NOTE: the network transport wiring is a known follow-up
-  (the merge logic + protocol are implemented + tested; the app is offline-first
-  and recovers via local storage).
+- Sync: one family token; `core::sync` defines the protocol + merge
+  (last-seen-wins). Transport is `app/src/net.rs` (poll-based `quad-net` HTTP):
+  phonics pulls+merges on mount, debounce-pushes on grade, flushes on leave. The
+  WASM build loads `web/sapp_jsutils.js` + `web/quad-net.js` before `load()`.
 
 ## No personal details in commits
 - Repo is public; audience is the maintainer's kids. Keep kid names, ages,

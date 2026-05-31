@@ -7,6 +7,8 @@ const SHELL = [
   './',
   './index.html',
   './mq_js_bundle.js',
+  './sapp_jsutils.js',
+  './quad-net.js',
   './fountouki.wasm',
   './manifest.webmanifest',
   './icon-180.png',

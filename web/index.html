@@ -22,6 +22,11 @@
     <canvas id="glcanvas" tabindex="1"></canvas>
     <!-- macroquad's JS shim provides the runtime imports the wasm expects. -->
     <script src="mq_js_bundle.js"></script>
+    <!-- quad-net HTTP plugin (cross-device sync). Order matters: the macroquad
+         bundle defines miniquad_add_plugin; sapp_jsutils must register before
+         quad-net (which uses its JsObject helpers); then load() runs the wasm. -->
+    <script src="sapp_jsutils.js"></script>
+    <script src="quad-net.js"></script>
     <script>
       load("fountouki.wasm");
       if ("serviceWorker" in navigator) {

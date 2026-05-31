@@ -12,6 +12,7 @@ mod emoji;
 mod games;
 mod input;
 mod layout;
+mod net;
 mod palette;
 mod parent;
 mod scene;

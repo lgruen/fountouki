@@ -7,3 +7,4 @@ edition = "2021"
 macroquad = "0.4"
 fountouki-core = { path = "../core" }
 nanoserde = "0.1"
+quad-net = "0.1"
