@@ -334,10 +334,18 @@ fn draw_cell(cx: f32, cy: f32, size: f32, fill: Color) {
 fn draw_item(item: &Item, cx: f32, cy: f32, sz: f32, ctx: &Ctx) {
     match item {
         Item::Glyph(g) => {
-            if g.chars().all(|c| c.is_ascii_alphanumeric()) {
+            if let Some(tex) = crate::emoji::texture(g) {
+                let s = sz * 0.96;
+                draw_texture_ex(
+                    &tex,
+                    cx - s / 2.0,
+                    cy - s / 2.0,
+                    WHITE,
+                    DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() },
+                );
+            } else if g.chars().all(|c| c.is_ascii_alphanumeric()) {
                 text::draw_centered(g, cx, cy, (sz * 0.95) as u16, &ctx.fonts.cursive, palette::INK);
             } else {
-                // Emoji placeholder until the open-emoji sprite set lands.
                 draw::rounded_rect(cx - sz * 0.4, cy - sz * 0.4, sz * 0.8, sz * 0.8, sz * 0.18, palette::ACCENT_SOFT);
             }
         }

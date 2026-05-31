@@ -15,6 +15,7 @@
 //! union of every emoji those two modules use (110 distinct glyphs).
 
 use macroquad::prelude::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// A lookup table from emoji glyph string → bundled sprite texture.
@@ -158,4 +159,24 @@ impl EmojiSet {
     pub fn get(&self, e: &str) -> Option<&Texture2D> {
         self.map.get(e)
     }
+}
+
+thread_local! {
+    static EMOJI: RefCell<Option<EmojiSet>> = const { RefCell::new(None) };
+}
+
+/// Load the sprite set into thread-local storage. Call once after the GL
+/// context exists (inside the macroquad main). Idempotent.
+pub fn init() {
+    EMOJI.with(|e| {
+        if e.borrow().is_none() {
+            *e.borrow_mut() = Some(EmojiSet::load());
+        }
+    });
+}
+
+/// Cloneable handle to a glyph's sprite (`Texture2D` is a cheap GPU handle), or
+/// `None` if the glyph isn't bundled / the set isn't initialized.
+pub fn texture(glyph: &str) -> Option<Texture2D> {
+    EMOJI.with(|e| e.borrow().as_ref().and_then(|s| s.get(glyph).cloned()))
 }

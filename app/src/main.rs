@@ -8,6 +8,7 @@ use macroquad::prelude::*;
 mod anim;
 mod confetti;
 mod draw;
+mod emoji;
 mod games;
 mod input;
 mod layout;
@@ -87,6 +88,7 @@ fn save_capture(rt: &RenderTarget, w: u32, h: u32, path: &str) {
 #[macroquad::main(window_conf)]
 async fn main() {
     let fonts = Fonts::load();
+    emoji::init();
     let args: Vec<String> = std::env::args().collect();
 
     if args.get(1).map(|s| s == "--capture").unwrap_or(false) {
@@ -132,6 +134,23 @@ async fn main() {
                     let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
+                Box::new(sc)
+            }
+            "patterns-emoji" => {
+                {
+                    let mut kv = db.borrow_kv_mut();
+                    let mut ps = fountouki_core::settings::PatternsSettings::default();
+                    ps.theme_choice = "emoji-animals".to_string();
+                    fountouki_core::settings::save_patterns(&mut **kv, &ps);
+                }
+                Box::new(PatternsScene::new(db.clone(), 5, now))
+            }
+            "phonics-miss" => {
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = PhonicsScene::new(db.clone(), 7, now);
+                let ptr = tap(sc.miss_center(&frame));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
                 Box::new(sc)
             }
             "picker" => Box::new(PickerScene::new()),

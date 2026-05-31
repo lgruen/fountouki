@@ -192,6 +192,9 @@ impl PhonicsScene {
     pub(crate) fn got_center(&self, f: &crate::layout::Frame) -> Vec2 {
         plan(f).got.0
     }
+    pub(crate) fn miss_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        plan(f).miss.0
+    }
 }
 
 impl Scene for PhonicsScene {
@@ -282,9 +285,19 @@ impl Scene for PhonicsScene {
                     &ctx.fonts.cursive,
                     palette::MUTED,
                 );
-                // Picture placeholder (drawn vector art lands in the visual pass).
-                draw_circle(cx, p.card.y + p.card.h * 0.6, p.card.h * 0.12, palette::ACCENT_SOFT);
                 if let Some(ex) = &self.reveal {
+                    if let Some(tex) = crate::emoji::texture(ex.emoji) {
+                        let s = p.card.h * 0.32;
+                        draw_texture_ex(
+                            &tex,
+                            cx - s / 2.0,
+                            p.card.y + p.card.h * 0.6 - s / 2.0,
+                            WHITE,
+                            DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() },
+                        );
+                    } else {
+                        draw_circle(cx, p.card.y + p.card.h * 0.6, p.card.h * 0.12, palette::ACCENT_SOFT);
+                    }
                     text::draw_centered(
                         ex.word,
                         cx,
