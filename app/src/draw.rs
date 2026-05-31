@@ -98,8 +98,8 @@ pub fn rainbow(cx: f32, horizon_y: f32, scale: f32, stroke: f32, filled: usize) 
 /// Filled circle "button" base.
 pub fn circle_btn(cx: f32, cy: f32, r: f32, fill: Color) {
     // tiny shadow
-    draw_circle(cx, cy + 4.0, r, Color::new(0.17, 0.17, 0.20, 0.10));
-    draw_circle(cx, cy, r, fill);
+    disc(cx, cy + 4.0, r, Color::new(0.17, 0.17, 0.20, 0.10));
+    disc(cx, cy, r, fill);
 }
 
 /// ✓ check mark centered on (cx,cy), sized to radius r.
@@ -204,12 +204,48 @@ pub fn vgradient(x: f32, y: f32, w: f32, h: f32, top: Color, bot: Color) {
     }
 }
 
+/// A genuinely round filled disc. macroquad's `draw_circle` is only a 20-gon,
+/// which reads as visibly faceted at large sizes — use ~64 segments.
+pub fn disc(cx: f32, cy: f32, r: f32, color: Color) {
+    draw_poly(cx, cy, 64, r, 0.0, color);
+}
+
+/// A smooth filled ellipse (macroquad's `draw_ellipse` is also only 20 sides).
+/// `rot_deg` rotates the ellipse clockwise.
+pub fn fill_ellipse(cx: f32, cy: f32, rx: f32, ry: f32, rot_deg: f32, color: Color) {
+    const N: usize = 64;
+    let rot = rot_deg.to_radians();
+    let (sr, cr) = rot.sin_cos();
+    let mut prev = Vec2::ZERO;
+    for i in 0..=N {
+        let a = i as f32 / N as f32 * std::f32::consts::TAU;
+        let (px, py) = (rx * a.cos(), ry * a.sin());
+        let p = vec2(cx + px * cr - py * sr, cy + py * cr + px * sr);
+        if i > 0 {
+            draw_triangle(vec2(cx, cy), prev, p, color);
+        }
+        prev = p;
+    }
+}
+
+/// A soft white cloud: a few overlapping round puffs on a flat base.
+pub fn cloud(cx: f32, cy: f32, scale: f32) {
+    let c = Color::new(1.0, 1.0, 1.0, 0.9);
+    disc(cx, cy, scale, c);
+    disc(cx - scale * 1.1, cy + scale * 0.25, scale * 0.72, c);
+    disc(cx + scale * 1.1, cy + scale * 0.25, scale * 0.78, c);
+    disc(cx + scale * 0.45, cy - scale * 0.5, scale * 0.7, c);
+    disc(cx - scale * 0.5, cy - scale * 0.35, scale * 0.6, c);
+    // flat-ish bottom so it reads as a cloud, not a blob cluster
+    draw_rectangle(cx - scale * 1.7, cy + scale * 0.1, scale * 3.4, scale * 0.55, c);
+}
+
 /// Soft glowing sun.
 pub fn sun(cx: f32, cy: f32, r: f32) {
-    draw_circle(cx, cy, r * 1.6, Color::new(1.0, 0.84, 0.4, 0.22));
-    draw_circle(cx, cy, r, palette::SUN_EDGE);
-    draw_circle(cx, cy, r * 0.82, palette::SUN_MID);
-    draw_circle(cx - r * 0.18, cy - r * 0.18, r * 0.5, palette::SUN_CORE);
+    disc(cx, cy, r * 1.6, Color::new(1.0, 0.84, 0.4, 0.22));
+    disc(cx, cy, r, palette::SUN_EDGE);
+    disc(cx, cy, r * 0.82, palette::SUN_MID);
+    disc(cx - r * 0.18, cy - r * 0.18, r * 0.5, palette::SUN_CORE);
 }
 
 /// A rigged pose for the frog mascot. Transform origin is the frog's *base*
@@ -244,6 +280,18 @@ fn shade(c: Color, k: f32) -> Color {
     Color::new(c.r * k, c.g * k, c.b * k, c.a)
 }
 
+/// Map a frog feature given as a body-center-relative offset (lx,ly) through the
+/// pose: scale + rotate about the *base* (the feet, 0.92r below the body center,
+/// i.e. transform-origin 50% 100%), then the hop offset. At the rest pose the
+/// body center (0,0) maps back to (cx,cy) — that identity is what keeps the drawn
+/// frog aligned with its tap target, so it's unit-tested below.
+pub(crate) fn frog_point(cx: f32, cy: f32, r: f32, pose: FrogPose, lx: f32, ly: f32) -> Vec2 {
+    let (sn, cs) = pose.rot.sin_cos();
+    let ox = lx * pose.sx;
+    let oy = (ly - 0.92 * r) * pose.sy;
+    vec2(cx + ox * cs - oy * sn, cy + 0.92 * r + pose.dy + ox * sn + oy * cs)
+}
+
 /// The drawn frog mascot — a small rigged character (vector, not emoji, so it's
 /// identical on every target and can squash, spin, blink and poke its tongue
 /// out). Every feature pivots on the frog's base through `pose`.
@@ -251,28 +299,22 @@ pub fn frog(cx: f32, cy: f32, r: f32, color: Color, pose: FrogPose) {
     let FrogPose { dy, rot, sx, sy, blink, tongue } = pose;
     let pi = std::f32::consts::PI;
     let rot_deg = rot.to_degrees();
-    // Base = ground contact under the body (the transform origin).
+    // Base = ground contact under the body (the transform origin), used for the
+    // contact shadow + the lift factor.
     let base = vec2(cx, cy + 0.92 * r);
-    let (sn, cs) = rot.sin_cos();
-    // Map a rest-pose point given as an offset (lx,ly) from the body center
-    // through scale-about-base, then rotate-about-base, then the hop offset.
-    let tf = |lx: f32, ly: f32| -> Vec2 {
-        let ox = lx * sx;
-        let oy = (ly + 0.92 * r) * sy;
-        vec2(base.x + ox * cs - oy * sn, base.y + dy + ox * sn + oy * cs)
-    };
+    let tf = |lx: f32, ly: f32| frog_point(cx, cy, r, pose, lx, ly);
     // Round features ride the squash in position but stay round; scale their
     // radius by the area-ish mean so they don't balloon.
     let rs = (sx * sy).sqrt();
 
     let dark = shade(color, 0.82);
     let belly = mix(color, palette::WHITE, 0.30);
-    let cheek = palette::hexa(0xf582ae, 0.5);
+    let cheek = palette::hexa(0xff8cbe, 0.92);
     let mouth = palette::INK;
 
     // Contact shadow: shrinks + fades as the frog leaves the ground.
     let lift = (-dy / (1.4 * r)).clamp(0.0, 1.0);
-    draw_ellipse(
+    fill_ellipse(
         base.x,
         base.y + 0.05 * r,
         0.85 * r * (1.0 - 0.35 * lift),
@@ -284,32 +326,32 @@ pub fn frog(cx: f32, cy: f32, r: f32, color: Color, pose: FrogPose) {
     // Feet (behind the body).
     for s in [-1.0_f32, 1.0] {
         let p = tf(s * 0.55 * r, 0.60 * r);
-        draw_circle(p.x, p.y, 0.30 * r * rs, dark);
+        disc(p.x, p.y, 0.30 * r * rs, dark);
     }
     // Body + belly patch (ellipses so squash/stretch reads).
     let bc = tf(0.0, 0.0);
-    draw_ellipse(bc.x, bc.y, r * sx, r * sy, rot_deg, color);
+    fill_ellipse(bc.x, bc.y, r * sx, r * sy, rot_deg, color);
     let bl = tf(0.0, 0.32 * r);
-    draw_ellipse(bl.x, bl.y, 0.6 * r * sx, 0.5 * r * sy, rot_deg, belly);
+    fill_ellipse(bl.x, bl.y, 0.6 * r * sx, 0.5 * r * sy, rot_deg, belly);
     // Rosy cheeks.
     for s in [-1.0_f32, 1.0] {
         let p = tf(s * 0.62 * r, 0.14 * r);
-        draw_circle(p.x, p.y, 0.15 * r * rs, cheek);
+        disc(p.x, p.y, 0.15 * r * rs, cheek);
     }
 
     // Eyes (bulging on top).
     let open = (1.0 - blink).clamp(0.0, 1.0);
     for s in [-1.0_f32, 1.0] {
         let socket = tf(s * 0.5 * r, -0.72 * r);
-        draw_circle(socket.x, socket.y, 0.36 * r * rs, color);
+        disc(socket.x, socket.y, 0.36 * r * rs, color);
         if open > 0.12 {
             let wr = 0.27 * r * rs;
-            draw_ellipse(socket.x, socket.y, wr, wr * open, rot_deg, palette::WHITE);
+            fill_ellipse(socket.x, socket.y, wr, wr * open, rot_deg, palette::WHITE);
             let pupil = tf(s * 0.5 * r, -0.68 * r);
             let pr = 0.14 * r * rs;
-            draw_ellipse(pupil.x, pupil.y, pr, pr * open, rot_deg, palette::INK);
+            fill_ellipse(pupil.x, pupil.y, pr, pr * open, rot_deg, palette::INK);
             let glint = tf(s * 0.5 * r - 0.06 * r, -0.80 * r);
-            draw_circle(glint.x, glint.y, 0.05 * r * rs, palette::WHITE);
+            disc(glint.x, glint.y, 0.05 * r * rs, palette::WHITE);
         } else {
             // Happy closed eye: a small downward curve.
             let a = tf(s * 0.5 * r - 0.13 * r, -0.72 * r);
@@ -322,9 +364,9 @@ pub fn frog(cx: f32, cy: f32, r: f32, color: Color, pose: FrogPose) {
     // Mouth: a gentle smile, or an open "ribbit" with the tongue out.
     if tongue > 0.02 {
         let m = tf(0.0, 0.20 * r);
-        draw_ellipse(m.x, m.y, 0.40 * r * sx, (0.15 + 0.10 * tongue) * r * sy, rot_deg, mouth);
+        fill_ellipse(m.x, m.y, 0.40 * r * sx, (0.15 + 0.10 * tongue) * r * sy, rot_deg, mouth);
         let t = tf(0.0, (0.28 + 0.26 * tongue) * r);
-        draw_circle(t.x, t.y, 0.15 * r * rs, palette::hex(0xf0566e));
+        disc(t.x, t.y, 0.15 * r * rs, palette::hex(0xf0566e));
     } else {
         let mut smile = [Vec2::ZERO; 9];
         for (i, sp) in smile.iter_mut().enumerate() {
@@ -418,4 +460,33 @@ pub fn phonics_card_preview(fonts: &text::Fonts, w: f32, h: f32) {
     mark_cross(miss_cx, by, miss_r, palette::MUTED);
     circle_btn(got_cx, by, got_r, palette::OK);
     mark_check(got_cx, by, got_r, palette::OK_STRONG);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The frog's drawn body center must coincide with the (cx,cy) it's asked to
+    /// draw at — that's the tap target. A sign slip in the pose transform once
+    /// pushed the visible frog ~1.84r below its hit circle, so taps missed.
+    #[test]
+    fn frog_rest_pose_centers_on_anchor() {
+        let p = FrogPose::default();
+        let c = frog_point(100.0, 200.0, 50.0, p, 0.0, 0.0);
+        assert!((c.x - 100.0).abs() < 1e-3, "body center x off: {}", c.x);
+        assert!((c.y - 200.0).abs() < 1e-3, "body center y off: {}", c.y);
+        // Feet sit below the center; eyes sit above it.
+        let feet = frog_point(100.0, 200.0, 50.0, p, 0.0, 0.60 * 50.0);
+        let eyes = frog_point(100.0, 200.0, 50.0, p, 0.0, -0.72 * 50.0);
+        assert!(feet.y > c.y && eyes.y < c.y, "feet {} eyes {}", feet.y, eyes.y);
+    }
+
+    /// A hop offset shifts the whole frog vertically with no horizontal drift.
+    #[test]
+    fn frog_hop_lifts_straight_up() {
+        let p = FrogPose { dy: -40.0, ..Default::default() };
+        let c = frog_point(100.0, 200.0, 50.0, p, 0.0, 0.0);
+        assert!((c.x - 100.0).abs() < 1e-3);
+        assert!((c.y - 160.0).abs() < 1e-3, "hop y: {}", c.y);
+    }
 }
