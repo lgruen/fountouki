@@ -277,8 +277,9 @@ async fn main() {
         std::process::exit(if fails == 0 { 0 } else { 1 });
     }
 
-    // Interactive.
-    let db = Db::mem();
+    // Interactive (the real app): persistent store so the sync token, mute, and
+    // local progress survive a reload. Capture/playtest above stay in-memory.
+    let db = Db::persistent();
     let muted = {
         let kv = db.borrow_kv();
         fountouki_core::settings::load_shared(&**kv).muted

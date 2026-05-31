@@ -10,6 +10,7 @@ const SHELL = [
   './sapp_jsutils.js',
   './quad-net.js',
   './text_input.js',
+  './storage.js',
   './fountouki.wasm',
   './manifest.webmanifest',
   './icon-180.png',
