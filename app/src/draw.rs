@@ -1,0 +1,154 @@
+//! Reusable vector drawing primitives + first scene composition.
+//! Everything is drawn by us (no platform widgets) so pixels are identical
+//! across targets. Marks (✓ ✗ →, chevron) are stroked vectors centered on
+//! true geometric center — this deletes all the old iOS glyph-bearing CSS debt.
+use crate::{palette, text};
+use macroquad::prelude::*;
+
+const SIN75: f32 = 0.965_926;
+const COS75: f32 = 0.258_819;
+const RAD75: f32 = 1.308_997;
+
+/// Filled rounded rectangle.
+pub fn rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32, color: Color) {
+    let r = r.min(w / 2.0).min(h / 2.0);
+    draw_rectangle(x + r, y, w - 2.0 * r, h, color);
+    draw_rectangle(x, y + r, w, h - 2.0 * r, color);
+    draw_circle(x + r, y + r, r, color);
+    draw_circle(x + w - r, y + r, r, color);
+    draw_circle(x + r, y + h - r, r, color);
+    draw_circle(x + w - r, y + h - r, r, color);
+}
+
+/// Soft drop shadow behind a rounded rect (layered translucent rects — no blur
+/// in macroquad, so fake it with a few expanding low-alpha passes).
+pub fn soft_shadow(x: f32, y: f32, w: f32, h: f32, r: f32) {
+    for i in 0..4 {
+        let s = i as f32 * 2.5;
+        let a = 0.05 - i as f32 * 0.011;
+        let c = Color::new(palette::SHADOW.r, palette::SHADOW.g, palette::SHADOW.b, a.max(0.0));
+        rounded_rect(x - s, y - s + 6.0, w + 2.0 * s, h + 2.0 * s, r + s, c);
+    }
+}
+
+/// Card = soft shadow + rounded surface.
+pub fn card(x: f32, y: f32, w: f32, h: f32, surface: Color) {
+    soft_shadow(x, y, w, h, palette::RADIUS);
+    rounded_rect(x, y, w, h, palette::RADIUS, surface);
+}
+
+/// Thick round-capped stroked polyline.
+pub fn stroke_path(pts: &[Vec2], width: f32, color: Color) {
+    for w in pts.windows(2) {
+        draw_line(w[0].x, w[0].y, w[1].x, w[1].y, width, color);
+    }
+    for p in pts {
+        draw_circle(p.x, p.y, width / 2.0, color);
+    }
+}
+
+/// One rainbow arc band (semicircle bow on a horizon). `sagitta` and the
+/// derived radius/half-width follow the exact spec geometry, scaled.
+pub fn rainbow_arc(cx: f32, horizon_y: f32, sagitta: f32, stroke: f32, color: Color) {
+    let r = sagitta / (1.0 - COS75);
+    let center_y = horizon_y - sagitta + r;
+    const N: usize = 60;
+    let mut pts = Vec::with_capacity(N + 1);
+    for i in 0..=N {
+        let theta = -RAD75 + (2.0 * RAD75) * (i as f32 / N as f32);
+        pts.push(vec2(cx + r * theta.sin(), center_y - r * theta.cos()));
+    }
+    stroke_path(&pts, stroke, color);
+}
+
+/// The phonics rainbow: `filled` outermost bands drawn in ROYGBIV.
+/// `scale` maps the 240×80 design viewBox to screen units.
+pub fn rainbow(cx: f32, horizon_y: f32, scale: f32, stroke: f32, filled: usize) {
+    // Draw inner→outer so outer (red) sits on top at the horizon ends.
+    for i in (0..7).rev() {
+        if i >= filled {
+            continue;
+        }
+        let t = i as f32 / 6.0;
+        let sagitta = (65.0 - 40.0 * t) * scale;
+        rainbow_arc(cx, horizon_y, sagitta, stroke, palette::RAINBOW[i]);
+    }
+}
+
+/// Filled circle "button" base.
+pub fn circle_btn(cx: f32, cy: f32, r: f32, fill: Color) {
+    // tiny shadow
+    draw_circle(cx, cy + 4.0, r, Color::new(0.17, 0.17, 0.20, 0.10));
+    draw_circle(cx, cy, r, fill);
+}
+
+/// ✓ check mark centered on (cx,cy), sized to radius r.
+pub fn mark_check(cx: f32, cy: f32, r: f32, color: Color) {
+    let w = (r * 0.16).max(4.0);
+    let pts = [
+        vec2(cx - 0.42 * r, cy + 0.02 * r),
+        vec2(cx - 0.10 * r, cy + 0.34 * r),
+        vec2(cx + 0.46 * r, cy - 0.34 * r),
+    ];
+    stroke_path(&pts, w, color);
+}
+
+/// ✗ cross mark centered on (cx,cy).
+pub fn mark_cross(cx: f32, cy: f32, r: f32, color: Color) {
+    let w = (r * 0.16).max(4.0);
+    let d = 0.34 * r;
+    stroke_path(&[vec2(cx - d, cy - d), vec2(cx + d, cy + d)], w, color);
+    stroke_path(&[vec2(cx + d, cy - d), vec2(cx - d, cy + d)], w, color);
+}
+
+/// → advance mark centered on (cx,cy).
+pub fn mark_arrow(cx: f32, cy: f32, r: f32, color: Color) {
+    let w = (r * 0.16).max(4.0);
+    stroke_path(&[vec2(cx - 0.42 * r, cy), vec2(cx + 0.30 * r, cy)], w, color);
+    let tip = vec2(cx + 0.50 * r, cy);
+    draw_triangle(
+        vec2(cx + 0.18 * r, cy - 0.30 * r),
+        vec2(cx + 0.18 * r, cy + 0.30 * r),
+        tip,
+        color,
+    );
+}
+
+/// First milestone scene: a static Phonics card with rainbow + action buttons,
+/// composed against the visual spec at the given pixel size. (Layout is
+/// hardcoded for now; generalized into a layout system once it looks right.)
+pub fn phonics_card_preview(fonts: &text::Fonts, w: f32, h: f32) {
+    let card_w = (w * 0.34).clamp(300.0, 460.0);
+    let card_h = (h * 0.42).clamp(260.0, 420.0);
+    let cx = w / 2.0;
+    let card_y = h * 0.47 - card_h / 2.0;
+
+    // Rainbow above the card.
+    let scale = card_w / 240.0 * 1.45;
+    let horizon = card_y - 18.0;
+    rainbow(cx, horizon, scale, (10.0 * scale).max(8.0), 3);
+
+    // Card.
+    card(cx - card_w / 2.0, card_y, card_w, card_h, palette::CARD);
+
+    // Big cursive letter.
+    let size = (card_h * 0.62) as u16;
+    text::draw_centered("a", cx, card_y + card_h * 0.5, size, &fonts.cursive, palette::INK);
+
+    // Action row, centered under the card axis. ✓ is the hero (bigger, green);
+    // ✗ is smaller/neutral; both centers symmetric in equal slots.
+    let got_r = 52.0;
+    let miss_r = 34.0;
+    let slot = got_r * 2.0;
+    let gap = 34.0;
+    let total = 2.0 * slot + gap;
+    let x0 = cx - total / 2.0;
+    let by = card_y + card_h + (h - (card_y + card_h)) * 0.42;
+    let miss_cx = x0 + slot / 2.0;
+    let got_cx = x0 + slot + gap + slot / 2.0;
+
+    circle_btn(miss_cx, by, miss_r, palette::CARD);
+    mark_cross(miss_cx, by, miss_r, palette::MUTED);
+    circle_btn(got_cx, by, got_r, palette::OK);
+    mark_check(got_cx, by, got_r, palette::OK_STRONG);
+}
