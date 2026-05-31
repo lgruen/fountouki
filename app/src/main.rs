@@ -276,6 +276,8 @@ async fn main() {
     let mut panel: Option<ParentPanel> = None;
     let mut ptr = Pointer::default();
     let mut dbg_taps = 0u32;
+    let mut dbg_frame = 0u64;
+    let mut dbg_last_tap = vec2(-100.0, -100.0);
 
     loop {
         let dt = get_frame_time();
@@ -329,30 +331,34 @@ async fn main() {
         // TEMP input-debug overlay (remove once mobile touch is confirmed):
         // a dot follows the pointer + a readout of what macroquad sees.
         {
+            dbg_frame += 1;
             if ptr.tapped() {
                 dbg_taps += 1;
+                dbg_last_tap = ptr.pos;
             }
+            // green ring = where the last tap landed (vs where you touched)
+            draw_circle_lines(dbg_last_tap.x, dbg_last_tap.y, 30.0, 4.0, Color::new(0.17, 0.62, 0.36, 0.9));
+            // red/grey dot = live pointer
             let dot = if ptr.down {
                 Color::new(0.96, 0.26, 0.21, 0.9)
             } else {
                 Color::new(0.0, 0.0, 0.0, 0.28)
             };
             draw_circle(ptr.pos.x, ptr.pos.y, 24.0, dot);
-            let mp = mouse_position();
             let info = format!(
-                "DBG touch_n={} down={} taps={} pos={:.0},{:.0} mouse={:.0},{:.0} scr={:.0}x{:.0}",
+                "DBG f={} touch_n={} mdown={} down={} taps={} pos={:.0},{:.0} scr={:.0}x{:.0}",
+                dbg_frame,
                 touches().len(),
+                is_mouse_button_down(MouseButton::Left),
                 ptr.down,
                 dbg_taps,
                 ptr.pos.x,
                 ptr.pos.y,
-                mp.0,
-                mp.1,
                 screen_width(),
                 screen_height(),
             );
-            draw_rectangle(0.0, 0.0, screen_width(), 34.0, Color::new(1.0, 1.0, 1.0, 0.85));
-            draw_text(&info, 8.0, 25.0, 26.0, BLACK);
+            draw_rectangle(0.0, 0.0, screen_width(), 34.0, Color::new(1.0, 1.0, 1.0, 0.9));
+            draw_text(&info, 8.0, 25.0, 24.0, BLACK);
         }
 
         if is_key_pressed(KeyCode::Escape) {
