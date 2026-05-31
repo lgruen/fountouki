@@ -109,8 +109,8 @@ impl PhonicsScene {
         let (frog_c, fr, replay, home_b, br, gy) = done_layout(f);
         draw::vgradient(0.0, 0.0, f.w, gy, palette::SKY_TOP, palette::SKY_BOT);
         draw::sun(f.w * 0.17, gy * 0.34, f.vmin(0.07).max(40.0));
-        let scale = 0.72 * f.w / 169.4;
-        draw::rainbow(f.w / 2.0, gy * 0.95, scale, (14.0 * scale).max(10.0), 7);
+        let (rcx, rhoriz, rscale, rstroke) = done_rainbow(f, gy);
+        draw::rainbow(rcx, rhoriz, rscale, rstroke, 7);
         draw::vgradient(0.0, gy, f.w, f.h - gy, palette::GROUND_TOP, palette::GROUND_BOT);
         draw_line(0.0, gy, f.w, gy, 3.0, palette::hex(0x2f7d2f));
         draw::plant(f.w * 0.28, gy, f.vmin(0.06));
@@ -376,6 +376,18 @@ fn done_layout(f: &crate::layout::Frame) -> (Vec2, f32, Vec2, Vec2, f32, f32) {
     (frog_c, fr, replay, home_b, br, gy)
 }
 
+/// Done/garden rainbow geometry (center_x, horizon_y, scale, stroke). The scale
+/// is capped so the outer band's apex clears the top edge — on a short
+/// phone-landscape the width-derived scale would otherwise run off the top.
+fn done_rainbow(f: &crate::layout::Frame, gy: f32) -> (f32, f32, f32, f32) {
+    let horizon = gy * 0.95;
+    let desired = 0.72 * f.w / 169.4;
+    // Outer band rises ~65*scale + stroke/2 (stroke = 14*scale) ≈ 72*scale.
+    let fit = ((horizon - 12.0) / 72.0).max(0.2);
+    let scale = desired.min(fit);
+    (f.w / 2.0, horizon, scale, (14.0 * scale).max(10.0))
+}
+
 fn plan(f: &crate::layout::Frame) -> PLayout {
     let cx = f.w / 2.0;
     let tb = f.topbar();
@@ -409,17 +421,58 @@ fn plan(f: &crate::layout::Frame) -> PLayout {
     let total = 2.0 * slot + gap;
     let x0 = cx - total / 2.0;
 
+    // Rainbow. The outer (red) band rises ~65*scale + stroke/2 above the
+    // horizon; cap the scale so that apex never climbs above the topbar (where
+    // the buttons already sit clear of the top edge / status bar) — otherwise a
+    // short phone-landscape clips the top of the arc.
+    let rb_horizon = card_y - 16.0;
+    let rb_desired = card_w / 240.0 * 1.45;
+    let rb_fit = ((rb_horizon - tb.y - 4.0) / 70.0).max(0.2);
+    let rb_scale = rb_desired.min(rb_fit);
+
     PLayout {
         home: (vec2(tb.x + ir, tb.y + ir), ir),
         mute: (vec2(tb.x + tb.w - ir, tb.y + ir), ir),
         card,
         letter_size: (card_h * 0.6) as u16,
         rb_cx: cx,
-        rb_horizon: card_y - 16.0,
-        rb_scale: card_w / 240.0 * 1.45,
-        rb_stroke: (10.0 * (card_w / 240.0 * 1.45)).max(8.0),
+        rb_horizon,
+        rb_scale,
+        rb_stroke: (10.0 * rb_scale).max(8.0),
         miss: (vec2(x0 + slot / 2.0, by), miss_r),
         got: (vec2(x0 + slot + gap + slot / 2.0, by), got_r),
         advance: (vec2(cx, by), got_r),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::{Frame, Insets};
+
+    fn frame(w: f32, h: f32) -> Frame {
+        Frame::new(w, h, Insets::default())
+    }
+
+    /// The rainbow's outer band must clear the top of the viewport on every
+    /// device — it used to overshoot and clip on short phone-landscape.
+    #[test]
+    fn rainbow_apex_clears_the_top() {
+        // ipad both ways + a couple of real phone-landscape sizes.
+        for (w, h) in [(1194.0, 834.0), (834.0, 1194.0), (844.0, 390.0), (812.0, 375.0)] {
+            let f = frame(w, h);
+            let p = plan(&f);
+            // Outer (red) band: sagitta 65*scale above the horizon, plus the round cap.
+            let apex = p.rb_horizon - 65.0 * p.rb_scale - p.rb_stroke / 2.0;
+            assert!(apex >= 0.0, "{w}x{h}: rainbow apex {apex} above the viewport");
+            // ...and stays at least as clear as the topbar buttons.
+            assert!(apex >= f.topbar().y - 2.0, "{w}x{h}: apex {apex} above topbar {}", f.topbar().y);
+
+            // The done/garden celebration rainbow must also clear the top.
+            let (.., gy) = done_layout(&f);
+            let (_cx, horizon, scale, stroke) = done_rainbow(&f, gy);
+            let done_apex = horizon - 65.0 * scale - stroke / 2.0;
+            assert!(done_apex >= 0.0, "{w}x{h}: done rainbow apex {done_apex} above the viewport");
+        }
     }
 }
