@@ -275,6 +275,7 @@ async fn main() {
     let mut current_game: Option<String> = None;
     let mut panel: Option<ParentPanel> = None;
     let mut ptr = Pointer::default();
+    let mut dbg_taps = 0u32;
 
     loop {
         let dt = get_frame_time();
@@ -323,6 +324,35 @@ async fn main() {
                     scene = build_game(id, &db, now_ms());
                 }
             }
+        }
+
+        // TEMP input-debug overlay (remove once mobile touch is confirmed):
+        // a dot follows the pointer + a readout of what macroquad sees.
+        {
+            if ptr.tapped() {
+                dbg_taps += 1;
+            }
+            let dot = if ptr.down {
+                Color::new(0.96, 0.26, 0.21, 0.9)
+            } else {
+                Color::new(0.0, 0.0, 0.0, 0.28)
+            };
+            draw_circle(ptr.pos.x, ptr.pos.y, 24.0, dot);
+            let mp = mouse_position();
+            let info = format!(
+                "DBG touch_n={} down={} taps={} pos={:.0},{:.0} mouse={:.0},{:.0} scr={:.0}x{:.0}",
+                touches().len(),
+                ptr.down,
+                dbg_taps,
+                ptr.pos.x,
+                ptr.pos.y,
+                mp.0,
+                mp.1,
+                screen_width(),
+                screen_height(),
+            );
+            draw_rectangle(0.0, 0.0, screen_width(), 34.0, Color::new(1.0, 1.0, 1.0, 0.85));
+            draw_text(&info, 8.0, 25.0, 26.0, BLACK);
         }
 
         if is_key_pressed(KeyCode::Escape) {
