@@ -35,3 +35,15 @@ impl Db {
         self.0.borrow_mut()
     }
 }
+
+/// Persist the shared (app-wide) mute flag. Shared by every scene's mute button
+/// so the toggle survives a relaunch and the games agree on the state.
+pub fn persist_mute(db: &Db, muted: bool) {
+    let mut s = {
+        let kv = db.borrow_kv();
+        fountouki_core::settings::load_shared(&**kv)
+    };
+    s.muted = muted;
+    let mut kv = db.borrow_kv_mut();
+    fountouki_core::settings::save_shared(&mut **kv, &s);
+}

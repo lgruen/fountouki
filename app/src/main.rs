@@ -89,6 +89,7 @@ fn save_capture(rt: &RenderTarget, w: u32, h: u32, path: &str) {
 async fn main() {
     let fonts = Fonts::load();
     emoji::init();
+    text::init_ui();
     let args: Vec<String> = std::env::args().collect();
 
     if args.get(1).map(|s| s == "--capture").unwrap_or(false) {
@@ -153,7 +154,7 @@ async fn main() {
                 sc.update(&ctx);
                 Box::new(sc)
             }
-            "picker" => Box::new(PickerScene::new()),
+            "picker" => Box::new(PickerScene::new(db.clone())),
             "phonics-done" => {
                 // Play 7 correct rounds to reach the rainbow-done garden scene.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
@@ -269,7 +270,7 @@ async fn main() {
         fountouki_core::settings::load_shared(&**kv).muted
     };
     let audio = Audio::load(muted).await;
-    let mut scene: Box<dyn Scene> = Box::new(PickerScene::new());
+    let mut scene: Box<dyn Scene> = Box::new(PickerScene::new(db.clone()));
     let mut current_game: Option<String> = None;
     let mut panel: Option<ParentPanel> = None;
     let mut ptr = Pointer::default();
@@ -299,7 +300,7 @@ async fn main() {
         } else {
             match scene.update(&ctx) {
                 Nav::Home => {
-                    scene = Box::new(PickerScene::new());
+                    scene = Box::new(PickerScene::new(db.clone()));
                     current_game = None;
                 }
                 Nav::Game(id) => {

@@ -220,7 +220,9 @@ impl Scene for PatternsScene {
             return Nav::Home;
         }
         if input::hit_circle(pt.pos, p.mute.0.x, p.mute.0.y, p.mute.1) {
-            ctx.audio.set_muted(!ctx.audio.muted());
+            let m = !ctx.audio.muted();
+            ctx.audio.set_muted(m);
+            crate::store::persist_mute(&self.db, m);
             return Nav::Stay;
         }
         match self.mode {
@@ -259,7 +261,7 @@ impl Scene for PatternsScene {
         draw::chevron_left(p.home.0.x, p.home.0.y, p.home.1 * 0.9, palette::INK);
         draw::circle_btn(p.mute.0.x, p.mute.0.y, p.mute.1, palette::CARD);
         draw::speaker(p.mute.0.x, p.mute.0.y, p.mute.1 * 0.9, palette::INK, ctx.audio.muted());
-        draw_hud(&p, self.stars, self.level, ctx);
+        draw_hud(&p, self.stars, self.level);
 
         // Sequence bar.
         draw::card(p.seq.x, p.seq.y, p.seq.w, p.seq.h, palette::CARD);
@@ -371,12 +373,12 @@ fn draw_shape(cx: f32, cy: f32, sz: f32, shape: &Shape) {
     }
 }
 
-fn draw_hud(p: &PLayout, stars: u32, level: u32, ctx: &Ctx) {
+fn draw_hud(p: &PLayout, stars: u32, level: u32) {
     // stars pill
     let (hx, hy) = (p.hud.0.x, p.hud.0.y);
     draw::rounded_rect(hx, hy - 18.0, 96.0, 36.0, 18.0, palette::CARD);
-    draw_circle(hx + 22.0, hy, 9.0, palette::GOLD);
-    text::draw_centered(&stars.to_string(), hx + 58.0, hy, 24, &ctx.fonts.cursive, palette::INK);
+    draw::star(hx + 22.0, hy, 11.0, palette::GOLD);
+    text::ui_centered(&stars.to_string(), hx + 58.0, hy, 24, palette::INK);
     // level pips
     let py = hy + 0.0;
     let px0 = hx + 110.0;

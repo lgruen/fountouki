@@ -176,13 +176,7 @@ impl PhonicsScene {
     fn toggle_mute(&self, ctx: &Ctx) {
         let muted = !ctx.audio.muted();
         ctx.audio.set_muted(muted);
-        let mut s = {
-            let kv = self.db.borrow_kv();
-            fountouki_core::settings::load_shared(&**kv)
-        };
-        s.muted = muted;
-        let mut kv = self.db.borrow_kv_mut();
-        fountouki_core::settings::save_shared(&mut **kv, &s);
+        crate::store::persist_mute(&self.db, muted);
     }
 
     // Test hooks (used by --playtest).
@@ -283,7 +277,7 @@ impl Scene for PhonicsScene {
                     p.card.y + p.card.h * 0.34,
                     (p.letter_size as f32 * 0.62) as u16,
                     &ctx.fonts.cursive,
-                    palette::MUTED,
+                    palette::INK,
                 );
                 if let Some(ex) = &self.reveal {
                     if let Some(tex) = crate::emoji::texture(ex.emoji) {
@@ -302,9 +296,9 @@ impl Scene for PhonicsScene {
                         ex.word,
                         cx,
                         p.card.y + p.card.h * 0.84,
-                        (p.card.h * 0.1) as u16,
+                        (p.card.h * 0.11) as u16,
                         &ctx.fonts.cursive,
-                        palette::MUTED,
+                        palette::INK,
                     );
                 }
             }
@@ -358,7 +352,7 @@ fn done_layout(f: &crate::layout::Frame) -> (Vec2, f32, Vec2, Vec2, f32, f32) {
     let ground = if f.is_portrait() { 0.40 } else { 0.30 };
     let gy = f.h * (1.0 - ground);
     let fr = f.vmin(0.11).clamp(58.0, 140.0);
-    let frog_c = vec2(f.w / 2.0, gy - fr * 0.55);
+    let frog_c = vec2(f.w / 2.0, gy - fr * 0.78);
     let br = f.icon_btn() / 2.0 * 1.2;
     let m = 30.0 + f.safe.bottom.max(0.0);
     let replay = vec2(f.safe.left + 30.0 + br, f.h - m - br);
@@ -368,18 +362,34 @@ fn done_layout(f: &crate::layout::Frame) -> (Vec2, f32, Vec2, Vec2, f32, f32) {
 
 fn plan(f: &crate::layout::Frame) -> PLayout {
     let cx = f.w / 2.0;
-    let card_w = (f.w * 0.34).clamp(300.0, 460.0);
-    let card_h = (f.h * 0.46).clamp(260.0, 430.0);
-    let card_y = f.h * 0.49 - card_h / 2.0;
-    let card = Rect::new(cx - card_w / 2.0, card_y, card_w, card_h);
-
     let tb = f.topbar();
     let ir = f.icon_btn() / 2.0;
-    let got_r = (f.w * 0.045).clamp(40.0, 54.0);
-    let miss_r = (f.w * 0.033).clamp(26.0, 35.0);
-    let by = card.y + card.h + (f.h - (card.y + card.h)) * 0.42;
+    let phone = f.is_phone();
+
+    // On short (phone-landscape) viewports, pack from the bottom up so the
+    // action row never clips and the card clears the topbar + rainbow.
+    let (card_w, card_h, card_y, got_r, miss_r, by) = if phone {
+        let got_r = (f.h * 0.12).clamp(28.0, 52.0);
+        let miss_r = got_r * 0.66;
+        let by = f.h - f.safe.bottom.max(8.0) - got_r - 6.0;
+        let card_w = (f.w * 0.26).clamp(190.0, 360.0);
+        let top = tb.y + tb.h;
+        let card_bottom = by - got_r - 12.0;
+        let card_h = (card_bottom - top - 56.0).clamp(110.0, 230.0); // 56px reserves the rainbow
+        (card_w, card_h, card_bottom - card_h, got_r, miss_r, by)
+    } else {
+        let card_w = (f.w * 0.34).clamp(300.0, 460.0);
+        let card_h = (f.h * 0.46).clamp(260.0, 430.0);
+        let card_y = f.h * 0.49 - card_h / 2.0;
+        let got_r = (f.w * 0.045).clamp(40.0, 54.0);
+        let miss_r = (f.w * 0.033).clamp(26.0, 35.0);
+        let by = card_y + card_h + (f.h - (card_y + card_h)) * 0.42;
+        (card_w, card_h, card_y, got_r, miss_r, by)
+    };
+
+    let card = Rect::new(cx - card_w / 2.0, card_y, card_w, card_h);
     let slot = got_r * 2.0;
-    let gap = 34.0;
+    let gap = if phone { 22.0 } else { 34.0 };
     let total = 2.0 * slot + gap;
     let x0 = cx - total / 2.0;
 

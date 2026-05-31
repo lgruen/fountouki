@@ -1,185 +1,115 @@
 # Working agreements
 
-## Primary platform: iPad iOS Safari, installed as a PWA
-The app exists to run on an iPad as a home-screen PWA. **iPad WebKit is
-the platform; everything else is convenience.** A change isn't shipped
-until it's been verified under the iPad device profile, even if every
-chromium check is green. Two bugs (invisible back-button SVG, off-centre
-X/✓ row) shipped past the chromium pass because nobody looked at the
-iPad render; don't repeat that.
+## What this is
+Preschool learning games (ages ~4) for the maintainer's kids. Rewritten from
+a DOM/CSS PWA to **Rust + macroquad** so the app **draws every pixel itself** —
+the rendering is identical on iOS, Android, desktop and web, because nothing is
+delegated to a browser's CSS engine. That cross-platform consistency is the
+whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 
-The mechanical checks live in:
-- `tools/ios-layout-test.mjs` — asserts layout invariants (SVG renders
-  square + visible, action-row centers under the card axis, …) under
-  WebKit + real iPad/iPhone device profiles. Part of `npm test`.
-- `tools/screenshots.mjs` `runIosDeviceScenes` — captures real iOS
-  device-emulated screenshots into `screenshots/webkit-ios/<device>/`.
-  Eyeball *these first*, before the synthetic chromium ones.
-
-## Workflow
-- Open a PR against `main` at the end of any code-changing task. Concise
-  title + short summary. No test plan needed.
-- Develop on the branch the session was started on; never push to `main`.
-- Before pushing: `npm run check` (typecheck + build), `npm test`
-  (Playwright — runs every spec on Chromium AND WebKit, and runs
-  `ios-layout-test.mjs` under WebKit). Visuals: also `npm run
-  screenshots` and eyeball the output **starting with
-  `screenshots/webkit-ios/ipad-pro-11-*`**, then phone profiles, then
-  the synthetic chromium pass. Red tests block deploy — fix them even
-  if unrelated.
-- Fresh sandbox? `npm ci` first. After install, `git checkout --
-  package-lock.json` if it churned (cross-platform libc metadata) —
-  don't commit that drift.
-- `npm test` / `npm run screenshots` need both engines: `npx playwright
-  install --with-deps chromium webkit`. If the network can't reach
-  Playwright's CDN, say so and skip rather than faking visual sign-off.
-  **Never sign off on visuals without the WebKit + iPad pass** — that
-  is the platform the app actually runs on.
-- Single-engine debugging: `BROWSER=webkit node tools/phonics-test.mjs`
-  (or `BROWSER=chromium`); `ONLY=webkit npm run screenshots` skips the
-  chromium pass. To reproduce an iPad-only bug in isolation:
-  `BROWSER=webkit node tools/ios-layout-test.mjs` (assertions) plus
-  `ONLY=webkit npm run screenshots` (captures `webkit-ios/<device>/`).
-
-## Working style
-
-### Self-verify in a real browser before claiming done
-- For new UI / gameplay: add a Playwright spec under `tools/` covering
-  golden path + at least one edge case (wrong answer, reload mid-flow,
-  empty state).
-- For any change touching shared chrome (back button, mute, topbar,
-  parent-settings overlay) or game-shell layout: extend
-  `tools/ios-layout-test.mjs` with an assertion for the new invariant.
-  Eyeballing alone misses the bugs; a numeric tolerance check doesn't.
-- Visual changes: run `npm run screenshots`. Eyeball **in this order**
-  (the iPad pass is the one that matters):
-  1. `screenshots/webkit-ios/ipad-pro-11-landscape/` and
-     `screenshots/webkit-ios/ipad-pro-11-portrait/` — the primary
-     platform.
-  2. `screenshots/webkit-ios/iphone-*` — secondary iOS targets.
-  3. `screenshots/webkit/` (synthetic landscape, tablet portrait,
-     tablet landscape) and the iPhone Pro Max landscape 932×430 case
-     for safe-area edges.
-  4. `screenshots/chromium/` only as a sanity check for non-iOS users.
-- iPad / iPhone Safari quirks (100dvh, safe-area, flexbox rounding,
-  SVG-in-flex sizing) only show on the WebKit pass. **A clean chromium
-  run is not sign-off.**
-- Tokens are cheap; bug reports are not.
-
-### Delegate noisy work to subagents
-- Use the Agent tool (Explore / general-purpose) for heavy Playwright
-  runs, screenshot review, log scraping. Tell them what to report and
-  how short (concise pass/fail + paths, not verbose output).
-- Main thread stays for code, decisions, commits.
-
-### Independent review for non-trivial work
-- After implementing a meaningful slice (a new game, a major refactor,
-  any non-trivial feature), launch an Agent (general-purpose) to review
-  the result. Brief it lightly — file paths, scope, audience — but
-  don't justify your choices or you'll bias the review.
-- The review covers code quality + architecture + game design /
-  pedagogy + visual layout. Final call is still yours unless the agent
-  flags a question only the user can answer — escalate those.
-- For game design / visuals, **iterate**. Address findings, re-screen-
-  shot, launch a fresh review on the new state. Continue until a clean
-  review *and* the "would I play this?" test is genuinely passing —
-  not just on round one.
-
-### Tight docs
-- Audience for every doc here (CLAUDE.md / README / TODO / IDEAS /
-  code comments) is primarily a future Claude. Bullets over prose,
-  sentences over paragraphs. Drop motivation unless the *why* is
-  unrecoverable.
-
-## No personal details in commits
-- Repo is public; the audience is the maintainer's kids only.
-- Keep kid names, ages, current-mastery state, or
-  "for the user's son" framing out of every committed file. Generic
-  preferences (themes, mechanics) are fine. Personal context lives in
-  Claude's local memory, not the repo.
+## Primary platform: WASM + PWA on iPad/Android
+- Ships as a **WASM build in a PWA shell** (`web/`), deployed to GitHub Pages,
+  installed to the home screen. This delivers the consistency win without app
+  stores / signing / Xcode. Native iOS/Android (`ios/`, `android/`) are
+  **optional, unmaintained scaffolds** — not the supported target.
+- The same macroquad code renders natively too; the WASM build is canonical.
 
 ## Project shape
-- TypeScript → esbuild → `dist/`. No runtime deps. Strict tsconfig.
-- `src/main.ts` is the bundle entry. Hash routing: `#/` → picker,
-  `#/<game-id>` → that game.
-- `src/shared/` — `sounds`, `confetti`, `storage` (namespaced
-  localStorage), `settings` (shared mute + sync token), `chrome` (home
-  / mute buttons), `pwa` (SW + orientation lock), `sync` (cross-device
-  client talking to the CF Worker in `server/`).
-- `src/games/<id>/` — per-game code. Each game exports
-  `mount(container, opts) -> unmount`.
-- `src/games/registry.ts` — list of games. Add a game = import + entry.
-- `server/` — CF Worker for sync. See `server/README.md` for live URL.
-- Static: `public/index.html` (just the shell), `public/style.css`,
-  `public/sw.js`.
+- Cargo workspace. **`core/`** = pure logic + data + protocol, NO macroquad
+  (`fountouki-core`): srs, patterns, themes, deck, audio synth, settings, sync,
+  storage, route, rng. Fast to compile, unit-tested (`cargo test -p fountouki-core`).
+- **`app/`** = the macroquad binary `fountouki`: rendering, scenes, input,
+  audio playback, the engine. Depends on `core`.
+  - `palette` `text` `draw` `anim` `input` `layout` `scene` `sound` `confetti`
+    `store` `parent` `emoji`; `games/{picker,phonics,patterns}.rs`.
+  - `layout.rs` computes every region from viewport size + safe-area insets +
+    form factor — this is the consistency cure; keep layout ours.
+  - Fonts (VicModernCursive) + Twemoji emoji sprites are `include_bytes!`-baked.
+- **`web/`** = PWA shell (index.html + macroquad `mq_js_bundle.js` + `sw.js` +
+  manifest/icons); the built `fountouki.wasm` is dropped in by CI.
+- **`server/`** = Cloudflare Worker sync (unchanged). `docs/port-spec/` = the
+  spec the rewrite was ported from. `tools/goldens.sh` = screenshot matrix.
 
-## Settings model
-- Mute is shared across all games (one toggle).
-- Everything else is per-game under `fountouki.<game>.<key>.v1`.
-- Sync state is per-game under one family-level token.
-- Scores are session-only — never persist them.
+## Binary modes (the test + visual harness)
+- `cargo run -p fountouki` — interactive desktop.
+- `--capture <png> <scene> [w] [h]` — render a scene offscreen to a PNG.
+  Scenes: `picker phonics phonics-miss phonics-done patterns patterns-emoji
+  patterns-unit parent-patterns parent-phonics`.
+- `--playtest` — scripted taps drive the real scenes + assert invariants; exits
+  non-zero on failure.
 
-## Parent menu (long-press ←)
-- Settings that a kid shouldn't tap into live in the parent menu,
-  opened by long-pressing the in-game ← (500ms hold). No visible
-  chrome — keeps the gameplay screen uncluttered. New games inherit
-  this for free via `makeHomeButton({ onHome })`.
-- Per-game knobs (theme, difficulty, mode, …) slot into that same
-  panel via `openParentSettings({ section })`. See
-  `src/games/patterns/settings-section.ts` and
-  `src/games/phonics/mastery-section.ts` for the pattern. Don't add a
-  dedicated ⚙ button on the topbar.
-- Universal sync controls (token / endpoint) live at the bottom of the
-  panel and show in every game.
+## Workflow
+- Develop on a branch off `main`; open a PR at the end of a code-changing task.
+  Never push to `main`.
+- Before pushing: `cargo test --workspace` (core unit tests), `cargo run -p
+  fountouki -- --playtest` (gameplay), `bash tools/goldens.sh` (visuals), and
+  `cargo build --release -p fountouki --target wasm32-unknown-unknown` (web).
+- **Eyeball `screenshots/golden/` — iPad landscape first**, then portrait, then
+  phone. The same renderer ships, so a golden reflects the device (no emulator
+  gap), modulo GPU AA. (CI renders goldens under software GL via xvfb.)
+- Fresh sandbox: install Rust (`rustup`), `rustup target add
+  wasm32-unknown-unknown`. The `.cargo/config.toml` adds the wasm linker flags
+  macroquad needs (`--import-undefined`).
+
+## CI / deploy
+- `.github/workflows/ci.yml` — on PRs: `cargo test`, `--playtest`, goldens
+  artifact, wasm build check (Linux deps + xvfb + software GL).
+- `.github/workflows/deploy.yml` — on `main`: build wasm, assemble `web/` +
+  the wasm into `dist/`, deploy to GitHub Pages.
+
+## Working style
+- **Self-verify before claiming done**: run `--playtest` + regenerate goldens +
+  eyeball them. Add a `--playtest` scenario for new gameplay; extend
+  `tools/goldens.sh` for new scenes.
+- Delegate noisy/parallel work (spec extraction, golden review, independent
+  code review) to subagents/workflows. Main thread owns the integrated build —
+  a single Cargo crate doesn't parallelize authorship well (shared `target/`).
+- **Independent review for non-trivial work**: after a meaningful slice, have an
+  agent review code + visuals + pedagogy; iterate on visuals to the "would I
+  play this?" bar.
+- Tight docs: audience is a future Claude. Bullets over prose.
 
 ## The "would I play this?" test
-- Before claiming a game is done, ask: *if you were a 4yo with a short
-  attention span and the constraints below, would you push yourself to
-  come back to this regularly?* "Tolerates" is failing. "Wants more" is
-  the bar.
-- Look at the screen and ask: is anything in here actually rewarding?
-  Are the wins big enough to feel earned? Does the visual itself pull
-  the kid in, or does it read like a quiz app for adults?
-- Bias toward richer, more playful visuals (big animated rewards,
-  vibrant color, characters that respond) over restrained / minimal —
-  the design constraints below are about removing *noise around the
-  target*, not stripping the joy out of the screen.
-
-## Brand
-- 🌰 is the PWA launcher icon **only**. Don't render it inside the app
-  (no home button, no header logo, no settings-panel chrome). In-app
-  buttons should use neutral glyphs (← for back, etc.). Settings live
-  behind the long-press on ← — no dedicated topbar gear.
+Before claiming a game is done: if you were a 4yo with a short attention span,
+would you push to come back? "Tolerates" fails; "wants more" is the bar. Big
+animated rewards, vibrant color, characters that respond — over restrained/
+minimal. The constraints below remove *noise around the target*, not the joy.
 
 ## Audience & pedagogy baseline
 - Preschoolers; big tap targets, minimal text, visual-first navigation.
-- Word labels are optional reading practice, never required.
-- Every game: errorless learning (never sit in "I don't know"),
-  monotonic progress (stars / bars never decrement), no time pressure,
-  theme as wrapper around the stimulus not embedded clutter, ~5-minute
-  soft sessions.
-- **Design for language delays and memory challenges.** Assume the
-  player has a smaller working-memory budget than a typical preschooler
-  and slower receptive-language processing:
-  - One stimulus on screen at a time. No competing visual elements
-    near the target.
-  - Generous repetition + spaced practice (SRS, in-session re-presents).
-  - Pictures *with* words for any concept-naming UI; never picture-only,
-    never text-only.
-  - Predictable layout across sessions; avoid surprise mechanics or
-    randomized button placement.
-  - Short, direct prompts. No idioms, wordplay, or sarcasm.
-  - When grading is parent-mediated, lean on the parent for nuance
-    (pacing, hints, model-and-repeat); the app's job is the structured
-    excuse, not the assessment.
+- Errorless (never sit in "I don't know"), monotonic progress (stars/rainbow
+  never decrement), no time pressure, theme as wrapper not clutter, ~5-min
+  sessions.
+- **Design for language delay + small working memory**: one stimulus at a time,
+  no competing elements near the target; generous repetition + SRS; pictures
+  *with* words (never picture-only or text-only); predictable layout across
+  sessions; short direct prompts (no idioms); grading is parent-mediated.
+
+## Brand
+- 🌰 is the PWA launcher icon **only** — never in-app. In-app glyphs are neutral
+  vectors (← chevron, speaker). The **frog is a drawn vector character** (not an
+  emoji); the rainbow is the phonics progress meter.
+
+## Parent menu (long-press ←)
+- Long-press the in-game ← (500 ms) opens the parent settings overlay
+  (`app/src/parent.rs`): universal sync token/endpoint + a per-game section
+  (patterns theme/difficulty/mode/hint cyclers + start-over; phonics read-only
+  mastery grid). No visible chrome / no topbar gear.
+
+## Settings + storage + sync
+- Mute is shared (one toggle). Per-game settings under
+  `fountouki.<area>.<name>.v1` (JSON, via `core::storage`/`core::settings`).
+- Scores/streak/level are session-only — never persisted.
+- Sync: one family token; `core::sync` defines the CF Worker protocol + merge
+  (last-seen-wins). NOTE: the network transport wiring is a known follow-up
+  (the merge logic + protocol are implemented + tested; the app is offline-first
+  and recovers via local storage).
+
+## No personal details in commits
+- Repo is public; audience is the maintainer's kids. Keep kid names, ages,
+  mastery state, and "for the user's son" framing out of committed files.
+  Personal context lives in Claude's local memory, not the repo.
 
 ## PR descriptions
-- For visual / UI work, attach a couple of representative screenshots
-  to the PR body (under `## Screenshots`). Prefer pairs (chromium next
-  to webkit at the same scene) so iOS regressions are obvious. Files
-  live under `screenshots/<engine>/` (or `screenshots/webkit-ios/<device>/`).
-  Use `gh pr create` with `--body` referencing those paths, or upload
-  via the GH web UI after the PR is open.
-- CI uploads the full `screenshots/` tree as an artifact on every PR
-  build (the `screenshots` artifact). Download from the CI run page if
-  you didn't generate them locally.
+- For visual/UI work, attach representative `screenshots/golden/` images under
+  `## Screenshots`. CI also uploads the full golden set as an artifact.

@@ -194,30 +194,28 @@ impl ParentPanel {
         draw_rectangle(0.0, 0.0, ctx.frame.w, ctx.frame.h, palette::SCRIM);
         let l = layout(&ctx.frame, &self.game);
         draw::card(l.card.x, l.card.y, l.card.w, l.card.h, palette::CARD);
-        let fnt = &ctx.fonts.cursive;
-
-        text::draw_centered("parent settings", l.card.x + l.card.w / 2.0, l.card.y + 30.0, 26, fnt, palette::INK);
+        text::ui_centered("parent settings", l.card.x + l.card.w / 2.0, l.card.y + 30.0, 26, palette::INK);
 
         if self.game == "patterns" {
-            chip(l.theme, "pictures", theme_label(&self.ptn.theme_choice), fnt, ctx);
-            chip(l.diff, "helpers", &self.ptn.difficulty, fnt, ctx);
-            chip(l.mode, "game", &self.ptn.mode, fnt, ctx);
-            chip(l.hint, "highlight piece", if self.ptn.show_hint { "on" } else { "off" }, fnt, ctx);
-            button(l.start_over, "start over", palette::ACCENT, palette::WHITE, fnt, ctx);
+            chip(l.theme, "pictures", theme_label(&self.ptn.theme_choice));
+            chip(l.diff, "helpers", &self.ptn.difficulty);
+            chip(l.mode, "game", &self.ptn.mode);
+            chip(l.hint, "highlight piece", if self.ptn.show_hint { "on" } else { "off" });
+            button(l.start_over, "start over", palette::ACCENT, palette::WHITE);
         }
         if let Some(m) = &self.mastery {
-            draw_mastery(l.card, m, fnt, ctx);
+            draw_mastery(l.card, m);
         }
 
         // Sync section.
-        label(l.token, "sync token", fnt, ctx);
-        field(l.token, &self.token, self.focus == Focus::Token, "(empty = no sync)", fnt, ctx);
-        button(l.gen, "generate", palette::OK, palette::OK_STRONG, fnt, ctx);
-        button(l.clear, "clear", palette::CARD, palette::MUTED, fnt, ctx);
-        label(l.endpoint, "endpoint", fnt, ctx);
-        field(l.endpoint, &self.endpoint, self.focus == Focus::Endpoint, settings_default_endpoint(), fnt, ctx);
+        label(l.token, "sync token");
+        field(l.token, &self.token, self.focus == Focus::Token, "(empty = no sync)");
+        button(l.gen, "generate", palette::OK, palette::OK_STRONG);
+        button(l.clear, "clear", palette::CARD, palette::MUTED);
+        label(l.endpoint, "endpoint");
+        field(l.endpoint, &self.endpoint, self.focus == Focus::Endpoint, settings_default_endpoint());
 
-        button(l.done, "done", palette::ACCENT, palette::WHITE, fnt, ctx);
+        button(l.done, "done", palette::ACCENT, palette::WHITE);
     }
 }
 
@@ -300,13 +298,13 @@ fn layout(f: &crate::layout::Frame, game: &str) -> Layout {
     let cy = f.h / 2.0 - ch / 2.0;
     let pad = 28.0;
     let rw = cw - 2.0 * pad;
-    let rh = 52.0;
+    let rh = 46.0;
     let mut y = cy + 64.0;
     // `mk` takes `&mut y` (rather than capturing it) so we can still read/adjust
     // y directly between rows.
     let mk = |y: &mut f32| {
         let r = Rect::new(cx + pad, *y, rw, rh);
-        *y += rh + 14.0;
+        *y += rh + 26.0;
         r
     };
     let (theme, diff, mode, hint, start_over) = if game == "patterns" {
@@ -333,18 +331,18 @@ fn hit(p: Vec2, r: Rect) -> bool {
     input::hit_rect(p, r.x, r.y, r.w, r.h)
 }
 
-fn label(r: Rect, t: &str, fnt: &Font, ctx: &Ctx) {
-    text::draw_centered_left(t, r.x, r.y - 6.0, 16, fnt, palette::MUTED);
+fn label(r: Rect, t: &str) {
+    text::ui_left(t, r.x, r.y - 15.0, 15, palette::MUTED);
 }
 
-fn chip(r: Rect, name: &str, value: &str, fnt: &Font, ctx: &Ctx) {
-    text::draw_centered_left(name, r.x, r.y - 6.0, 15, fnt, palette::MUTED);
+fn chip(r: Rect, name: &str, value: &str) {
+    text::ui_left(name, r.x, r.y - 15.0, 14, palette::MUTED);
     draw::rounded_rect(r.x, r.y, r.w, r.h, 12.0, palette::CARD);
     draw::rounded_rect(r.x, r.y, r.w, r.h, 12.0, Color::new(0.0, 0.0, 0.0, 0.03));
-    text::draw_centered(value, r.x + r.w / 2.0, r.y + r.h / 2.0, 22, fnt, palette::INK);
+    text::ui_centered(value, r.x + r.w / 2.0, r.y + r.h / 2.0, 20, palette::INK);
 }
 
-fn field(r: Rect, value: &str, focused: bool, placeholder: &str, fnt: &Font, ctx: &Ctx) {
+fn field(r: Rect, value: &str, focused: bool, placeholder: &str) {
     let ring = if focused { palette::ACCENT } else { palette::FIELD_BORDER };
     draw::rounded_rect(r.x - 2.0, r.y - 2.0, r.w + 4.0, r.h + 4.0, 12.0, ring);
     draw::rounded_rect(r.x, r.y, r.w, r.h, 12.0, palette::WHITE);
@@ -353,23 +351,22 @@ fn field(r: Rect, value: &str, focused: bool, placeholder: &str, fnt: &Font, ctx
     } else {
         (value, palette::INK)
     };
-    text::draw_centered_left(txt, r.x + 14.0, r.y + r.h / 2.0, 18, fnt, col);
+    text::ui_left(txt, r.x + 14.0, r.y + r.h / 2.0, 16, col);
 }
 
-fn button(r: Rect, t: &str, fill: Color, fg: Color, fnt: &Font, ctx: &Ctx) {
+fn button(r: Rect, t: &str, fill: Color, fg: Color) {
     draw::rounded_rect(r.x, r.y, r.w, r.h, 14.0, fill);
-    text::draw_centered(t, r.x + r.w / 2.0, r.y + r.h / 2.0, 20, fnt, fg);
+    text::ui_centered(t, r.x + r.w / 2.0, r.y + r.h / 2.0, 18, fg);
 }
 
-fn draw_mastery(card: Rect, m: &Mastery, fnt: &Font, ctx: &Ctx) {
+fn draw_mastery(card: Rect, m: &Mastery) {
     let x = card.x + 28.0;
     let mut y = card.y + 70.0;
-    text::draw_centered_left(
+    text::ui_left(
         &format!("mastered {}  strong {}  learning {}  new {}", m.mastered, m.strong, m.learning, m.new),
         x,
         y,
-        16,
-        fnt,
+        15,
         palette::MUTED,
     );
     y += 26.0;

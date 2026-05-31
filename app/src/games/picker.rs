@@ -12,11 +12,13 @@ use macroquad::prelude::*;
 /// a match arm in `draw_icon` and `main::build_game`.
 pub const GAMES: &[(&str, &str)] = &[("patterns", "patterns"), ("phonics", "phonics")];
 
-pub struct PickerScene;
+pub struct PickerScene {
+    db: crate::store::Db,
+}
 
 impl PickerScene {
-    pub fn new() -> PickerScene {
-        PickerScene
+    pub fn new(db: crate::store::Db) -> PickerScene {
+        PickerScene { db }
     }
 }
 
@@ -28,7 +30,9 @@ impl Scene for PickerScene {
         }
         let (m, mr) = mute_pos(&ctx.frame);
         if input::hit_circle(pt.pos, m.x, m.y, mr) {
-            ctx.audio.set_muted(!ctx.audio.muted());
+            let muted = !ctx.audio.muted();
+            ctx.audio.set_muted(muted);
+            crate::store::persist_mute(&self.db, muted);
             return Nav::Stay;
         }
         for (i, (id, _)) in GAMES.iter().enumerate() {
@@ -50,14 +54,7 @@ impl Scene for PickerScene {
             let r = tile_rect(&ctx.frame, i);
             draw::card(r.x, r.y, r.w, r.h, palette::CARD);
             draw_icon(id, r, ctx);
-            text::draw_centered(
-                label,
-                r.x + r.w / 2.0,
-                r.y + r.h * 0.84,
-                (r.w * 0.13) as u16,
-                &ctx.fonts.cursive,
-                palette::MUTED,
-            );
+            text::ui_centered(label, r.x + r.w / 2.0, r.y + r.h * 0.84, (r.w * 0.12) as u16, palette::MUTED);
         }
     }
 }

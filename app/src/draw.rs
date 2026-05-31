@@ -246,6 +246,20 @@ pub fn house_icon(cx: f32, cy: f32, r: f32, color: Color) {
     draw_rectangle(cx - r * 0.38, cy, r * 0.76, r * 0.5, color);
 }
 
+/// Filled 5-point star.
+pub fn star(cx: f32, cy: f32, r: f32, color: Color) {
+    let inner = r * 0.45;
+    let mut pts = [Vec2::ZERO; 10];
+    for (i, p) in pts.iter_mut().enumerate() {
+        let rad = if i % 2 == 0 { r } else { inner };
+        let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+        *p = vec2(cx + rad * a.cos(), cy + rad * a.sin());
+    }
+    for i in 0..10 {
+        draw_triangle(vec2(cx, cy), pts[i], pts[(i + 1) % 10], color);
+    }
+}
+
 /// First milestone scene: a static Phonics card with rainbow + action buttons,
 /// composed against the visual spec at the given pixel size. (Layout is
 /// hardcoded for now; generalized into a layout system once it looks right.)
