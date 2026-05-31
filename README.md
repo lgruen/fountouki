@@ -1,71 +1,104 @@
 # fountouki
 
-- Preschool learning games as a PWA — a Rust + [macroquad](https://macroquad.rs)
-  rewrite of the original TypeScript app.
-- Renders **identically** on iOS / Android / desktop / web because it draws
-  every pixel itself (one GL renderer, no DOM/CSS divergence). The old WebKit
-  layout-quirk class of bug is gone by construction.
+Tiny learning games for preschoolers (ages ~4). Rewritten from a DOM/CSS PWA to
+**Rust + macroquad**: the app **draws every pixel itself** onto one GPU surface,
+so the UI is **identical on iOS, Android, desktop and web** — nothing is
+delegated to a browser's CSS engine. That cross-platform consistency is the
+reason the rewrite exists. Audience for this doc: a future Claude working here.
+
+## Ships as
+- **WASM in a PWA** (the `web/` shell), deployed to GitHub Pages, installed to
+  the home screen. This is the canonical, supported deploy — no app store, no
+  signing, no Xcode. The same macroquad code also runs native; `ios/` + `android/`
+  hold **optional, unmaintained** native scaffolds.
 
 ## Layout
-
-- `core/` — `fountouki-core`: pure logic + unit tests. SRS, decks, themes,
-  patterns generation, settings, storage/sync model, route ids, audio-fx
-  params, rng. No rendering, no platform deps.
-- `app/` — `fountouki` binary: macroquad rendering, scenes, input, layout,
-  palette, fonts, sound, parent panel. Depends on `core`.
-- `web/` — web shell: `index.html` + macroquad's `mq_js_bundle.js`. The built
-  `fountouki.wasm` is copied in alongside for the Pages deploy.
-- `server/` — Cloudflare Worker for cross-device sync. **Unchanged** from the
-  TS app. See `server/README.md` for the live URL + deploy.
-- `tools/goldens.sh` — golden-screenshot matrix (see below).
-- `docs/port-spec/` — behavioral spec extracted from the old app (`shell`,
-  `phonics`, `patterns`, `visual`, `audio-fx`, `storage-sync`). Source of
-  truth for "what should this do" during the port.
-- `ios/`, `android/` — native wrapper scaffolds + build docs (see their
-  READMEs). On-device install is a manual step (TestFlight / sideloaded APK).
-
-## Dev commands
-
-```sh
-cargo run -p fountouki                  # desktop interactive (native window)
-cargo test --workspace                  # core logic tests + any app tests
-cargo run -p fountouki -- --playtest    # scripted assertions; non-zero on fail
-bash tools/goldens.sh                   # capture golden PNGs → screenshots/golden/
-
-# WASM build (repo .cargo/config.toml supplies the wasm-ld flags):
-cargo build --release -p fountouki --target wasm32-unknown-unknown
-# then copy target/wasm32-unknown-unknown/release/fountouki.wasm → web/
+```
+core/      fountouki-core — PURE logic/data/protocol, no macroquad. 120 unit tests.
+app/       the macroquad binary `fountouki` — rendering, scenes, input, audio.
+  assets/  fonts (VicModernCursive stimuli, Varela Round UI) + 110 Twemoji PNGs.
+web/       PWA shell: index.html + macroquad mq_js_bundle.js + sw.js + manifest/icons.
+server/    Cloudflare Worker sync (UNCHANGED from the TS app; see server/README.md).
+tools/     goldens.sh — the screenshot matrix.
+docs/      port-spec/ — the spec the rewrite was ported from (source of truth).
+ios/ android/  optional native build scaffolds + READMEs.
 ```
 
-- Native packaging / on-device builds: see `ios/README.md` and
-  `android/README.md`.
+### `core/` modules (pure, testable)
+- `srs` — phonics Leitner SRS: boxes 0–4, intervals, INTRO_ORDER frontier gate,
+  `merge` (last-seen-wins), validate/ensure_letters, `build_queue`.
+- `patterns` — round generation: levels, period scaling, choice rules, the
+  `mulberry32` RNG (consumption order matters for reproducibility).
+- `themes` — the 9 theme item pools (`Item::Glyph`/`Item::Shape`), `ThemeChoice`.
+- `deck` — phonics letters, INTRO_ORDER, per-letter exemplar (emoji + word).
+- `audio` — PCM synthesis (correct/incorrect/level_up/tap/frog) → `Vec<f32>`.
+- `settings` — `SharedSettings` (mute + sync) + `PatternsSettings`; token gen.
+- `sync` — CF Worker protocol: `sync_url`, `interpret_pull`, `Debouncer`,
+  `SyncTransport` trait. (See "Known follow-ups": the network transport isn't
+  wired into the app yet.)
+- `storage` — `KeyValueStore` trait + `ns_key` (`fountouki.<area>.<name>.v1`) +
+  legacy migration. `route` — `parse_hash`/`hash_for`. `rng` — `Mulberry32`.
 
-## Binary modes
+### `app/` modules (rendering)
+- Engine: `palette` `text` (cursive + UI font) `draw` (vector primitives,
+  rainbow-arc geometry, frog, star, confetti shapes) `anim` `input` (pointer +
+  500ms long-press) `layout` (**Frame** computes every region from viewport +
+  safe-area + form factor — the consistency cure) `scene` (`Scene` trait + `Ctx`
+  + `Nav`) `sound` (synth→WAV→macroquad) `confetti` `store` (`Db`) `emoji`
+  (thread-local Twemoji sprite set).
+- `parent.rs` — the long-press parent settings overlay.
+- `games/{picker,phonics,patterns}.rs` — the scenes.
+- `main.rs` — window, the router/app loop, `build_game`, and the `--capture` /
+  `--playtest` entry points.
 
-The `fountouki` binary has two non-interactive modes (otherwise it runs the
-interactive app loop):
+## Dev commands
+```sh
+cargo run -p fountouki                         # desktop (interactive)
+cargo test --workspace                         # core unit tests (120)
+cargo run -p fountouki -- --playtest           # scripted gameplay assertions
+bash tools/goldens.sh                          # screenshot matrix → screenshots/golden/
+cargo build --release -p fountouki --target wasm32-unknown-unknown   # web build
+```
+- Fresh machine: install `rustup`, then `rustup target add wasm32-unknown-unknown`.
+  `.cargo/config.toml` already adds the wasm linker flags macroquad needs
+  (`--import-undefined`/`--export-table`).
+- `--capture <png> <scene> [w] [h]` renders a scene offscreen to a PNG. Scene
+  ids: `picker phonics phonics-miss phonics-done patterns patterns-emoji
+  patterns-unit parent-patterns parent-phonics`.
 
-- `--capture <png> <scene> [w] [h]` — render one scene offscreen to a PNG.
-  Same renderer that ships native, so the output reflects the device, not an
-  emulator. `[w] [h]` default to a standard size if omitted.
-- `--playtest` — drive the real scenes with synthetic taps and assert; exits
-  non-zero on failure. Used in CI.
-
-Scene ids (for `--capture` and `tools/goldens.sh`):
-`picker`, `phonics`, `patterns`, `parent-patterns`, `parent-phonics`.
-
-## Goldens
-
-- `tools/goldens.sh` captures every scene at iPad landscape/portrait + phone
-  landscape into `screenshots/golden/`. Eyeball them; CI uploads them as
-  artifacts.
-- Local (macOS): real GL. CI (Linux): runs under `xvfb-run` with software GL.
-- **Determinism caveat:** the WASM/CI software-GL path is not pixel-identical
-  to native GL (AA, gradients, text hinting differ). Goldens are for eyeballing
-  regressions, not byte-exact diffing across the native↔CI boundary.
+## Testing & visual verification
+- **Logic**: `cargo test --workspace` (core). **Gameplay**: `--playtest` drives
+  the real scenes with synthetic taps + asserts (phonics 7-star completion,
+  patterns correct-scores + errorless). **Visuals**: `tools/goldens.sh` renders
+  every scene × {ipad-landscape, ipad-portrait, phone-landscape} to
+  `screenshots/golden/` — the SAME renderer that ships produces these, so a
+  golden reflects the device (modulo GPU AA). Eyeball iPad landscape first.
+- CI (`.github/workflows/ci.yml`) runs all three on Linux under `xvfb` +
+  software GL and uploads the goldens as an artifact. Determinism caveat: the
+  software-GL path isn't byte-identical to native GL — goldens are for
+  eyeballing regressions, not byte-exact cross-environment diffing.
 
 ## Deploy
+- `.github/workflows/deploy.yml` (push to `main`): builds the wasm, assembles
+  `web/` + `fountouki.wasm` into `dist/`, deploys to GitHub Pages.
 
-- Web → GitHub Pages (`.github/workflows/deploy.yml`): build wasm, assemble
-  `web/`, publish.
-- Sync server: `server/` (Cloudflare Worker) — deployed independently.
+## Extending
+- **Add a game**: implement a `Scene` in `app/src/games/`, add an arm to
+  `main::build_game` + an entry in `games::picker::GAMES` (id, label) + a
+  `draw_icon` arm. Add a `--capture` scene id + a `--playtest` scenario.
+- **Add an emoji**: drop its Twemoji PNG in `app/assets/emoji/` (lowercase hex
+  codepoints, FE0F stripped) and add an `insert!` line in `app/src/emoji.rs`.
+- Rendering rule: keep layout **ours** (compute from `Frame`); never reintroduce
+  platform-delegated/CSS-style layout — that's the bug class the rewrite fixed.
+
+## Known follow-ups
+- **Cross-device sync transport is not wired** into the app. The protocol +
+  merge logic live in `core::sync`/`core::srs` and are unit-tested; the app is
+  offline-first (state persists locally) and recovers, but it does not yet
+  pull/push to the Worker. Wire a `SyncTransport` (browser `fetch` for wasm)
+  into phonics: pull+merge on mount, debounced push on grade, flush on hide.
+- Native `ios/`/`android/` scaffolds are best-effort + unverified end-to-end
+  (need Xcode + an Apple Developer account / Android NDK). WASM-PWA is the
+  supported target.
+- Visual polish backlog (from review): richer done-screen confetti, fuller
+  picker frog, a friendlier patterns progress indicator.
