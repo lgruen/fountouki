@@ -3,7 +3,7 @@
 //! cyclers + start-over; phonics: read-only mastery). Drawn on top of a dimmed
 //! scene; closing persists changes. No native widgets — selects are tap-to-cycle
 //! chips, the token/endpoint are tap-to-focus text fields.
-use crate::{draw, input, palette, scene::Ctx, store::Db, text};
+use crate::{draw, input, kb, palette, scene::Ctx, store::Db, text};
 use fountouki_core::{
     rng::Mulberry32,
     settings::{self, PatternsSettings},
@@ -121,7 +121,10 @@ impl ParentPanel {
 
     pub fn update(&mut self, ctx: &Ctx) -> PanelResult {
         let l = layout(&ctx.frame, &self.game, self.scroll);
-        // Text entry into the focused field.
+        // Text entry into the focused field. Native reads macroquad's physical
+        // keyboard; web mirrors the hidden <input> (`kb` / `text_input.js`),
+        // which is the only way to get a soft keyboard + characters on mobile.
+        #[cfg(not(target_arch = "wasm32"))]
         if self.focus != Focus::None {
             while let Some(c) = get_char_pressed() {
                 let buf = if self.focus == Focus::Token { &mut self.token } else { &mut self.endpoint };
@@ -140,6 +143,12 @@ impl ParentPanel {
                     self.endpoint.pop();
                 }
             }
+        }
+        #[cfg(target_arch = "wasm32")]
+        match self.focus {
+            Focus::Token => self.token = sanitize_token(&kb::value()),
+            Focus::Endpoint => self.endpoint = sanitize_endpoint(&kb::value()),
+            Focus::None => {}
         }
 
         let pt = ctx.pointer;
@@ -170,13 +179,22 @@ impl ParentPanel {
         // Body controls are only tappable where they're actually visible (inside
         // the scroll viewport); the pinned `done` button is always live.
         let in_body = hit(pt.pos, l.view);
-        self.focus = if in_body && hit(pt.pos, l.token) {
+        let focus = if in_body && hit(pt.pos, l.token) {
             Focus::Token
         } else if in_body && hit(pt.pos, l.endpoint) {
             Focus::Endpoint
         } else {
             Focus::None
         };
+        // This whole block runs only on a tap, so it's the moment to (re)raise or
+        // dismiss the soft keyboard. Re-focusing on every tap of a field also
+        // recovers the keyboard if the user had swiped it away. No-op on native.
+        match focus {
+            Focus::Token => kb::focus(&self.token, kb::Mode::Text),
+            Focus::Endpoint => kb::focus(&self.endpoint, kb::Mode::Url),
+            Focus::None => kb::blur(),
+        }
+        self.focus = focus;
         if in_body && hit(pt.pos, l.gen) {
             let mut rng = Mulberry32::new(self.seed);
             self.token = settings::generate_token(&mut rng);
@@ -247,6 +265,32 @@ impl ParentPanel {
 
         button(l.done, "done", palette::ACCENT, palette::WHITE);
     }
+}
+
+impl Drop for ParentPanel {
+    /// Closing the panel (any path) dismisses the soft keyboard. No-op on native.
+    fn drop(&mut self) {
+        kb::blur();
+    }
+}
+
+/// Sync-token chars: lowercase ASCII alphanumerics, capped at 64. Re-derived
+/// from the hidden input's full value each frame (web), so it filters the whole
+/// string rather than one keystroke — the same rule the native keystroke path
+/// applies char-by-char above.
+#[cfg(any(target_arch = "wasm32", test))]
+fn sanitize_token(s: &str) -> String {
+    s.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .take(64)
+        .collect()
+}
+
+/// Endpoint chars: any non-control character, capped at 120.
+#[cfg(any(target_arch = "wasm32", test))]
+fn sanitize_endpoint(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).take(120).collect()
 }
 
 /// Thin scroll-position thumb on the card's right edge (only when overflowing).
@@ -543,6 +587,22 @@ mod tests {
         // Scroll is clamped: asking for more than max doesn't push past the end.
         let over = layout(&small, "patterns", l0.max_scroll + 999.0);
         assert!((over.endpoint.y - l.endpoint.y).abs() < 0.5, "scroll not clamped to max");
+    }
+
+    /// The web soft-keyboard path resanitizes the hidden input's whole value;
+    /// it must land on the same rules the native keystroke path enforces.
+    #[test]
+    fn token_sanitizer_matches_field_rules() {
+        assert_eq!(sanitize_token("AbC-12 xy!"), "abc12xy");
+        assert_eq!(sanitize_token(""), "");
+        // Lowercased, alnum-only, hard-capped at 64.
+        assert_eq!(sanitize_token(&"A".repeat(100)).len(), 64);
+    }
+
+    #[test]
+    fn endpoint_sanitizer_strips_controls_and_caps() {
+        assert_eq!(sanitize_endpoint("https://x.dev\n\t"), "https://x.dev");
+        assert_eq!(sanitize_endpoint(&"a".repeat(200)).len(), 120);
     }
 
     /// Tablets are tall enough for the full form, so the card fits its content

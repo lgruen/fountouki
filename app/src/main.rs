@@ -11,6 +11,7 @@ mod draw;
 mod emoji;
 mod games;
 mod input;
+mod kb;
 mod layout;
 mod net;
 mod palette;

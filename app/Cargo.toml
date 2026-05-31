@@ -8,3 +8,8 @@ macroquad = "0.4"
 fountouki-core = { path = "../core" }
 nanoserde = "0.1"
 quad-net = "0.1"
+
+# Web-only: string marshalling for the hidden-<input> soft-keyboard bridge
+# (`kb.rs` + `web/text_input.js`). Already in the tree via quad-net.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sapp-jsutils = "0.1"

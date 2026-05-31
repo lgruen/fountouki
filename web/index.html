@@ -33,6 +33,9 @@
          quad-net (which uses its JsObject helpers); then load() runs the wasm. -->
     <script src="sapp_jsutils.js"></script>
     <script src="quad-net.js"></script>
+    <!-- Hidden-<input> bridge so mobile soft keyboards work for the parent-menu
+         text fields (the canvas alone can't raise one). Reuses sapp_jsutils. -->
+    <script src="text_input.js"></script>
     <script>
       load("fountouki.wasm");
       if ("serviceWorker" in navigator) {

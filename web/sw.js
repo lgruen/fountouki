@@ -9,6 +9,7 @@ const SHELL = [
   './mq_js_bundle.js',
   './sapp_jsutils.js',
   './quad-net.js',
+  './text_input.js',
   './fountouki.wasm',
   './manifest.webmanifest',
   './icon-180.png',

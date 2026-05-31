@@ -166,6 +166,7 @@ dependencies = [
  "macroquad",
  "nanoserde",
  "quad-net",
+ "sapp-jsutils",
 ]
 
 [[package]]
