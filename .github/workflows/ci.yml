@@ -37,7 +37,7 @@ jobs:
       # renderer that ships). Uploaded so layout regressions can be eyeballed.
       - name: Golden screenshots
         run: LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a bash tools/goldens.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: screenshots
