@@ -6,7 +6,7 @@
 use crate::{draw, input, palette, scene::Ctx, store::Db, text};
 use fountouki_core::{
     rng::Mulberry32,
-    settings::{self, PatternsSettings, SharedSettings},
+    settings::{self, PatternsSettings},
     srs,
     themes::ThemeChoice,
 };
@@ -53,6 +53,11 @@ pub struct ParentPanel {
     start_over: bool,
     mastery: Option<Mastery>,
     seed: u32,
+    /// Pixels the body content is scrolled up (0 = top). Clamped to the
+    /// content's overflow each frame; always 0 when everything fits.
+    scroll: f32,
+    /// Last pointer-y while dragging the body, for frame-to-frame delta.
+    drag_y: Option<f32>,
 }
 
 struct Mastery {
@@ -89,6 +94,8 @@ impl ParentPanel {
             start_over: false,
             mastery,
             seed,
+            scroll: 0.0,
+            drag_y: None,
         }
     }
 
@@ -113,7 +120,7 @@ impl ParentPanel {
     }
 
     pub fn update(&mut self, ctx: &Ctx) -> PanelResult {
-        let l = layout(&ctx.frame, &self.game);
+        let l = layout(&ctx.frame, &self.game, self.scroll);
         // Text entry into the focused field.
         if self.focus != Focus::None {
             while let Some(c) = get_char_pressed() {
@@ -136,30 +143,48 @@ impl ParentPanel {
         }
 
         let pt = ctx.pointer;
+
+        // Drag- and wheel-scroll the body. A drag (>16px) won't register as a
+        // tap, so this never conflicts with the button hit-tests below.
+        if pt.down {
+            if let Some(prev) = self.drag_y {
+                if l.max_scroll > 0.0 {
+                    self.scroll -= pt.pos.y - prev;
+                }
+            }
+            self.drag_y = Some(pt.pos.y);
+        } else {
+            self.drag_y = None;
+        }
+        self.scroll -= mouse_wheel().1 * 0.6;
+        self.scroll = self.scroll.clamp(0.0, l.max_scroll);
+
         if !pt.tapped() {
             return PanelResult::Stay;
         }
         // Outside the card → close.
-        if !input::hit_rect(pt.pos, l.card.x, l.card.y, l.card.w, l.card.h) {
+        if !hit(pt.pos, l.card) {
             self.apply();
             return PanelResult::Close { rebuild: self.ptn_dirty };
         }
-        // Focus fields.
-        self.focus = if input::hit_rect(pt.pos, l.token.x, l.token.y, l.token.w, l.token.h) {
+        // Body controls are only tappable where they're actually visible (inside
+        // the scroll viewport); the pinned `done` button is always live.
+        let in_body = hit(pt.pos, l.view);
+        self.focus = if in_body && hit(pt.pos, l.token) {
             Focus::Token
-        } else if input::hit_rect(pt.pos, l.endpoint.x, l.endpoint.y, l.endpoint.w, l.endpoint.h) {
+        } else if in_body && hit(pt.pos, l.endpoint) {
             Focus::Endpoint
         } else {
             Focus::None
         };
-        if hit(pt.pos, l.gen) {
+        if in_body && hit(pt.pos, l.gen) {
             let mut rng = Mulberry32::new(self.seed);
             self.token = settings::generate_token(&mut rng);
         }
-        if hit(pt.pos, l.clear) {
+        if in_body && hit(pt.pos, l.clear) {
             self.token.clear();
         }
-        if self.game == "patterns" {
+        if self.game == "patterns" && in_body {
             if hit(pt.pos, l.theme) {
                 self.ptn.theme_choice = cycle_theme(&self.ptn.theme_choice);
                 self.ptn_dirty = true;
@@ -192,10 +217,13 @@ impl ParentPanel {
     pub fn draw(&mut self, ctx: &Ctx) {
         // Dim scrim over the (already-drawn) scene.
         draw_rectangle(0.0, 0.0, ctx.frame.w, ctx.frame.h, palette::SCRIM);
-        let l = layout(&ctx.frame, &self.game);
+        let l = layout(&ctx.frame, &self.game, self.scroll);
         draw::card(l.card.x, l.card.y, l.card.w, l.card.h, palette::CARD);
-        text::ui_centered("parent settings", l.card.x + l.card.w / 2.0, l.card.y + 30.0, 26, palette::INK);
+        text::ui_centered("parent settings", l.card.x + l.card.w / 2.0, l.title_y, 26, palette::INK);
 
+        // Scrollable body, clipped to the viewport so rows can't bleed into the
+        // pinned title/done bands or off the card.
+        draw::push_clip(l.view.x, l.view.y, l.view.w, l.view.h);
         if self.game == "patterns" {
             chip(l.theme, "pictures", theme_label(&self.ptn.theme_choice));
             chip(l.diff, "helpers", &self.ptn.difficulty);
@@ -204,9 +232,8 @@ impl ParentPanel {
             button(l.start_over, "start over", palette::ACCENT, palette::WHITE);
         }
         if let Some(m) = &self.mastery {
-            draw_mastery(l.card, m);
+            draw_mastery(l.mastery, m);
         }
-
         // Sync section.
         label(l.token, "sync token");
         field(l.token, &self.token, self.focus == Focus::Token, "(empty = no sync)");
@@ -214,9 +241,25 @@ impl ParentPanel {
         button(l.clear, "clear", palette::CARD, palette::MUTED);
         label(l.endpoint, "endpoint");
         field(l.endpoint, &self.endpoint, self.focus == Focus::Endpoint, settings_default_endpoint());
+        draw::pop_clip();
+
+        scrollbar(&l, self.scroll);
 
         button(l.done, "done", palette::ACCENT, palette::WHITE);
     }
+}
+
+/// Thin scroll-position thumb on the card's right edge (only when overflowing).
+fn scrollbar(l: &Layout, scroll: f32) {
+    if l.max_scroll <= 0.5 {
+        return;
+    }
+    let track = l.view.h;
+    let thumb = (track * track / l.inner_h).clamp(28.0, track);
+    let t = scroll / l.max_scroll;
+    let y = l.view.y + t * (track - thumb);
+    let x = l.card.x + l.card.w - 10.0;
+    draw::rounded_rect(x, y, 4.0, thumb, 2.0, palette::MUTED);
 }
 
 fn settings_default_endpoint() -> &'static str {
@@ -279,52 +322,117 @@ fn theme_label(cur: &str) -> &'static str {
 
 struct Layout {
     card: Rect,
+    title_y: f32,
+    /// Scroll viewport: body rows are clipped to and hit-tested against this.
+    view: Rect,
     theme: Rect,
     diff: Rect,
     mode: Rect,
     hint: Rect,
     start_over: Rect,
+    mastery: Rect,
     token: Rect,
     gen: Rect,
     clear: Rect,
     endpoint: Rect,
     done: Rect,
+    /// Total body content height, and the overflow past the viewport.
+    inner_h: f32,
+    max_scroll: f32,
 }
 
-fn layout(f: &crate::layout::Frame, game: &str) -> Layout {
+/// Layout = pinned title band, a scrollable body, and a pinned `done` band. The
+/// body rows are laid out in local coords (y from 0) then shifted by `-scroll`;
+/// the card fits its content when it can, else fills the safe viewport and the
+/// body scrolls (phones in landscape are too short for the full form).
+fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
+    const PAD: f32 = 26.0;
+    const HEADER: f32 = 54.0; // pinned title band
+    const FOOTER: f32 = 66.0; // pinned done band
+    const RH: f32 = 46.0; // labeled-control height
+    const LBL: f32 = 22.0; // space reserved for a label above a control
+    const GAP: f32 = 16.0; // gap below each row
+    const BTN_H: f32 = 44.0;
+
     let cw = (f.w * 0.5).clamp(420.0, 660.0);
-    let ch = (f.h * 0.86).clamp(360.0, 760.0);
+    let rw = cw - 2.0 * PAD;
+
+    // --- body rows in LOCAL coords (y grows down from 0) ---
+    // A little headroom so the first row's label doesn't kiss the clip edge.
+    let mut ly = 14.0;
+    let labeled = |ly: &mut f32| {
+        let top = *ly + LBL;
+        *ly = top + RH + GAP;
+        (top, RH)
+    };
+    let block = |ly: &mut f32, h: f32| {
+        let top = *ly;
+        *ly = top + h + GAP;
+        (top, h)
+    };
+
+    let z2 = (0.0_f32, 0.0_f32);
+    let (mut theme_l, mut diff_l, mut mode_l, mut hint_l, mut start_l) = (z2, z2, z2, z2, z2);
+    let mut mastery_l = z2;
+    if game == "patterns" {
+        theme_l = labeled(&mut ly);
+        diff_l = labeled(&mut ly);
+        mode_l = labeled(&mut ly);
+        hint_l = labeled(&mut ly);
+        start_l = block(&mut ly, BTN_H);
+    } else if game == "phonics" {
+        mastery_l = block(&mut ly, 78.0);
+    }
+    let token_l = labeled(&mut ly);
+    let gen_l = block(&mut ly, BTN_H);
+    let endpoint_l = labeled(&mut ly);
+    let inner_h = ly;
+
+    // --- card sizing: fit content, else fill the safe viewport and scroll ---
+    let v_margin = f.safe.top.max(14.0) + f.safe.bottom.max(14.0);
+    let avail = (f.h - v_margin).max(220.0);
+    let ch = (HEADER + inner_h + FOOTER).min(avail);
     let cx = f.w / 2.0 - cw / 2.0;
-    let cy = f.h / 2.0 - ch / 2.0;
-    let pad = 28.0;
-    let rw = cw - 2.0 * pad;
-    let rh = 46.0;
-    let mut y = cy + 64.0;
-    // `mk` takes `&mut y` (rather than capturing it) so we can still read/adjust
-    // y directly between rows.
-    let mk = |y: &mut f32| {
-        let r = Rect::new(cx + pad, *y, rw, rh);
-        *y += rh + 26.0;
-        r
-    };
-    let (theme, diff, mode, hint, start_over) = if game == "patterns" {
-        (mk(&mut y), mk(&mut y), mk(&mut y), mk(&mut y), mk(&mut y))
-    } else {
-        let z = Rect::new(-100.0, -100.0, 0.0, 0.0);
-        // leave room for the phonics mastery block
-        if game == "phonics" {
-            y += 150.0;
-        }
-        (z, z, z, z, z)
-    };
-    let token = mk(&mut y);
+    let cy = (f.h - ch) / 2.0;
+
+    let view = Rect::new(cx, cy + HEADER, cw, ch - HEADER - FOOTER);
+    let max_scroll = (inner_h - view.h).max(0.0);
+    let s = scroll.clamp(0.0, max_scroll);
+
+    // local row → on-screen rect (left-aligned in the padded column).
+    let lx = cx + PAD;
     let half = (rw - 14.0) / 2.0;
-    let gen = Rect::new(cx + pad, y, half, 44.0);
-    let clear = Rect::new(cx + pad + half + 14.0, y, half, 44.0);
-    y += 44.0 + 14.0;
-    let endpoint = mk(&mut y);
-    let done = Rect::new(cx + cw / 2.0 - 80.0, cy + ch - 60.0, 160.0, 46.0);
-    Layout { card: Rect::new(cx, cy, cw, ch), theme, diff, mode, hint, start_over, token, gen, clear, endpoint, done }
+    let row = |loc: (f32, f32), w: f32| Rect::new(lx, view.y - s + loc.0, w, loc.1);
+
+    let gen = row(gen_l, half);
+    let clear = Rect::new(lx + half + 14.0, gen.y, half, BTN_H);
+    let off = Rect::new(-1000.0, -1000.0, 0.0, 0.0);
+    let (theme, diff, mode, hint, start_over) = if game == "patterns" {
+        (row(theme_l, rw), row(diff_l, rw), row(mode_l, rw), row(hint_l, rw), row(start_l, rw))
+    } else {
+        (off, off, off, off, off)
+    };
+
+    let done = Rect::new(cx + cw / 2.0 - 80.0, cy + ch - FOOTER + (FOOTER - 46.0) / 2.0, 160.0, 46.0);
+
+    Layout {
+        card: Rect::new(cx, cy, cw, ch),
+        title_y: cy + 30.0,
+        view,
+        theme,
+        diff,
+        mode,
+        hint,
+        start_over,
+        mastery: row(mastery_l, rw),
+        token: row(token_l, rw),
+        gen,
+        clear,
+        endpoint: row(endpoint_l, rw),
+        done,
+        inner_h,
+        max_scroll,
+    }
 }
 
 fn hit(p: Vec2, r: Rect) -> bool {
@@ -359,25 +467,93 @@ fn button(r: Rect, t: &str, fill: Color, fg: Color) {
     text::ui_centered(t, r.x + r.w / 2.0, r.y + r.h / 2.0, 18, fg);
 }
 
-fn draw_mastery(card: Rect, m: &Mastery) {
-    let x = card.x + 28.0;
-    let mut y = card.y + 70.0;
+fn draw_mastery(r: Rect, m: &Mastery) {
+    let x = r.x;
     text::ui_left(
         &format!("mastered {}  strong {}  learning {}  new {}", m.mastered, m.strong, m.learning, m.new),
         x,
-        y,
+        r.y + 11.0,
         15,
         palette::MUTED,
     );
-    y += 26.0;
     let dot = 14.0;
     let gap = 6.0;
     let per_row = 13;
+    let y0 = r.y + 36.0;
     for (i, (_c, b)) in m.boxes.iter().enumerate() {
         let col = i % per_row;
         let rrow = i / per_row;
         let cx = x + col as f32 * (dot + gap) + dot / 2.0;
-        let cy = y + rrow as f32 * (dot + gap) + dot / 2.0;
+        let cy = y0 + rrow as f32 * (dot + gap) + dot / 2.0;
         draw_circle(cx, cy, dot / 2.0, palette::MASTERY[(*b as usize).min(4)]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::{Frame, Insets};
+
+    fn frame(w: f32, h: f32) -> Frame {
+        Frame::new(w, h, Insets::default())
+    }
+
+    // label width height — the golden matrix, incl. the short phone-landscape.
+    const SIZES: [(f32, f32); 3] = [(1194.0, 834.0), (834.0, 1194.0), (844.0, 390.0)];
+
+    /// The pinned `done` button sits below the scroll viewport and inside the
+    /// card on every device — the regression that overlapped it with the
+    /// generate/clear/start-over controls on short phones.
+    #[test]
+    fn done_is_pinned_below_the_body() {
+        for game in ["patterns", "phonics"] {
+            for (w, h) in SIZES {
+                let l = layout(&frame(w, h), game, 0.0);
+                let view_bottom = l.view.y + l.view.h;
+                assert!(
+                    l.done.y >= view_bottom - 0.5,
+                    "{game} {w}x{h}: done.y {} overlaps body (view bottom {view_bottom})",
+                    l.done.y
+                );
+                assert!(
+                    l.done.y + l.done.h <= l.card.y + l.card.h + 0.5,
+                    "{game} {w}x{h}: done spills past the card bottom"
+                );
+                assert!(l.view.y > l.card.y, "{game} {w}x{h}: title band has no room");
+            }
+        }
+    }
+
+    /// A short phone-landscape card can't show the whole form, so it scrolls;
+    /// at full scroll the last field (endpoint) is fully within the viewport.
+    #[test]
+    fn short_phone_scrolls_to_reach_the_end() {
+        let small = frame(844.0, 390.0);
+        let l0 = layout(&small, "patterns", 0.0);
+        assert!(l0.max_scroll > 0.0, "patterns should scroll on a short phone");
+
+        let l = layout(&small, "patterns", l0.max_scroll);
+        let view_bottom = l.view.y + l.view.h;
+        assert!(
+            l.endpoint.y + l.endpoint.h <= view_bottom + 0.5,
+            "endpoint unreachable at max scroll: {} vs {view_bottom}",
+            l.endpoint.y + l.endpoint.h
+        );
+        assert!(l.endpoint.y >= l.view.y - 0.5, "endpoint above viewport at max scroll");
+        // Scroll is clamped: asking for more than max doesn't push past the end.
+        let over = layout(&small, "patterns", l0.max_scroll + 999.0);
+        assert!((over.endpoint.y - l.endpoint.y).abs() < 0.5, "scroll not clamped to max");
+    }
+
+    /// Tablets are tall enough for the full form, so the card fits its content
+    /// and never scrolls.
+    #[test]
+    fn tablets_fit_without_scrolling() {
+        for game in ["patterns", "phonics"] {
+            for (w, h) in [(1194.0, 834.0), (834.0, 1194.0)] {
+                let l = layout(&frame(w, h), game, 0.0);
+                assert_eq!(l.max_scroll, 0.0, "{game} {w}x{h} should fit without scroll");
+            }
+        }
     }
 }
