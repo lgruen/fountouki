@@ -34,7 +34,7 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 - `cargo run -p fountouki` — interactive desktop.
 - `--capture <png> <scene> [w] [h]` — render a scene offscreen to a PNG.
   Scenes: `picker phonics phonics-miss phonics-done patterns patterns-emoji
-  patterns-unit parent-patterns parent-phonics`.
+  patterns-unit patterns-hard parent-patterns parent-phonics`.
 - `--playtest` — scripted taps drive the real scenes + assert invariants; exits
   non-zero on failure.
 
