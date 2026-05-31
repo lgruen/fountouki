@@ -114,6 +114,60 @@ pub fn mark_arrow(cx: f32, cy: f32, r: f32, color: Color) {
     );
 }
 
+/// Generic stroked arc (a0..a1 radians, 0 = +x, CCW), round-capped.
+pub fn arc(cx: f32, cy: f32, radius: f32, a0: f32, a1: f32, width: f32, color: Color) {
+    const N: usize = 24;
+    let mut pts = Vec::with_capacity(N + 1);
+    for i in 0..=N {
+        let a = a0 + (a1 - a0) * (i as f32 / N as f32);
+        pts.push(vec2(cx + radius * a.cos(), cy + radius * a.sin()));
+    }
+    stroke_path(&pts, width, color);
+}
+
+/// Left-pointing back chevron ("<") centered on (cx,cy), sized to r.
+pub fn chevron_left(cx: f32, cy: f32, r: f32, color: Color) {
+    let w = (r * 0.18).max(3.0);
+    stroke_path(
+        &[
+            vec2(cx + 0.28 * r, cy - 0.36 * r),
+            vec2(cx - 0.22 * r, cy),
+            vec2(cx + 0.28 * r, cy + 0.36 * r),
+        ],
+        w,
+        color,
+    );
+}
+
+/// Speaker glyph (mute button). Cone pointing right + sound waves; a slash when muted.
+pub fn speaker(cx: f32, cy: f32, r: f32, color: Color, muted: bool) {
+    let bx = cx - 0.55 * r;
+    // magnet box
+    draw_rectangle(bx, cy - 0.16 * r, 0.18 * r, 0.32 * r, color);
+    // cone (trapezoid as two triangles)
+    let l = bx + 0.18 * r;
+    let right = cx - 0.05 * r;
+    draw_triangle(
+        vec2(l, cy - 0.16 * r),
+        vec2(l, cy + 0.16 * r),
+        vec2(right, cy + 0.42 * r),
+        color,
+    );
+    draw_triangle(
+        vec2(l, cy - 0.16 * r),
+        vec2(right, cy + 0.42 * r),
+        vec2(right, cy - 0.42 * r),
+        color,
+    );
+    let w = (r * 0.1).max(2.0);
+    if muted {
+        stroke_path(&[vec2(cx + 0.1 * r, cy - 0.4 * r), vec2(cx + 0.55 * r, cy + 0.4 * r)], w, color);
+    } else {
+        arc(right + 0.12 * r, cy, 0.18 * r, -0.9, 0.9, w, color);
+        arc(right + 0.12 * r, cy, 0.34 * r, -0.8, 0.8, w, color);
+    }
+}
+
 /// First milestone scene: a static Phonics card with rainbow + action buttons,
 /// composed against the visual spec at the given pixel size. (Layout is
 /// hardcoded for now; generalized into a layout system once it looks right.)

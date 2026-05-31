@@ -7,6 +7,8 @@ pub struct Ctx<'a> {
     pub dt: f32,
     /// Seconds since the scene was mounted (deterministic in capture).
     pub time: f32,
+    /// Wall-clock epoch milliseconds (for SRS due/last-seen). Fixed in capture.
+    pub now: i64,
     pub pointer: &'a Pointer,
     pub frame: Frame,
     pub fonts: &'a Fonts,
