@@ -129,26 +129,36 @@ export function missed(state: PhonicsState, letter: string, now = Date.now()): v
 
 /** Letters currently eligible to be queued.
  *
- *  Walks INTRO_ORDER and includes:
- *   - every already-introduced letter (box >= INTRODUCED_BOX_MIN), regardless
- *     of position — keeps prior progress in rotation even if INTRO_ORDER
- *     is reordered later, or the kid jumps around;
- *   - plus the first NEW_LETTER_BUFFER not-yet-introduced letters from
- *     INTRO_ORDER, so the unfamiliar surface stays small. A relapsed
- *     letter (box dropped back to 0) falls into this bucket too,
- *     consuming a slot until the kid recovers it. */
+ *  Walks INTRO_ORDER from the start and stops at the frontier — the point
+ *  where NEW_LETTER_BUFFER not-yet-introduced letters have been gathered.
+ *  Everything up to and including that frontier is active:
+ *   - already-introduced letters (box >= INTRODUCED_BOX_MIN) in the prefix
+ *     stay in rotation for spaced review;
+ *   - plus the first NEW_LETTER_BUFFER not-yet-introduced letters, so the
+ *     unfamiliar surface stays small. A relapsed letter (box dropped back
+ *     to 0) falls into this bucket too, consuming a slot until recovered.
+ *
+ *  Crucially we STOP at the frontier rather than scanning the whole order.
+ *  An introduced letter that sits *beyond* the frontier — e.g. one polluted
+ *  to box >= 1 by an older, ungated build that flashed the whole alphabet —
+ *  is parked (its box is retained, never erased) until the kid drips far
+ *  enough down INTRO_ORDER to reach it. Without the stop, a single stray
+ *  late-letter grade (x, v, q…) leaks back into a fresh learner's rotation
+ *  forever, which is exactly the drip-in this gate exists to prevent. */
 export function activeLetters(state: PhonicsState): string[] {
   const active: string[] = [];
   let unsettled = 0;
   for (const letter of INTRO_ORDER) {
+    // Frontier reached: stop. Everything past the NEW_LETTER_BUFFER-th
+    // not-yet-introduced letter is parked, whether or not it's already
+    // introduced. (A fully-polluted tail from an older ungated build has
+    // no box-0 letter left to stop on, so the cut-off must gate the
+    // introduced branch too — not just new letters.)
+    if (unsettled >= NEW_LETTER_BUFFER) break;
     const s = state.letters[letter];
     const box = s?.box ?? 0;
-    if (box >= INTRODUCED_BOX_MIN) {
-      active.push(letter);
-    } else if (unsettled < NEW_LETTER_BUFFER) {
-      active.push(letter);
-      unsettled += 1;
-    }
+    active.push(letter);
+    if (box < INTRODUCED_BOX_MIN) unsettled += 1;
   }
   return active;
 }

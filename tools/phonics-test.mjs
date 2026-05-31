@@ -86,6 +86,63 @@ await page.evaluate(() => localStorage.clear());
 await page.reload();
 await page.waitForSelector('.phonics-letter');
 
+console.log('1c) legacy-polluted state: out-of-order introduced letters stay parked');
+// Regression for the "kid just started but keeps getting x, v, q" bug.
+// An older, ungated build flashed the whole alphabet, so a real install
+// can carry box>=1 on letters scattered across the order — including the
+// whole tail. activeLetters must still drip in Jolly order and NOT surface
+// any letter past the frontier (the 3rd not-yet-introduced letter), even
+// when there's no box-0 letter left after it to stop on.
+const INTRO_ORDER = [
+  's','a','t','i','p','n','c','k','e','h','r','m','d',
+  'g','o','u','l','f','b','j','z','w','v','y','x','q',
+];
+// New (box 0) only for i, h, m — every other letter introduced to box 2.
+// Mirrors the reported screenshot (0 mastered, 1 strong, 22 learning, 3 new).
+const NEW_NOW = new Set(['i', 'h', 'm']);
+await page.evaluate(
+  ({ order, neu }) => {
+    const now = Date.now();
+    const letters = {};
+    for (const l of order) {
+      letters[l] = neu.includes(l)
+        ? { box: 0, due: now, lastSeen: 0 }
+        : { box: 2, due: now, lastSeen: now };
+    }
+    localStorage.setItem(
+      'fountouki.phonics.state.v1',
+      JSON.stringify({ schemaVersion: 1, letters, version: 50 }),
+    );
+  },
+  { order: INTRO_ORDER, neu: [...NEW_NOW] },
+);
+await page.reload();
+await page.waitForSelector('.phonics-letter');
+// Frontier: walk INTRO_ORDER, stop after the 3rd box-0 letter (i, h, m).
+const frontierIdx = INTRO_ORDER.indexOf('m');
+const ALLOWED = new Set(INTRO_ORDER.slice(0, frontierIdx + 1));
+assert(!ALLOWED.has('x') && !ALLOWED.has('v'), 'sanity: x/v are past the frontier');
+const polluted = new Set();
+for (let i = 0; i < 24; i++) {
+  const cur = await page.evaluate(() => window.__phonics?.letter);
+  assert(
+    ALLOWED.has(cur),
+    `parked letter ${cur} surfaced; rotation should stay within the Jolly frontier ${[...ALLOWED].join('')}`,
+  );
+  polluted.add(cur);
+  // Alternate miss/advance so we churn the queue without ending the session.
+  await page.click('.phonics-miss');
+  await page.waitForSelector('.phonics-hint:not([hidden])');
+  await page.click('.phonics-advance');
+  await page.waitForFunction(() => window.__phonics?.inMissReveal === false);
+}
+assert(!polluted.has('x') && !polluted.has('v'), 'x/v must never appear (legacy pollution parked)');
+assert(NEW_NOW.has('i') || NEW_NOW.has('h') || NEW_NOW.has('m'), 'sanity');
+// Reset to truly fresh state for the remaining steps.
+await page.evaluate(() => localStorage.clear());
+await page.reload();
+await page.waitForSelector('.phonics-letter');
+
 console.log('2) "got it" → star += 1, next card');
 const beforeGotLetter = await page.locator('.phonics-letter').textContent();
 await page.click('.phonics-got');
