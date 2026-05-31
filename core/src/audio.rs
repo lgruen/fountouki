@@ -199,6 +199,52 @@ pub fn frog() -> Vec<f32> {
     mix(&notes)
 }
 
+/// `trainWhistle()` — a cheerful "toot-toot". Each toot is a perfect-fifth steam
+/// chord (root + fifth + octave) on reedy triangles, with a slightly detuned
+/// partner on the fifth for the shimmery beat of a real steam whistle. The frog
+/// equivalent for the patterns finale's tap reaction.
+pub fn train_whistle() -> Vec<f32> {
+    use Waveform::{Sine, Triangle};
+    // root G4, fifth D5, octave G5 — the classic open, bright whistle interval.
+    let toot = |start: f32| {
+        [
+            Note { freq: 392.00, start, dur: 0.24, gain: 0.12, waveform: Triangle }, // G4
+            Note { freq: 587.33, start, dur: 0.24, gain: 0.12, waveform: Triangle }, // D5
+            Note { freq: 783.99, start, dur: 0.24, gain: 0.10, waveform: Triangle }, // G5
+            Note { freq: 590.50, start, dur: 0.24, gain: 0.05, waveform: Sine },     // detune shimmer
+        ]
+    };
+    let mut notes = Vec::with_capacity(8);
+    notes.extend(toot(0.00));
+    notes.extend(toot(0.30));
+    mix(&notes)
+}
+
+/// `finale()` — the grand "you made it to the end!" flourish for the patterns
+/// finale: a quick rising run, then a held C-major chord with a high sparkle on
+/// top. Grander and longer than [`level_up`].
+pub fn finale() -> Vec<f32> {
+    use Waveform::Sine;
+    let chord = 0.15;
+    let notes = [
+        // ascending run
+        Note::new(523.25, 0.00, 0.12), // C5
+        Note::new(659.25, 0.10, 0.12), // E5
+        Note::new(783.99, 0.20, 0.12), // G5
+        Note::new(1046.50, 0.30, 0.16), // C6
+        Note::new(1318.51, 0.40, 0.18), // E6
+        // held triumphant C-major chord
+        Note { freq: 523.25, start: 0.52, dur: 0.72, gain: chord, waveform: Sine }, // C5
+        Note { freq: 659.25, start: 0.52, dur: 0.72, gain: chord, waveform: Sine }, // E5
+        Note { freq: 783.99, start: 0.52, dur: 0.72, gain: chord, waveform: Sine }, // G5
+        Note { freq: 1046.50, start: 0.52, dur: 0.72, gain: chord, waveform: Sine }, // C6
+        // sparkle on top
+        Note { freq: 1567.98, start: 0.62, dur: 0.30, gain: 0.09, waveform: Sine }, // G6
+        Note { freq: 2093.00, start: 0.74, dur: 0.34, gain: 0.07, waveform: Sine }, // C7
+    ];
+    mix(&notes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,14 +285,35 @@ mod tests {
         assert_clean(&level_up());
         assert_clean(&tap());
         assert_clean(&frog());
+        assert_clean(&train_whistle());
+        assert_clean(&finale());
     }
 
     #[test]
     fn all_sounds_nonempty_and_in_range() {
-        for buf in [correct(0), incorrect(), level_up(), tap(), frog()] {
+        for buf in [correct(0), incorrect(), level_up(), tap(), frog(), train_whistle(), finale()] {
             assert!(!buf.is_empty());
             assert!(max_abs(&buf) <= 1.0);
         }
+    }
+
+    #[test]
+    fn train_whistle_is_two_toots() {
+        // Second toot starts at 0.30, dur 0.24 -> ends 0.54 s.
+        let buf = train_whistle();
+        let expected = ((0.54f32 * SAMPLE_RATE as f32).ceil() as usize) + 1;
+        assert_eq!(buf.len(), expected);
+        assert!(max_abs(&buf) > 0.0, "whistle must produce sound");
+    }
+
+    #[test]
+    fn finale_is_grander_than_level_up() {
+        // The finale's held chord + sparkle runs to 1.08 s — longer than the
+        // four-note level-up fanfare, so it reads as a bigger moment.
+        let f = finale();
+        let lu = level_up();
+        assert!(f.len() > lu.len(), "finale ({}) should outlast level_up ({})", f.len(), lu.len());
+        assert!(max_abs(&f) > 0.0, "finale must produce sound");
     }
 
     #[test]

@@ -161,6 +161,38 @@ async fn main() {
                 }
                 Box::new(PatternsScene::new(db.clone(), 5, now))
             }
+            "patterns-done" => {
+                // Master the final level (a clean streak of 4 at MAX_LEVEL) to
+                // reach the Pattern Train finale, then settle the entrance so the
+                // golden shows the train parked + celebrating at the flag.
+                {
+                    let mut kv = db.borrow_kv_mut();
+                    let mut ps = fountouki_core::settings::PatternsSettings::default();
+                    ps.theme_choice = "shapes".to_string();
+                    fountouki_core::settings::save_patterns(&mut **kv, &ps);
+                }
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = PatternsScene::new(db.clone(), 7, now);
+                sc.level = fountouki_core::patterns::MAX_LEVEL;
+                let dptr = Pointer::default();
+                let mut guard = 0;
+                while !sc.in_finale() && guard < 40 {
+                    let ptr = tap(sc.choice_center(&frame, sc.correct_index()));
+                    let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                    if sc.in_finale() {
+                        break;
+                    }
+                    let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &dptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                    guard += 1;
+                }
+                for _ in 0..26 {
+                    let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &dptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                Box::new(sc)
+            }
             "phonics-miss" => {
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = PhonicsScene::new(db.clone(), 7, now);
@@ -329,6 +361,57 @@ async fn main() {
                 println!("PASS patterns-level-streak");
             } else {
                 println!("FAIL patterns-level-streak (held={}, level {}->{}, stars={})", held, lvl, sc.level, sc.stars);
+                fails += 1;
+            }
+        }
+        // patterns: mastering the FINAL level (a clean streak at MAX_LEVEL) fires
+        // the train finale. The engine is then re-tappable (plays a reaction,
+        // stays on the celebration) and Replay returns to a fresh game.
+        {
+            let mut sc = PatternsScene::new(Db::mem(), 7, now);
+            sc.level = fountouki_core::patterns::MAX_LEVEL; // start at the top
+            let idle = Pointer::default();
+            let mut guard = 0;
+            while !sc.in_finale() && guard < 40 {
+                let ptr = tap(sc.choice_center(&frame, sc.correct_index()));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if sc.in_finale() {
+                    break;
+                }
+                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                guard += 1;
+            }
+            if sc.in_finale() {
+                println!("PASS patterns-finale-trigger");
+            } else {
+                println!("FAIL patterns-finale-trigger (guard={guard}, level={})", sc.level);
+                fails += 1;
+            }
+            // Settle the entrance, then tap the engine.
+            for _ in 0..20 {
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            let before = sc.engine_taps();
+            let ptr = tap(sc.engine_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if sc.in_finale() && sc.engine_taps() == before + 1 {
+                println!("PASS patterns-engine-react");
+            } else {
+                println!("FAIL patterns-engine-react (finale={}, taps {}->{})", sc.in_finale(), before, sc.engine_taps());
+                fails += 1;
+            }
+            // Replay returns to a fresh game at level 1 (stars reset).
+            let ptr = tap(sc.replay_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if !sc.in_finale() && sc.level == 1 && sc.stars == 0 {
+                println!("PASS patterns-replay");
+            } else {
+                println!("FAIL patterns-replay (finale={}, level={}, stars={})", sc.in_finale(), sc.level, sc.stars);
                 fails += 1;
             }
         }

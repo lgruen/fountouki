@@ -11,6 +11,8 @@ pub struct Audio {
     level_up: Option<Sound>,
     tap: Option<Sound>,
     frog: Option<Sound>,
+    train_whistle: Option<Sound>,
+    finale: Option<Sound>,
     muted: Cell<bool>,
     silent: bool,
 }
@@ -24,6 +26,8 @@ impl Audio {
             level_up: None,
             tap: None,
             frog: None,
+            train_whistle: None,
+            finale: None,
             muted: Cell::new(true),
             silent: true,
         }
@@ -41,6 +45,8 @@ impl Audio {
             level_up: Some(load_pcm(&synth::level_up()).await),
             tap: Some(load_pcm(&synth::tap()).await),
             frog: Some(load_pcm(&synth::frog()).await),
+            train_whistle: Some(load_pcm(&synth::train_whistle()).await),
+            finale: Some(load_pcm(&synth::finale()).await),
             muted: Cell::new(muted),
             silent: false,
         }
@@ -81,6 +87,12 @@ impl Audio {
     }
     pub fn frog(&self) {
         self.play(&self.frog);
+    }
+    pub fn train_whistle(&self) {
+        self.play(&self.train_whistle);
+    }
+    pub fn finale(&self) {
+        self.play(&self.finale);
     }
 }
 

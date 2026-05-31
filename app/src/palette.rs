@@ -78,6 +78,28 @@ pub const GROUND_MID: Color = hex(0x4caf4c);
 pub const GROUND_BOT: Color = hex(0x3a8c3a);
 pub const RAIN: Color = hex(0x3aa8ee);
 
+// Patterns finale — the "Pattern Train" dusk arrival (a deliberate golden-hour
+// contrast to the phonics garden's cool high-noon).
+pub const SKY_DUSK_TOP: Color = hex(0xff9d7e); // dusky rose top
+pub const SKY_DUSK_MID: Color = hex(0xffd9a0); // amber middle (also cab glass)
+pub const SKY_DUSK_BOT: Color = hex(0xfff2cf); // pale gold at the horizon
+pub const HILL_FAR: Color = hex(0xb98ad0); // hazy violet far hills
+pub const HILL_NEAR: Color = hex(0x7fae6e); // green near hill / ground band
+pub const RAIL: Color = hex(0x8a7a6a); // track + sleepers + station posts
+pub const LIGHT_GLOW: Color = hex(0xfff0b8); // warm string-light / headlamp glow
+pub const ENGINE_RED: Color = hex(0xe85c6b); // cheerful kid-train red (boiler)
+pub const ENGINE_RED_DARK: Color = hex(0xc24856); // boiler front face / shade
+pub const STEAM: Color = hex(0xfff6ea); // warm-white steam puff
+pub const CAR_BODY: Color = CARD; // cars are uniform cream — the items carry the pattern
+// The conductor: a whimsical invented Seussian critter (NOT a bear) — teal body,
+// big magenta snoot, wild hair tufts, and a tall red/cream striped stovepipe hat.
+pub const CRITTER: Color = hex(0x39c0c2); // teal body/head
+pub const CRITTER_DARK: Color = hex(0x2a9698); // shade + wild hair tufts
+pub const CRITTER_BELLY: Color = hex(0xd6f3f0); // pale belly/muzzle
+pub const NOSE: Color = hex(0xff5ea8); // big magenta snoot
+pub const HAT_BRIM: Color = hex(0x37557d); // navy brim/band of the striped hat
+// (hat stripes reuse ENGINE_RED + CARD; bow tie reuses ENGINE_RED + GOLD)
+
 // Form chrome (parent settings)
 pub const FIELD_BORDER: Color = hex(0xe6e1d3);
 pub const SCRIM: Color = Color::new(43.0 / 255.0, 44.0 / 255.0, 52.0 / 255.0, 0.72);
