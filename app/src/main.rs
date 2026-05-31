@@ -4,8 +4,13 @@
 //! entrypoint; `--capture` renders a scene offscreen to a PNG (the golden path).
 use macroquad::prelude::*;
 
+mod anim;
 mod draw;
+mod input;
+mod layout;
 mod palette;
+mod scene;
+mod sound;
 mod text;
 
 use text::Fonts;

@@ -104,7 +104,9 @@ dependencies = [
 name = "fountouki"
 version = "0.1.0"
 dependencies = [
+ "fountouki-core",
  "macroquad",
+ "nanoserde",
 ]
 
 [[package]]
