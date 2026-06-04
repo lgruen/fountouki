@@ -5,16 +5,30 @@
 // parent-menu token/endpoint fields (drawn by Rust) were dead on touch devices.
 //
 // We keep one hidden, focusable <input>. While a field is focused in-app the
-// wasm calls fountouki_kb_focus() to focus it (which raises the keyboard) and
-// reads fountouki_kb_value() back each frame; tapping away calls
+// wasm reads fountouki_kb_value() back each frame; tapping away calls
 // fountouki_kb_blur(). The <input> is the text source on web; native desktop
 // keeps using macroquad's physical-keyboard path.
+//
+// Raising the keyboard, the iOS catch: WebKit only shows the soft keyboard when
+// input.focus() runs *synchronously inside a user-gesture handler*. macroquad
+// processes a tap one frame after the touch, so a focus() from the wasm frame
+// (fountouki_kb_focus) is too late on iOS — Android/desktop are lenient and show
+// it, iPad never did. So we don't rely on the wasm to raise it: each frame the
+// panel publishes its focusable field rects (fountouki_kb_set_fields); we add
+// our OWN touch listener, hit-test the tap against those rects, and focus the
+// input right there, in-gesture. fountouki_kb_focus then only seeds value/caret.
 //
 // Registered as a miniquad plugin so its imports land in the same wasm import
 // object as sapp_jsutils, whose js_object()/js_objects[] string registry we
 // reuse (load order in index.html puts sapp_jsutils first).
 (function () {
   var input = null;
+  // Latest field layout pushed from the wasm: { sw, sh, view:[x,y,w,h],
+  // fields:[[x,y,w,h,mode],...] } in the wasm's screen-coordinate space. null
+  // when the parent panel is closed (nothing focusable → ignore all taps).
+  var fields = null;
+  // Touch/click start point (client px) for a small-travel "is this a tap?" gate.
+  var startX = 0, startY = 0;
 
   function ensure() {
     if (input) return input;
@@ -48,6 +62,51 @@
     return input;
   }
 
+  // Map a client (CSS px) point to wasm screen space and return the keyboard
+  // mode of the field it hits, or null. Scaling uses the wasm's own reported
+  // size vs the canvas's CSS box, so it's independent of devicePixelRatio.
+  function hitMode(clientX, clientY) {
+    if (!fields) return null;
+    var canvas = document.getElementById("glcanvas");
+    if (!canvas) return null;
+    var r = canvas.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    var x = ((clientX - r.left) / r.width) * fields.sw;
+    var y = ((clientY - r.top) / r.height) * fields.sh;
+    var v = fields.view;
+    // Outside the visible scroll viewport: ignore (matches the in-app hit-test).
+    if (x < v[0] || x > v[0] + v[2] || y < v[1] || y > v[1] + v[3]) return null;
+    for (var i = 0; i < fields.fields.length; i++) {
+      var f = fields.fields[i];
+      if (x >= f[0] && x <= f[0] + f[2] && y >= f[1] && y <= f[1] + f[3]) return f[4];
+    }
+    return null;
+  }
+
+  function point(e) {
+    return e.changedTouches ? e.changedTouches[0] : e;
+  }
+
+  function onStart(e) {
+    var p = point(e);
+    startX = p.clientX;
+    startY = p.clientY;
+  }
+
+  // The in-gesture focus. Runs in capture phase so it lands before macroquad's
+  // own canvas handlers (which would otherwise pull focus back to the canvas).
+  function onEnd(e) {
+    if (!fields) return;
+    var p = point(e);
+    // Only a stationary tap focuses — a drag (panel scroll) must not.
+    if (Math.abs(p.clientX - startX) > 16 || Math.abs(p.clientY - startY) > 16) return;
+    var mode = hitMode(p.clientX, p.clientY);
+    if (mode === null) return;
+    var el = ensure();
+    el.inputMode = mode === 1 ? "url" : "text";
+    el.focus({ preventScroll: true });
+  }
+
   function register_plugin(importObject) {
     // value: a sapp_jsutils string-object id (the field's current text);
     // mode: 0 = text (token), 1 = url (endpoint).
@@ -66,11 +125,27 @@
       return js_object(input ? input.value : "");
     };
     importObject.env.fountouki_kb_blur = function () {
+      fields = null;
       if (input) {
         input.value = "";
         input.blur();
       }
     };
+    // spec: a sapp_jsutils string-object id holding the JSON field layout.
+    importObject.env.fountouki_kb_set_fields = function (spec) {
+      try {
+        fields = JSON.parse(js_objects[spec] || "null");
+      } catch (e) {
+        fields = null;
+      }
+    };
+
+    // One set of capture-phase listeners on window, so we see the gesture before
+    // macroquad and can focus the input within it (the iOS keyboard requirement).
+    window.addEventListener("touchstart", onStart, true);
+    window.addEventListener("touchend", onEnd, true);
+    window.addEventListener("mousedown", onStart, true);
+    window.addEventListener("mouseup", onEnd, true);
   }
 
   miniquad_add_plugin({

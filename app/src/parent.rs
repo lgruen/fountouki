@@ -121,6 +121,17 @@ impl ParentPanel {
 
     pub fn update(&mut self, ctx: &Ctx) -> PanelResult {
         let l = layout(&ctx.frame, &self.game, self.scroll);
+        // Publish the focusable field rects so the web bridge's touch handler can
+        // raise the soft keyboard *in-gesture* — the only way iOS shows it (a
+        // deferred-frame focus() is ignored there). No-op on native.
+        kb::set_fields(
+            (ctx.frame.w, ctx.frame.h),
+            (l.view.x, l.view.y, l.view.w, l.view.h),
+            &[
+                kb::Field { rect: (l.token.x, l.token.y, l.token.w, l.token.h), mode: kb::Mode::Text },
+                kb::Field { rect: (l.endpoint.x, l.endpoint.y, l.endpoint.w, l.endpoint.h), mode: kb::Mode::Url },
+            ],
+        );
         // Text entry into the focused field. Native reads macroquad's physical
         // keyboard; web mirrors the hidden <input> (`kb` / `text_input.js`),
         // which is the only way to get a soft keyboard + characters on mobile.
