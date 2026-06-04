@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-macroquad = "0.4"
+# `audio` is opt-in as of macroquad 0.4.15 (default features dropped it). Without
+# it `macroquad::audio` compiles to a silent dummy backend where every play is a
+# no-op — this is why sound never worked since the Rust port.
+macroquad = { version = "0.4", features = ["audio"] }
 fountouki-core = { path = "../core" }
 nanoserde = "0.1"
 quad-net = "0.1"

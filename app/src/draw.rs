@@ -181,7 +181,13 @@ pub fn speaker(cx: f32, cy: f32, r: f32, color: Color, muted: bool) {
     );
     let w = (r * 0.1).max(2.0);
     if muted {
-        stroke_path(&[vec2(cx + 0.1 * r, cy - 0.4 * r), vec2(cx + 0.55 * r, cy + 0.4 * r)], w, color);
+        // Diagonal strike-through across the whole glyph (top-right → bottom-left).
+        // Knock it out in the button color first so it reads as a cut *through* the
+        // same-colored cone rather than a stray line beside it.
+        let a = vec2(cx + 0.5 * r, cy - 0.45 * r);
+        let b = vec2(cx - 0.5 * r, cy + 0.45 * r);
+        stroke_path(&[a, b], w * 2.2, palette::CARD);
+        stroke_path(&[a, b], w, color);
     } else {
         arc(right + 0.12 * r, cy, 0.18 * r, -0.9, 0.9, w, color);
         arc(right + 0.12 * r, cy, 0.34 * r, -0.8, 0.8, w, color);
