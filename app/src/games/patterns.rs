@@ -546,7 +546,9 @@ impl Scene for PatternsScene {
 
         // Sequence bar.
         draw::card(p.seq.x, p.seq.y, p.seq.w, p.seq.h, palette::CARD);
-        let pulse = 1.0 + 0.06 * crate::anim::pulse(ctx.time, 1.6).max(0.0);
+        // Gentle, slow breathing on the `?` slot — kept small + unhurried so it
+        // draws the eye to the gap without becoming a distracting jiggle.
+        let pulse = 1.0 + 0.035 * crate::anim::pulse(ctx.time, 3.2).max(0.0);
         for (i, item) in self.round.visible.iter().enumerate() {
             let (cx, cy) = p.cell_center(i);
             let selected = matches!(self.sel, Some((s, e)) if i >= s && i < e);
