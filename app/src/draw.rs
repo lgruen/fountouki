@@ -205,15 +205,15 @@ pub fn vgradient(x: f32, y: f32, w: f32, h: f32, top: Color, bot: Color) {
 }
 
 /// A genuinely round filled disc. macroquad's `draw_circle` is only a 20-gon,
-/// which reads as visibly faceted at large sizes — use ~64 segments.
+/// which reads as visibly faceted at large sizes — use 128 segments.
 pub fn disc(cx: f32, cy: f32, r: f32, color: Color) {
-    draw_poly(cx, cy, 64, r, 0.0, color);
+    draw_poly(cx, cy, 128, r, 0.0, color);
 }
 
 /// A smooth filled ellipse (macroquad's `draw_ellipse` is also only 20 sides).
 /// `rot_deg` rotates the ellipse clockwise.
 pub fn fill_ellipse(cx: f32, cy: f32, rx: f32, ry: f32, rot_deg: f32, color: Color) {
-    const N: usize = 64;
+    const N: usize = 128;
     let rot = rot_deg.to_radians();
     let (sr, cr) = rot.sin_cos();
     let mut prev = Vec2::ZERO;
