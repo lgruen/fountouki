@@ -30,6 +30,10 @@ pub const INK: Color = hex(0x2b2c34); // primary text + glyphs
 pub const MUTED: Color = hex(0x6f6e77); // secondary text, miss glyph
 pub const ACCENT: Color = hex(0xf582ae); // brand pink "tap here"
 pub const ACCENT_SOFT: Color = hex(0xffd6e6); // pale pink slot fill
+pub const ACCENT_STRONG: Color = hex(0xc7286b); // deep rose for the `?` glyph (legible on ACCENT_SOFT)
+/// Warm taupe ring around sequence/choice cells so each white tile reads as a
+/// distinct rectangle against the near-white bar (they were near-invisible).
+pub const CELL_BORDER: Color = hex(0xdccba2);
 pub const OK: Color = hex(0x8bd3a6); // success green button fill
 pub const OK_STRONG: Color = hex(0x2b9d5f); // check glyph / star-pop flash
 pub const BAD: Color = hex(0xf6b3a2); // wrong-answer salmon (never harsh red)
