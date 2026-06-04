@@ -617,8 +617,9 @@ fn draw_cell(cx: f32, cy: f32, size: f32, fill: Color, border: Color) {
     // drop shadow so a cell lifts off the warm-white bar
     draw::rounded_rect(x, y + 3.0, size, size, r, Color::new(0.17, 0.17, 0.2, 0.10));
     // border ring: white-on-off-white tiles were near-invisible, so each cell
-    // gets a warm ring to read as a distinct rectangle.
-    let bw = (size * 0.055).max(2.5);
+    // gets a warm ring to read as a distinct rectangle. Kept slim (3.8% of the
+    // cell) so it reads as a clean outline, not a chunky frame.
+    let bw = (size * 0.038).max(2.0);
     draw::rounded_rect(x - bw, y - bw, size + 2.0 * bw, size + 2.0 * bw, r + bw, border);
     draw::rounded_rect(x, y, size, size, r, fill);
 }
