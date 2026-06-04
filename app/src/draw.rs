@@ -464,31 +464,10 @@ pub fn phonics_card_preview(fonts: &text::Fonts, w: f32, h: f32) {
 
 // ============================================================================
 // Patterns finale — the "Pattern Train". A golden-hour dusk arrival: a friendly
-// steam engine driven by a whimsical conductor critter, pulling cars that carry
-// the kid's just-solved pattern, to a checkered finish flag. Sibling-quality to
-// the phonics frog reward but its own scene (travel + arrival vs jumping).
+// steam engine driven by the frog mascot, pulling cars that carry the kid's
+// just-solved pattern, to a checkered finish flag. Reuses the phonics reward's
+// frog (same character) but in its own scene (travel + arrival vs jumping).
 // ============================================================================
-
-/// A rigged pose for the conductor critter. Pivots about the bust center (it's
-/// seen waist-up in the cab window), unlike the frog's ground-pivot.
-#[derive(Clone, Copy)]
-pub struct ConductorPose {
-    /// Vertical bob in px (negative = up; a tap "pop" lifts it).
-    pub dy: f32,
-    /// Lean/nod, radians.
-    pub tilt: f32,
-    pub sx: f32,
-    pub sy: f32,
-    /// Eyelid closure 0=open .. 1=happy squint.
-    pub blink: f32,
-    /// Waving arm raise, 0=resting .. 1=high wave.
-    pub wave: f32,
-}
-impl Default for ConductorPose {
-    fn default() -> Self {
-        ConductorPose { dy: 0.0, tilt: 0.0, sx: 1.0, sy: 1.0, blink: 0.0, wave: 0.0 }
-    }
-}
 
 /// A pose for the engine body (scoot/bob/squash). Scales about the track base.
 #[derive(Clone, Copy)]
@@ -502,130 +481,6 @@ impl Default for EnginePose {
     fn default() -> Self {
         EnginePose { dx: 0.0, dy: 0.0, sx: 1.0, sy: 1.0 }
     }
-}
-
-fn conductor_point(cx: f32, cy: f32, pose: ConductorPose, lx: f32, ly: f32) -> Vec2 {
-    let (sn, cs) = pose.tilt.sin_cos();
-    let ox = lx * pose.sx;
-    let oy = ly * pose.sy;
-    vec2(cx + ox * cs - oy * sn, cy + pose.dy + ox * sn + oy * cs)
-}
-
-/// The conductor — a whimsical invented critter: teal body, big magenta snoot,
-/// wild hair tufts, a red bow tie, and a tall red/cream striped stovepipe hat.
-/// An original Seussian character (deliberately NOT a bear, and distinct from
-/// the phonics frog). Feature offsets are in units of `r` (head radius); it
-/// pivots about the bust so a bob/tilt/wave reads in the cab window.
-pub fn conductor(cx: f32, cy: f32, r: f32, pose: ConductorPose) {
-    let pi = std::f32::consts::PI;
-    let tilt_deg = pose.tilt.to_degrees();
-    let rs = (pose.sx * pose.sy).sqrt();
-    let tf = |lx: f32, ly: f32| conductor_point(cx, cy, pose, lx, ly);
-
-    let body = palette::CRITTER;
-    let dark = palette::CRITTER_DARK;
-    let belly = palette::CRITTER_BELLY;
-    let cheek = palette::hexa(0xff8cbe, 0.9);
-
-    // Wild curly hair tufts — two on EACH side, under where the hat brim sits.
-    for s in [-1.0_f32, 1.0] {
-        let t1 = [tf(s * 0.44 * r, -0.42 * r), tf(s * 0.66 * r, -0.64 * r), tf(s * 0.84 * r, -0.46 * r)];
-        stroke_path(&t1, (0.1 * r * rs).max(3.0), dark);
-        let t2 = [tf(s * 0.5 * r, -0.28 * r), tf(s * 0.8 * r, -0.4 * r), tf(s * 0.96 * r, -0.24 * r)];
-        stroke_path(&t2, (0.085 * r * rs).max(2.5), dark);
-    }
-
-    // Torso (tall, a touch egg-shaped) + belly patch.
-    let t = tf(0.0, 0.72 * r);
-    fill_ellipse(t.x, t.y, 0.6 * r * pose.sx, 0.8 * r * pose.sy, tilt_deg, body);
-    let bl = tf(0.0, 0.86 * r);
-    fill_ellipse(bl.x, bl.y, 0.34 * r * pose.sx, 0.46 * r * pose.sy, tilt_deg, belly);
-
-    // Big red bow tie at the neck: a cream-outlined pair of wings + a cream knot
-    // (no gold here, so gold reads only on the hat badge + flag).
-    for &(spread, col) in &[(0.42_f32, palette::CARD), (0.36, palette::ENGINE_RED)] {
-        draw_triangle(tf(-0.05 * r, 0.3 * r), tf(-spread * r, 0.13 * r), tf(-spread * r, 0.47 * r), col);
-        draw_triangle(tf(0.05 * r, 0.3 * r), tf(spread * r, 0.13 * r), tf(spread * r, 0.47 * r), col);
-    }
-    let knot = tf(0.0, 0.3 * r);
-    disc(knot.x, knot.y, 0.11 * r * rs, palette::CARD);
-
-    // Waving arm: rests low, swings up + flutters with `wave`.
-    {
-        let shoulder = tf(0.5 * r, 0.4 * r);
-        let raise = pose.wave.clamp(0.0, 1.0);
-        let swing = (pose.wave * pi * 3.0).sin() * 0.18 * raise;
-        let px = 0.62 * r + 0.28 * r * raise + swing * r;
-        let py = 0.5 * r - 1.2 * r * raise;
-        let elbow = tf(0.62 * r, 0.4 * r - 0.5 * r * raise);
-        let paw = tf(px, py);
-        stroke_path(&[shoulder, elbow, paw], (0.15 * r * rs).max(3.0), body);
-        disc(paw.x, paw.y, 0.16 * r * rs, body);
-    }
-
-    // Head (egg).
-    let head = tf(0.0, -0.32 * r);
-    fill_ellipse(head.x, head.y, 0.58 * r * pose.sx, 0.62 * r * pose.sy, tilt_deg, body);
-
-    // Rosy cheeks (a symmetric pair).
-    for s in [-1.0_f32, 1.0] {
-        let p = tf(s * 0.42 * r, -0.16 * r);
-        disc(p.x, p.y, 0.13 * r * rs, cheek);
-    }
-
-    // Big magenta snoot (the character's focal feature).
-    let nose = tf(0.0, -0.13 * r);
-    disc(nose.x, nose.y, 0.26 * r * rs, palette::NOSE);
-    let nh = tf(-0.08 * r, -0.21 * r);
-    disc(nh.x, nh.y, 0.08 * r * rs, palette::hexa(0xffffff, 0.6));
-
-    // Big, wide-set eyes (open round, or a happy closed curve).
-    let open = (1.0 - pose.blink).clamp(0.0, 1.0);
-    for s in [-1.0_f32, 1.0] {
-        if open > 0.12 {
-            let w = tf(s * 0.28 * r, -0.47 * r);
-            let wr = 0.2 * r * rs;
-            fill_ellipse(w.x, w.y, wr, wr * open, tilt_deg, palette::WHITE);
-            // Pupils sit high in the eye → reads "thrilled", not merely content.
-            let p = tf(s * 0.28 * r, -0.5 * r);
-            let pr = 0.1 * r * rs;
-            fill_ellipse(p.x, p.y, pr, pr * open, tilt_deg, palette::INK);
-            let g = tf(s * 0.28 * r - 0.05 * r, -0.56 * r);
-            disc(g.x, g.y, 0.05 * r * rs, palette::WHITE);
-        } else {
-            let a = tf(s * 0.28 * r - 0.12 * r, -0.47 * r);
-            let b = tf(s * 0.28 * r, -0.41 * r);
-            let c = tf(s * 0.28 * r + 0.12 * r, -0.47 * r);
-            stroke_path(&[a, b, c], (0.05 * r * rs).max(2.0), palette::INK);
-        }
-    }
-
-    // ONE tall striped stovepipe hat seated directly on the head: a red brim
-    // oval, then a red/cream-striped crown rising from it (flat top). Stripes are
-    // tf'd quads so they ride the tilt/scale exactly.
-    let brim = tf(0.0, -0.64 * r);
-    fill_ellipse(brim.x, brim.y, 0.7 * r * pose.sx, 0.17 * r * pose.sy, tilt_deg, palette::ENGINE_RED_DARK);
-    let cw = 0.52 * r;
-    let base_y = -0.72 * r;
-    let n = 6usize;
-    let sh = 1.35 * r / n as f32;
-    let quad = |y0: f32, y1: f32, col: Color| {
-        let a = tf(-cw / 2.0, y0);
-        let b = tf(cw / 2.0, y0);
-        let c = tf(cw / 2.0, y1);
-        let d = tf(-cw / 2.0, y1);
-        draw_triangle(a, b, c, col);
-        draw_triangle(a, c, d, col);
-    };
-    for i in 0..n {
-        let y0 = base_y - i as f32 * sh;
-        let y1 = base_y - (i as f32 + 1.0) * sh;
-        let col = if i % 2 == 0 { palette::CARD } else { palette::ENGINE_RED };
-        quad(y0, y1, col);
-    }
-    // A gold conductor star badge on the lowest red band.
-    let badge = tf(0.0, base_y - sh * 1.5);
-    star(badge.x, badge.y, 0.15 * r * rs, palette::GOLD);
 }
 
 /// A spoked train wheel: INK rim, colored face, cream spokes, gold hub. `ang`
@@ -651,11 +506,11 @@ pub fn train_wheel(cx: f32, cy: f32, r: f32, ang: f32, face: Color, spoke: Color
 /// base (where the wheels meet the track) is at `(ex, by)`. Shared by the scene
 /// hit-test and the cross-device guard test, so geometry lives in one place.
 pub fn engine_hit_rect(ex: f32, by: f32, r_boiler: f32) -> Rect {
-    // Tall enough to include the conductor's tall striped hat poking above the
-    // cab — a generous, forgiving tap target, and the guard test then also
-    // guarantees the hat apex clears the viewport top.
+    // Tall enough to include the funnel + the frog's head poking up at the cab
+    // window — a generous, forgiving tap target, and the guard test then also
+    // guarantees its apex clears the viewport top.
     // A touch wider than the loco so a re-tap during a forward chuff-scoot still lands.
-    Rect::new(ex - r_boiler * 2.2, by - r_boiler * 3.75, r_boiler * 4.6, r_boiler * 3.75)
+    Rect::new(ex - r_boiler * 2.2, by - r_boiler * 3.1, r_boiler * 4.6, r_boiler * 3.1)
 }
 
 /// Where steam leaves the funnel (boiler radius `R`, base at `(ex, by)`).
@@ -663,10 +518,10 @@ pub fn engine_funnel_tip(ex: f32, by: f32, r_boiler: f32) -> Vec2 {
     vec2(ex + r_boiler * 0.95, by - r_boiler * 2.85)
 }
 
-/// The steam engine + its conductor, base (wheels on track) at `(ex, by)`.
+/// The steam engine + its frog driver, base (wheels on track) at `(ex, by)`.
 /// `r_boiler` (== 2× wheel radius) sets the scale; `ep` scoots/bobs/squashes the
 /// whole loco about the base; `wheel_ang` spins the spokes; `headlamp` 0..1 adds
-/// glow; `cond` poses the conductor critter in the cab.
+/// glow; `cond` poses the frog mascot leaning out of the cab window.
 pub fn train_engine(
     ex: f32,
     by: f32,
@@ -674,7 +529,7 @@ pub fn train_engine(
     ep: EnginePose,
     wheel_ang: f32,
     headlamp: f32,
-    cond: ConductorPose,
+    cond: FrogPose,
 ) {
     let r = r_boiler;
     let wr = r * 0.5; // small wheel radius
@@ -712,7 +567,7 @@ pub fn train_engine(
         stroke_path(&[a, b], (r * 0.06).max(2.0), red_d);
     }
 
-    // Cab + roof + window (glass), with the conductor leaning out.
+    // Cab + roof + window (glass), with the frog driver leaning out.
     let cw = r * 1.6;
     let ch = r * 1.95;
     let ccx = pt(-r * 1.25, -r * 1.65);
@@ -721,10 +576,12 @@ pub fn train_engine(
     rounded_rect(roof.x - r * 1.0, roof.y - r * 0.18, r * 2.0, r * 0.42, r * 0.18, red_d);
     let win = pt(-r * 1.25, -r * 1.95);
     rounded_rect(win.x - r * 0.62, win.y - r * 0.55, r * 1.24, r * 1.1, r * 0.22, palette::SKY_DUSK_MID);
-    // Conductor in the window (tall striped hat pokes up above the cab).
-    let cond_c = pt(-r * 1.22, -r * 1.78);
-    conductor(cond_c.x, cond_c.y, r * 0.82, cond);
-    // Window frame over the lower sill so the conductor reads as leaning out.
+    // The frog mascot (same character as the phonics reward) drives the train,
+    // sized + seated to fill the glass with its head near the top; the sill
+    // stroke below then reads it as leaning out of the window.
+    let frog_c = pt(-r * 1.25, -r * 1.9);
+    frog(frog_c.x, frog_c.y, r * 0.56, palette::RAINBOW[3], cond);
+    // Window frame over the lower sill so the frog reads as leaning out.
     let sill_l = pt(-r * 1.25 - r * 0.62, -r * 1.4);
     let sill_r = pt(-r * 1.25 + r * 0.62, -r * 1.4);
     stroke_path(&[sill_l, sill_r], (r * 0.12).max(2.0), red_d);
@@ -742,7 +599,7 @@ pub fn train_engine(
     rounded_rect(lip.x - r * 0.48, lip.y - r * 0.1, r * 0.96, r * 0.2, r * 0.1, palette::GOLD);
 
     // Brass dome on the boiler — toward the boiler centre so it never crowds the
-    // conductor's face (which sits off to the cab/left).
+    // frog driver's face (which sits off to the cab/left).
     let dome = pt(r * 0.3, -fb + r * 0.05);
     fill_ellipse(dome.x, dome.y, r * 0.3, r * 0.26, 0.0, palette::GOLD);
 
@@ -823,19 +680,22 @@ pub fn bunting(x0: f32, x1: f32, y: f32, sag: f32, n: usize, time: f32) {
     }
     stroke_path(&line, 3.0, palette::hexa(0x6f5a4a, 0.8));
     let span = h_span(n);
+    let dx = x1 - x0;
     for i in 0..n {
         let t = (i as f32 + 0.5) / n as f32;
-        let x = x0 + (x1 - x0) * t;
+        let x = x0 + dx * t;
         let yy = yat(t);
+        // Rotate each pennant to the string's local tangent so its top edge sits
+        // flush on the swag and it hangs perpendicular to it — on the sloped
+        // sections the un-rotated (horizontal-topped) triangles floated off the
+        // string by one corner. Slope = d(yat)/dx; dy(yat)/dt = sag*4*(1-2t).
+        let slope = sag * 4.0 * (1.0 - 2.0 * t);
+        let (sn, cs) = slope.atan2(dx).sin_cos();
+        let rot = |lx: f32, ly: f32| vec2(x + lx * cs - ly * sn, yy + lx * sn + ly * cs);
         let flutter = (time * 2.0 + i as f32 * 0.7).sin() * 0.08;
         let s = span;
         let col = palette::RAINBOW[i % 7];
-        draw_triangle(
-            vec2(x - s, yy),
-            vec2(x + s, yy),
-            vec2(x + flutter * s, yy + s * 2.2),
-            col,
-        );
+        draw_triangle(rot(-s, 0.0), rot(s, 0.0), rot(flutter * s, s * 2.2), col);
     }
 }
 
