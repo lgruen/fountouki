@@ -91,14 +91,8 @@ pub const ENGINE_RED: Color = hex(0xe85c6b); // cheerful kid-train red (boiler)
 pub const ENGINE_RED_DARK: Color = hex(0xc24856); // boiler front face / shade
 pub const STEAM: Color = hex(0xfff6ea); // warm-white steam puff
 pub const CAR_BODY: Color = CARD; // cars are uniform cream — the items carry the pattern
-// The conductor: a whimsical invented Seussian critter (NOT a bear) — teal body,
-// big magenta snoot, wild hair tufts, and a tall red/cream striped stovepipe hat.
-pub const CRITTER: Color = hex(0x39c0c2); // teal body/head
-pub const CRITTER_DARK: Color = hex(0x2a9698); // shade + wild hair tufts
-pub const CRITTER_BELLY: Color = hex(0xd6f3f0); // pale belly/muzzle
-pub const NOSE: Color = hex(0xff5ea8); // big magenta snoot
-pub const HAT_BRIM: Color = hex(0x37557d); // navy brim/band of the striped hat
-// (hat stripes reuse ENGINE_RED + CARD; bow tie reuses ENGINE_RED + GOLD)
+// The cab driver is the shared frog mascot (see draw::frog), tinted RAINBOW[3];
+// no separate critter palette.
 
 // Form chrome (parent settings)
 pub const FIELD_BORDER: Color = hex(0xe6e1d3);

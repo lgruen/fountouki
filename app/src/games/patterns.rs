@@ -300,22 +300,23 @@ impl PatternsScene {
         if fl.show_bunting {
             draw::bunting(content.x, content.x + content.w, f.h * 0.12, f.h * 0.055, 12, ctx.time);
         }
-        // Reaction state (engine scoot/squash, headlamp, conductor pose).
+        // Reaction state (engine scoot/squash, headlamp, frog-driver pose).
         let rx = &REACTIONS[self.react_kind];
         let (scoot, squash, lamp, cond) = if self.react_t < rx.dur {
             let p = (self.react_t / rx.dur).clamp(0.0, 1.0);
             let imp = (p * pi).sin();
-            let cond = draw::ConductorPose {
+            let cond = draw::FrogPose {
                 dy: -0.12 * r * imp,
-                tilt: 0.05 * imp * rx.wave,
+                rot: 0.05 * imp * rx.wave,
                 sx: 1.0 + 0.02 * imp,
                 sy: 1.0 - 0.02 * imp,
                 blink: (imp * 0.6).min(0.6),
-                wave: rx.wave * imp,
+                // The "wave" reactions become a happy tongue-out ribbit.
+                tongue: rx.wave * imp,
             };
             (rx.scoot * r * imp, rx.squash * imp, rx.lamp * (0.5 + 0.5 * (p * pi * 4.0).sin()), cond)
         } else {
-            (0.0, 0.0, 0.0, idle_conductor(ctx.time))
+            (0.0, 0.0, 0.0, idle_frog(ctx.time))
         };
         let train_dx = train_offset(self.finale_t, &fl) + scoot;
         let ex = fl.engine.x + train_dx;
@@ -334,7 +335,7 @@ impl PatternsScene {
             draw_item(item, cx, seat_cy, fl.seat * 0.78, ctx);
         }
 
-        // Engine + conductor (the hero), in front of the cars.
+        // Engine + frog driver (the hero), in front of the cars.
         let ep = draw::EnginePose { dx: 0.0, dy: 0.5 * (ctx.time * 2.0).sin(), sx: 1.0 + squash * 0.5, sy: 1.0 - squash };
         draw::train_engine(ex, by, r, ep, wheel_ang, lamp, cond);
 
@@ -873,20 +874,20 @@ fn train_offset(ft: f32, fl: &FinaleLayout) -> f32 {
     start * (1.0 - crate::anim::ease_out_cubic(p))
 }
 
-/// Resting conductor: a gentle breathing bob + an occasional blink.
-fn idle_conductor(time: f32) -> draw::ConductorPose {
+/// Resting frog driver: a gentle breathing bob + an occasional blink, so the
+/// mascot looks alive in the cab even when untapped (mirrors the phonics idle).
+fn idle_frog(time: f32) -> draw::FrogPose {
     use std::f32::consts::PI;
     let breathe = (time * 2.0).sin();
     let bt = time.rem_euclid(3.6);
     let blink = if bt < 0.16 { (bt / 0.16 * PI).sin() } else { 0.0 };
-    draw::ConductorPose {
+    draw::FrogPose {
         dy: 2.0 * breathe,
-        tilt: 0.0,
+        rot: 0.0,
         sx: 1.0 - 0.02 * breathe,
         sy: 1.0 + 0.025 * breathe,
         blink,
-        // A small, gentle "hello" wave so the conductor feels alive at rest.
-        wave: (0.14 + 0.1 * (time * 1.6).sin()).max(0.0),
+        tongue: 0.0,
     }
 }
 
