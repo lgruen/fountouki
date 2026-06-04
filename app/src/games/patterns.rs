@@ -331,7 +331,7 @@ impl PatternsScene {
             let body = Rect::new(cx - fl.car_w / 2.0, by - fl.wheel_r - fl.car_h, fl.car_w, fl.car_h);
             draw::train_car_chassis(body, by, fl.wheel_r);
             let seat_cy = body.y + body.h * 0.46 + (ctx.time * 3.0 + i as f32).sin() * 1.5;
-            draw_cell(cx, seat_cy, fl.seat, palette::WHITE);
+            draw_cell(cx, seat_cy, fl.seat, palette::WHITE, palette::CELL_BORDER);
             draw_item(item, cx, seat_cy, fl.seat * 0.78, ctx);
         }
 
@@ -555,19 +555,20 @@ impl Scene for PatternsScene {
                     cx - p.cell / 2.0 - 4.0, cy - p.cell / 2.0 - 4.0,
                     p.cell + 8.0, p.cell + 8.0, p.cell * 0.2, palette::ACCENT,
                 );
-                draw_cell(cx, cy, p.cell, palette::ACCENT_SOFT);
+                draw_cell(cx, cy, p.cell, palette::ACCENT_SOFT, palette::ACCENT);
             } else {
-                draw_cell(cx, cy, p.cell, palette::WHITE);
+                draw_cell(cx, cy, p.cell, palette::WHITE, palette::CELL_BORDER);
             }
             draw_item(item, cx, cy, p.cell * 0.78, ctx);
         }
 
         match self.mode {
             GameMode::Next => {
-                // The pink `?` slot to fill.
+                // The pink `?` slot to fill — a pink ring + deep-rose glyph so it
+                // pops against the bar and stays legible on the pale fill.
                 let (sx, sy) = p.cell_center(self.round.visible.len());
-                draw_cell(sx, sy, p.cell * pulse, palette::ACCENT_SOFT);
-                text::draw_centered("?", sx, sy, (p.cell * 0.7) as u16, &ctx.fonts.cursive, palette::ACCENT);
+                draw_cell(sx, sy, p.cell * pulse, palette::ACCENT_SOFT, palette::ACCENT);
+                text::draw_centered("?", sx, sy, (p.cell * 0.7) as u16, &ctx.fonts.cursive, palette::ACCENT_STRONG);
                 // Choice buttons.
                 for (i, r) in p.choices.iter().enumerate() {
                     let mut fill = palette::CARD;
@@ -607,11 +608,17 @@ impl Scene for PatternsScene {
 
 // --- rendering helpers ------------------------------------------------------
 
-fn draw_cell(cx: f32, cy: f32, size: f32, fill: Color) {
+fn draw_cell(cx: f32, cy: f32, size: f32, fill: Color, border: Color) {
     let r = (size * 0.18).min(18.0);
-    // subtle shadow so a white cell reads against the warm-white bar
-    draw::rounded_rect(cx - size / 2.0, cy - size / 2.0 + 3.0, size, size, r, Color::new(0.17, 0.17, 0.2, 0.07));
-    draw::rounded_rect(cx - size / 2.0, cy - size / 2.0, size, size, r, fill);
+    let x = cx - size / 2.0;
+    let y = cy - size / 2.0;
+    // drop shadow so a cell lifts off the warm-white bar
+    draw::rounded_rect(x, y + 3.0, size, size, r, Color::new(0.17, 0.17, 0.2, 0.10));
+    // border ring: white-on-off-white tiles were near-invisible, so each cell
+    // gets a warm ring to read as a distinct rectangle.
+    let bw = (size * 0.055).max(2.5);
+    draw::rounded_rect(x - bw, y - bw, size + 2.0 * bw, size + 2.0 * bw, r + bw, border);
+    draw::rounded_rect(x, y, size, size, r, fill);
 }
 
 fn draw_item(item: &Item, cx: f32, cy: f32, sz: f32, ctx: &Ctx) {
