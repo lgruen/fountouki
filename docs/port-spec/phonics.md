@@ -143,7 +143,7 @@ struct LetterCard { letter: char, canonical: Exemplar, variants: Vec<Exemplar> }
 | f | 🐟 fish | 🐸 frog, 🌸 flower |
 | g | 🐐 goat | 🍇 grapes, 🎁 gift |
 | h | 🐴 horse | 🏠 house, 🎩 hat |
-| i | 🐛 insect | 🪻 iris |
+| i | 🦎 iguana | 🪻 iris |
 | j | 🪼 jellyfish | 🎷 jazz, 🃏 joker |
 | k | 🦘 kangaroo | 🗝️ key, 🪁 kite |
 | l | 🦁 lion | 🍋 lemon, 🐞 ladybug |

@@ -101,7 +101,7 @@ pub const DECK: [LetterCard; 26] = [
     },
     LetterCard {
         letter: 'i',
-        canonical: ex("🐛", "insect"),
+        canonical: ex("🦎", "iguana"),
         variants: &[ex("🪻", "iris")],
     },
     LetterCard {

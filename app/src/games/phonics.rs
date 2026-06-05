@@ -325,32 +325,27 @@ impl Scene for PhonicsScene {
                 text::draw_centered(
                     &glyph,
                     cx,
-                    p.card.y + p.card.h * 0.34,
+                    p.card.y + p.card.h * 0.30,
                     (p.letter_size as f32 * 0.62) as u16,
                     &ctx.fonts.cursive,
                     palette::INK,
                 );
+                // Picture only — no word label (distracting at this age), and
+                // pushed well below the letter so the two never crowd.
                 if let Some(ex) = &self.reveal {
+                    let ecy = p.card.y + p.card.h * 0.64;
                     if let Some(tex) = crate::emoji::texture(ex.emoji) {
-                        let s = p.card.h * 0.32;
+                        let s = p.card.h * 0.34;
                         draw_texture_ex(
                             &tex,
                             cx - s / 2.0,
-                            p.card.y + p.card.h * 0.6 - s / 2.0,
+                            ecy - s / 2.0,
                             WHITE,
                             DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() },
                         );
                     } else {
-                        draw_circle(cx, p.card.y + p.card.h * 0.6, p.card.h * 0.12, palette::ACCENT_SOFT);
+                        draw_circle(cx, ecy, p.card.h * 0.12, palette::ACCENT_SOFT);
                     }
-                    text::draw_centered(
-                        ex.word,
-                        cx,
-                        p.card.y + p.card.h * 0.84,
-                        (p.card.h * 0.11) as u16,
-                        &ctx.fonts.cursive,
-                        palette::INK,
-                    );
                 }
             }
         }
