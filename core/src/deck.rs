@@ -1,19 +1,18 @@
-//! Phonics deck data: the 26 lowercase letters, their exemplar word/emoji
-//! cards, and the two orderings used by the game.
+//! Phonics deck data: the 26 lowercase letters, each paired with a single
+//! canonical exemplar (the picture shown on a miss), plus the two letter
+//! orderings the game uses. One picture per letter — consistency aids learning
+//! for small working memory (no per-letter variety to track).
 //!
 //! - `LETTERS` — alphabetical `a..z` (= deck order). This is the order
 //!   `srs::ensure_letters` walks when initializing missing state.
 //! - `INTRO_ORDER` — Jolly-Phonics introduction order. Distinct from
 //!   `LETTERS`; used ONLY by the active-set drip-in gate in `srs`.
 //!
-//! Each letter has a CANONICAL exemplar (always used for the miss-hint —
-//! a clean anchor) plus optional VARIANTS unlocked at box >= 2 for
-//! generalization. Emoji include variation selectors / ZWJ sequences
-//! (☀️, ☂️, 🗝️, 6️⃣, 0️⃣) — stored as exact UTF-8, never normalized.
+//! Emoji are stored as exact UTF-8 — variation selectors / ZWJ sequences (☀️,
+//! ☂️, 🗝️ …) are kept verbatim, never normalized. 'igloo' has no Unicode glyph
+//! and is drawn as a vector by the app (its emoji string is a sentinel).
 //!
 //! Transcribed from `src/games/phonics/deck.ts`; values are load-bearing.
-
-use crate::rng::Mulberry32;
 
 /// One exemplar: an emoji glyph paired with its spoken word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,13 +21,11 @@ pub struct Exemplar {
     pub word: &'static str,
 }
 
-/// A full deck entry: the letter, its canonical exemplar, and its variants.
+/// A full deck entry: the letter and its canonical exemplar.
 #[derive(Clone, Copy, Debug)]
 pub struct LetterCard {
     pub letter: char,
     pub canonical: Exemplar,
-    /// Extra exemplars unlocked at box >= 2 (may be empty).
-    pub variants: &'static [Exemplar],
 }
 
 /// Convenience constructor for an `Exemplar` literal.
@@ -56,149 +53,41 @@ pub const INTRO_ORDER: [char; 26] = [
     'j', 'z', 'w', 'v', 'y', 'x', 'q', // tail
 ];
 
-/// The full deck, in `LETTERS` (alphabetical) order. Canonical first, then
-/// variants, per `deck.ts`.
+/// The full deck, in `LETTERS` (alphabetical) order — one exemplar per letter.
+/// Every consonant uses its hard/primary sound (cat/goat, not city/giraffe) and
+/// every vowel its short sound (ant, egg, igloo, octopus, umbrella). x uses a
+/// word-final /ks/ (fox), the only position the x sound occurs.
 pub const DECK: [LetterCard; 26] = [
-    LetterCard {
-        letter: 'a',
-        canonical: ex("🐜", "ant"),
-        variants: &[ex("🍎", "apple"), ex("🐊", "alligator")],
-    },
-    LetterCard {
-        letter: 'b',
-        canonical: ex("🐻", "bear"),
-        variants: &[ex("🦋", "butterfly"), ex("🎈", "balloon")],
-    },
-    LetterCard {
-        letter: 'c',
-        canonical: ex("🐱", "cat"),
-        variants: &[ex("🥕", "carrot"), ex("🐄", "cow")],
-    },
-    LetterCard {
-        letter: 'd',
-        canonical: ex("🐕", "dog"),
-        variants: &[ex("🦆", "duck"), ex("🦖", "dinosaur")],
-    },
-    LetterCard {
-        letter: 'e',
-        canonical: ex("🐘", "elephant"),
-        variants: &[ex("🥚", "egg")],
-    },
-    LetterCard {
-        letter: 'f',
-        canonical: ex("🐟", "fish"),
-        variants: &[ex("🐸", "frog"), ex("🌸", "flower")],
-    },
-    LetterCard {
-        letter: 'g',
-        canonical: ex("🐐", "goat"),
-        variants: &[ex("🍇", "grapes"), ex("🎁", "gift")],
-    },
-    LetterCard {
-        letter: 'h',
-        canonical: ex("🐴", "horse"),
-        variants: &[ex("🏠", "house"), ex("🎩", "hat")],
-    },
-    LetterCard {
-        // 'igloo' has no Unicode/Twemoji glyph; the app renders it as a vector
-        // (keyed off the word), so this emoji string is a sentinel only — the
-        // 🛖 'hut' codepoint as the nearest standin, never drawn as a sprite.
-        letter: 'i',
-        canonical: ex("🛖", "igloo"),
-        // 'iris' is long-i (/ˈaɪrɪs/) — wrong sound, and obscure. 'insect'
-        // (the former canonical) is a clean short-i anchor.
-        variants: &[ex("🐛", "insect")],
-    },
-    LetterCard {
-        letter: 'j',
-        canonical: ex("🪼", "jellyfish"),
-        variants: &[ex("🎷", "jazz"), ex("🃏", "joker")],
-    },
-    LetterCard {
-        letter: 'k',
-        canonical: ex("🦘", "kangaroo"),
-        variants: &[ex("🗝️", "key"), ex("🪁", "kite")],
-    },
-    LetterCard {
-        letter: 'l',
-        canonical: ex("🦁", "lion"),
-        variants: &[ex("🍋", "lemon"), ex("🐞", "ladybug")],
-    },
-    LetterCard {
-        letter: 'm',
-        canonical: ex("🐵", "monkey"),
-        variants: &[ex("🌙", "moon"), ex("🍄", "mushroom")],
-    },
-    LetterCard {
-        letter: 'n',
-        canonical: ex("🪺", "nest"),
-        variants: &[ex("👃", "nose"), ex("🥜", "nut")],
-    },
-    LetterCard {
-        letter: 'o',
-        canonical: ex("🐙", "octopus"),
-        // 'owl' is a diphthong (/aʊl/), not short-o — dropped. 'orange' is the
-        // standard short-o picture word.
-        variants: &[ex("🍊", "orange")],
-    },
-    LetterCard {
-        letter: 'p',
-        canonical: ex("🐼", "panda"),
-        variants: &[ex("🍍", "pineapple"), ex("🐧", "penguin")],
-    },
-    LetterCard {
-        letter: 'q',
-        canonical: ex("👸", "queen"),
-        variants: &[ex("🪶", "quill"), ex("❓", "question")],
-    },
-    LetterCard {
-        letter: 'r',
-        canonical: ex("🌈", "rainbow"),
-        variants: &[ex("🐰", "rabbit"), ex("🤖", "robot")],
-    },
-    LetterCard {
-        letter: 's',
-        canonical: ex("☀️", "sun"),
-        variants: &[ex("🐍", "snake"), ex("⭐", "star")],
-    },
-    LetterCard {
-        letter: 't',
-        canonical: ex("🐢", "turtle"),
-        variants: &[ex("🐅", "tiger"), ex("🌳", "tree")],
-    },
-    LetterCard {
-        letter: 'u',
-        canonical: ex("☂️", "umbrella"),
-        variants: &[ex("🆙", "up")],
-    },
-    LetterCard {
-        letter: 'v',
-        canonical: ex("🚐", "van"),
-        variants: &[ex("🎻", "violin"), ex("🌋", "volcano")],
-    },
-    LetterCard {
-        letter: 'w',
-        canonical: ex("🐳", "whale"),
-        variants: &[ex("🌊", "wave"), ex("🍉", "watermelon")],
-    },
-    LetterCard {
-        // x's sound is /ks/, which only occurs word-finally — so the picture
-        // words end in x (fox/box/six). 'x-ray' teaches the letter *name*
-        // (/ɛks/), not the sound, so 'fox' is the canonical anchor.
-        letter: 'x',
-        canonical: ex("🦊", "fox"),
-        variants: &[ex("📦", "box"), ex("6️⃣", "six")],
-    },
-    LetterCard {
-        letter: 'y',
-        canonical: ex("🪀", "yo-yo"),
-        variants: &[ex("🟡", "yellow")],
-    },
-    LetterCard {
-        letter: 'z',
-        canonical: ex("🦓", "zebra"),
-        variants: &[ex("0️⃣", "zero"), ex("💤", "zzz")],
-    },
+    LetterCard { letter: 'a', canonical: ex("🐜", "ant") },
+    LetterCard { letter: 'b', canonical: ex("🐻", "bear") },
+    LetterCard { letter: 'c', canonical: ex("🐱", "cat") },
+    LetterCard { letter: 'd', canonical: ex("🐕", "dog") },
+    LetterCard { letter: 'e', canonical: ex("🐘", "elephant") },
+    LetterCard { letter: 'f', canonical: ex("🐟", "fish") },
+    LetterCard { letter: 'g', canonical: ex("🐐", "goat") },
+    LetterCard { letter: 'h', canonical: ex("🐴", "horse") },
+    // 'igloo' has no Unicode/Twemoji glyph — the app draws it as a vector (keyed
+    // off the word); 🛖 ('hut') is a never-rendered sentinel codepoint.
+    LetterCard { letter: 'i', canonical: ex("🛖", "igloo") },
+    LetterCard { letter: 'j', canonical: ex("🪼", "jellyfish") },
+    LetterCard { letter: 'k', canonical: ex("🦘", "kangaroo") },
+    LetterCard { letter: 'l', canonical: ex("🦁", "lion") },
+    LetterCard { letter: 'm', canonical: ex("🐵", "monkey") },
+    LetterCard { letter: 'n', canonical: ex("🪺", "nest") },
+    LetterCard { letter: 'o', canonical: ex("🐙", "octopus") },
+    LetterCard { letter: 'p', canonical: ex("🐼", "panda") },
+    LetterCard { letter: 'q', canonical: ex("👸", "queen") },
+    LetterCard { letter: 'r', canonical: ex("🌈", "rainbow") },
+    LetterCard { letter: 's', canonical: ex("☀️", "sun") },
+    LetterCard { letter: 't', canonical: ex("🐢", "turtle") },
+    LetterCard { letter: 'u', canonical: ex("☂️", "umbrella") },
+    LetterCard { letter: 'v', canonical: ex("🚐", "van") },
+    LetterCard { letter: 'w', canonical: ex("🐳", "whale") },
+    // x's sound /ks/ only occurs word-finally, so the picture word ends in x;
+    // 'x-ray' would teach the letter *name* (/ɛks/), not the sound.
+    LetterCard { letter: 'x', canonical: ex("🦊", "fox") },
+    LetterCard { letter: 'y', canonical: ex("🪀", "yo-yo") },
+    LetterCard { letter: 'z', canonical: ex("🦓", "zebra") },
 ];
 
 /// Look up a deck card by letter. `None` for any non-deck char.
@@ -206,33 +95,10 @@ pub fn card(letter: char) -> Option<&'static LetterCard> {
     DECK.iter().find(|c| c.letter == letter)
 }
 
-/// The canonical exemplar for `letter` (the clean anchor used by the
-/// miss-hint). `None` for an unknown letter.
+/// The canonical exemplar for `letter` (the picture shown on a miss-hint).
+/// `None` for an unknown letter.
 pub fn exemplar(letter: char) -> Option<Exemplar> {
     card(letter).map(|c| c.canonical)
-}
-
-/// Pick an exemplar for display.
-///
-/// - box < 2 OR no variants → always the canonical (clean anchor).
-/// - box >= 2 with variants → uniform over `[canonical] ++ variants`
-///   (canonical included), index = `floor(rng() * pool.len())`.
-///
-/// The miss-hint always calls this with `box == 0` → canonical. Panics on
-/// an unknown letter (mirrors the TS `lookup` throwing).
-pub fn pick_exemplar(letter: char, box_: u8, rng: &mut Mulberry32) -> Exemplar {
-    let c = card(letter).expect("pick_exemplar: unknown letter");
-    if box_ < 2 || c.variants.is_empty() {
-        return c.canonical;
-    }
-    // pool = [canonical] ++ variants; uniform pick, index = floor(rng()*len).
-    let pool_len = 1 + c.variants.len();
-    let idx = rng.below(pool_len);
-    if idx == 0 {
-        c.canonical
-    } else {
-        c.variants[idx - 1]
-    }
 }
 
 #[cfg(test)]
@@ -282,47 +148,10 @@ mod tests {
     }
 
     #[test]
-    fn variants_preserved_with_selectors() {
-        let s = card('s').unwrap();
-        assert_eq!(s.variants, &[ex("🐍", "snake"), ex("⭐", "star")]);
-        // The 'u' canonical retains its variation selector (☂️).
+    fn canonical_emoji_keep_variation_selectors() {
+        // The sun + umbrella canonicals carry a U+FE0F variation selector that
+        // must survive verbatim (no normalization) to match the sprite keys.
+        assert_eq!(card('s').unwrap().canonical.emoji, "☀️");
         assert_eq!(card('u').unwrap().canonical.emoji, "☂️");
-        // x has a keycap six variant (6️⃣).
-        assert_eq!(card('x').unwrap().variants[1], ex("6️⃣", "six"));
-    }
-
-    #[test]
-    fn pick_exemplar_below_box2_is_canonical() {
-        let mut rng = Mulberry32::new(1);
-        for box_ in 0..2u8 {
-            assert_eq!(pick_exemplar('s', box_, &mut rng), ex("☀️", "sun"));
-        }
-    }
-
-    #[test]
-    fn pick_exemplar_high_box_chooses_within_pool() {
-        let mut rng = Mulberry32::new(7);
-        let chosen = pick_exemplar('e', 3, &mut rng);
-        let pool = [ex("🐘", "elephant"), ex("🥚", "egg")];
-        assert!(pool.contains(&chosen));
-    }
-
-    #[test]
-    fn pick_exemplar_box2_can_include_variant() {
-        // Over many draws on a letter with 2 variants we should see more than
-        // just the canonical.
-        let mut rng = Mulberry32::new(42);
-        let mut seen_variant = false;
-        let mut seen_canonical = false;
-        for _ in 0..50 {
-            let e = pick_exemplar('a', 2, &mut rng);
-            if e == ex("🐜", "ant") {
-                seen_canonical = true;
-            } else {
-                seen_variant = true;
-            }
-        }
-        assert!(seen_canonical, "canonical should appear in the pool");
-        assert!(seen_variant, "variants should appear at box>=2");
     }
 }
