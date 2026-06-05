@@ -100,8 +100,11 @@ pub const DECK: [LetterCard; 26] = [
         variants: &[ex("🏠", "house"), ex("🎩", "hat")],
     },
     LetterCard {
+        // 'igloo' has no Unicode/Twemoji glyph; the app renders it as a vector
+        // (keyed off the word), so this emoji string is a sentinel only — the
+        // 🛖 'hut' codepoint as the nearest standin, never drawn as a sprite.
         letter: 'i',
-        canonical: ex("🦎", "iguana"),
+        canonical: ex("🛖", "igloo"),
         variants: &[ex("🪻", "iris")],
     },
     LetterCard {
