@@ -230,6 +230,12 @@ impl PhonicsScene {
     pub(crate) fn frog_taps(&self) -> u32 {
         self.frog_taps
     }
+    /// Force the current card to a specific letter (capture/playtest only) so a
+    /// golden can show a chosen exemplar (e.g. the drawn igloo for 'i').
+    pub(crate) fn debug_set_letter(&mut self, c: char) {
+        self.queue = vec![c, c];
+        self.qi = 0;
+    }
 }
 
 impl Scene for PhonicsScene {
@@ -325,32 +331,30 @@ impl Scene for PhonicsScene {
                 text::draw_centered(
                     &glyph,
                     cx,
-                    p.card.y + p.card.h * 0.34,
+                    p.card.y + p.card.h * 0.30,
                     (p.letter_size as f32 * 0.62) as u16,
                     &ctx.fonts.cursive,
                     palette::INK,
                 );
+                // Picture only — no word label (distracting at this age), and
+                // pushed well below the letter so the two never crowd.
                 if let Some(ex) = &self.reveal {
-                    if let Some(tex) = crate::emoji::texture(ex.emoji) {
-                        let s = p.card.h * 0.32;
+                    let ecy = p.card.y + p.card.h * 0.64;
+                    if ex.word == "igloo" {
+                        // No igloo glyph exists — draw it as a vector.
+                        draw::igloo(cx, ecy, p.card.h * 0.46);
+                    } else if let Some(tex) = crate::emoji::texture(ex.emoji) {
+                        let s = p.card.h * 0.34;
                         draw_texture_ex(
                             &tex,
                             cx - s / 2.0,
-                            p.card.y + p.card.h * 0.6 - s / 2.0,
+                            ecy - s / 2.0,
                             WHITE,
                             DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() },
                         );
                     } else {
-                        draw_circle(cx, p.card.y + p.card.h * 0.6, p.card.h * 0.12, palette::ACCENT_SOFT);
+                        draw_circle(cx, ecy, p.card.h * 0.12, palette::ACCENT_SOFT);
                     }
-                    text::draw_centered(
-                        ex.word,
-                        cx,
-                        p.card.y + p.card.h * 0.84,
-                        (p.card.h * 0.11) as u16,
-                        &ctx.fonts.cursive,
-                        palette::INK,
-                    );
                 }
             }
         }

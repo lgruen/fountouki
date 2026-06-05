@@ -201,6 +201,16 @@ async fn main() {
                 sc.update(&ctx);
                 Box::new(sc)
             }
+            "phonics-miss-igloo" => {
+                // The 'i' miss-reveal exercises the drawn (vector) igloo.
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = PhonicsScene::new(db.clone(), 7, now);
+                sc.debug_set_letter('i');
+                let ptr = tap(sc.miss_center(&frame));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                Box::new(sc)
+            }
             "picker" => Box::new(PickerScene::new(db.clone())),
             "phonics-done" => {
                 // Play 7 correct rounds to reach the rainbow-done garden scene.

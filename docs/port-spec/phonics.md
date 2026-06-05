@@ -119,48 +119,49 @@ If the letter isn't in the map, both functions are no-ops (no version bump).
 
 ## 2. Deck (letter → exemplars + intro order)
 
-Each letter has a **canonical** exemplar (always used for the miss-hint;
-clean anchor) and an optional **variants** list (extra exemplars unlocked
-at box >= 2 for generalization).
+Each letter has a single **canonical** exemplar — the picture shown on a
+miss. One picture per letter (no variants): consistency aids learning for a
+small working memory.
 
 ```rust
 struct Exemplar { emoji: &str, word: &str }
-struct LetterCard { letter: char, canonical: Exemplar, variants: Vec<Exemplar> }
+struct LetterCard { letter: char, canonical: Exemplar }
 ```
 
 ### 2.1 DECK (order = deck order = `LETTERS`)
 
 `LETTERS` is exactly the order below: alphabetical `a..z`. (`LETTERS` ≠
-`INTRO_ORDER`.) Canonical first, then variants:
+`INTRO_ORDER`.) Every consonant uses its hard/primary sound and every vowel
+its short sound; x uses a word-final /ks/ (the only position the sound occurs).
 
-| letter | canonical | variants |
-|---|---|---|
-| a | 🐜 ant | 🍎 apple, 🐊 alligator |
-| b | 🐻 bear | 🦋 butterfly, 🎈 balloon |
-| c | 🐱 cat | 🥕 carrot, 🐄 cow |
-| d | 🐕 dog | 🦆 duck, 🦖 dinosaur |
-| e | 🐘 elephant | 🥚 egg |
-| f | 🐟 fish | 🐸 frog, 🌸 flower |
-| g | 🐐 goat | 🍇 grapes, 🎁 gift |
-| h | 🐴 horse | 🏠 house, 🎩 hat |
-| i | 🐛 insect | 🪻 iris |
-| j | 🪼 jellyfish | 🎷 jazz, 🃏 joker |
-| k | 🦘 kangaroo | 🗝️ key, 🪁 kite |
-| l | 🦁 lion | 🍋 lemon, 🐞 ladybug |
-| m | 🐵 monkey | 🌙 moon, 🍄 mushroom |
-| n | 🪺 nest | 👃 nose, 🥜 nut |
-| o | 🐙 octopus | 🦉 owl, 🍊 orange |
-| p | 🐼 panda | 🍍 pineapple, 🐧 penguin |
-| q | 👸 queen | 🪶 quill, ❓ question |
-| r | 🌈 rainbow | 🐰 rabbit, 🤖 robot |
-| s | ☀️ sun | 🐍 snake, ⭐ star |
-| t | 🐢 turtle | 🐅 tiger, 🌳 tree |
-| u | ☂️ umbrella | 🆙 up |
-| v | 🚐 van | 🎻 violin, 🌋 volcano |
-| w | 🐳 whale | 🌊 wave, 🍉 watermelon |
-| x | 🩻 x-ray | 📦 box, 6️⃣ six |
-| y | 🪀 yo-yo | 🟡 yellow |
-| z | 🦓 zebra | 0️⃣ zero, 💤 zzz |
+| letter | exemplar |
+|---|---|
+| a | 🐜 ant |
+| b | 🐻 bear |
+| c | 🐱 cat |
+| d | 🐕 dog |
+| e | 🐘 elephant |
+| f | 🐟 fish |
+| g | 🐐 goat |
+| h | 🐴 horse |
+| i | 🛖 igloo (drawn vector — no glyph exists) |
+| j | 🪼 jellyfish |
+| k | 🦘 kangaroo |
+| l | 🦁 lion |
+| m | 🐵 monkey |
+| n | 🪺 nest |
+| o | 🐙 octopus |
+| p | 🐼 panda |
+| q | 👸 queen |
+| r | 🌈 rainbow |
+| s | ☀️ sun |
+| t | 🐢 turtle |
+| u | ☂️ umbrella |
+| v | 🚐 van |
+| w | 🐳 whale |
+| x | 🦊 fox |
+| y | 🪀 yo-yo |
+| z | 🦓 zebra |
 
 Note these emoji include variation selectors / ZWJ sequences (☀️, ☂️,
 🗝️, 6️⃣, 0️⃣). Store the exact UTF-8 byte sequences; do not normalize.
@@ -182,24 +183,18 @@ Flat list (26 entries, exact order):
 Rationale: group 1 (s,a,t,i,p,n) already forms many CVC words (sat, pin,
 nap…), so phonics "clicks" early. Used only by the active-set gate (§3).
 
-### 2.3 pickExemplar(letter, box, rng) -> Exemplar
+### 2.3 exemplar(letter) -> Exemplar
 
 ```
-card = lookup(letter)  // panic/Err on unknown letter
-if box < 2 OR card.variants is empty: return card.canonical
-pool = [canonical] ++ variants
-return pool[floor(rng() * pool.len())]   // uniform over pool; canonical included
+card = lookup(letter)  // None/Err on unknown letter
+return card.canonical
 ```
 
-`rng()` in `[0,1)`. Default `Math.random`. Used in normal card display
-when a letter has graduated (box>=2) for variety. The **miss-hint always
-uses box 0 → canonical** (see §5.3).
-
-(In the TS port, the in-game card actually renders only the *letter glyph*,
-not the exemplar — see §5.2. `pickExemplar` is invoked in two places: the
-miss-hint with box 0, and conceptually for variety; the only caller in
-`game.ts` is the miss-hint. Keep `pickExemplar` available for completeness
-but the playing card shows no emoji.)
+The playing card renders only the *letter glyph*, not the exemplar (see
+§5.2); the exemplar picture appears only on the miss-hint (see §5.3).
+(The original TS port had a `pickExemplar(letter, box, rng)` that pooled in
+per-letter variants at box>=2 for variety; variants were removed — one
+consistent picture per letter — so selection is just the canonical.)
 
 ---
 

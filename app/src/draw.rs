@@ -254,6 +254,76 @@ pub fn sun(cx: f32, cy: f32, r: f32) {
     disc(cx - r * 0.18, cy - r * 0.18, r * 0.5, palette::SUN_CORE);
 }
 
+/// A drawn igloo — vector art, not an emoji: there is no igloo glyph in Unicode
+/// (so no Twemoji sprite exists), and "igloo" is the gold-standard preschool
+/// 'i' word. Reads as a snow-block dome with an arched entrance; fills a box of
+/// side `s` centered on (cx, cy).
+pub fn igloo(cx: f32, cy: f32, s: f32) {
+    use std::f32::consts::PI;
+    let snow = palette::hex(0xeaf2fb);
+    let seam = palette::hexa(0x9db6d2, 0.85);
+    let edge = palette::hexa(0x6f8db0, 0.95);
+    let door = palette::hex(0x5f7a9b);
+
+    let base = cy + s * 0.20; // flat ground line the dome sits on
+    let r = s * 0.46;
+    let ew = (s * 0.016).max(1.6); // outline weight
+    let sw = (s * 0.012).max(1.2); // block-seam weight
+
+    // Upper half-disc (a snow dome with a flat bottom on `base`).
+    let dome = |rr: f32, color: Color| {
+        const N: usize = 80;
+        let mut prev = vec2(cx + rr, base);
+        for i in 1..=N {
+            let a = PI * i as f32 / N as f32;
+            let p = vec2(cx + rr * a.cos(), base - rr * a.sin());
+            draw_triangle(vec2(cx, base), prev, p, color);
+            prev = p;
+        }
+    };
+    // Stroked dome arc over angles a0..a1 in [0,PI] (0 = right base, PI = left).
+    let arc = |rr: f32, a0: f32, a1: f32, width: f32, color: Color| {
+        const N: usize = 64;
+        let mut pts = Vec::with_capacity(N + 1);
+        for i in 0..=N {
+            let a = a0 + (a1 - a0) * i as f32 / N as f32;
+            pts.push(vec2(cx + rr * a.cos(), base - rr * a.sin()));
+        }
+        stroke_path(&pts, width, color);
+    };
+    // Radial block seam at angle `a`, from radius r0 out to r1.
+    let seam_at = |a: f32, r0: f32, r1: f32, width: f32, color: Color| {
+        let p0 = vec2(cx + r0 * a.cos(), base - r0 * a.sin());
+        let p1 = vec2(cx + r1 * a.cos(), base - r1 * a.sin());
+        draw_line(p0.x, p0.y, p1.x, p1.y, width, color);
+    };
+
+    // Ground shadow grounds the dome (matches the frog/sun treatment).
+    fill_ellipse(cx, base + s * 0.05, r * 1.04, s * 0.05, 0.0, Color::new(0.12, 0.18, 0.26, 0.12));
+
+    // Dome body, then the snow-block courses (two horizontal arcs + staggered
+    // radial seams between them) so it reads as stacked ice blocks.
+    dome(r, snow);
+    let c_mid = r * 0.66;
+    let c_in = r * 0.34;
+    for k in 0..5 {
+        seam_at(PI * (0.5 + k as f32) / 5.0, c_mid, r, sw, seam);
+    }
+    for k in 0..4 {
+        seam_at(PI * (0.5 + k as f32) / 4.0, c_in, c_mid, sw, seam);
+    }
+    arc(c_mid, 0.0, PI, sw, seam);
+    arc(c_in, 0.0, PI, sw, seam);
+    arc(r, 0.0, PI, ew, edge);
+    draw_line(cx - r, base, cx + r, base, ew, edge);
+
+    // Entrance: a smaller snow tunnel with a dark arched opening at the front.
+    let re = r * 0.44;
+    dome(re, snow);
+    arc(re, 0.0, PI, ew, edge);
+    dome(r * 0.28, door);
+}
+
 /// A rigged pose for the frog mascot. Transform origin is the frog's *base*
 /// (where the feet meet the ground), matching the old CSS `transform-origin:
 /// 50% 100%` — so squash/stretch and spins pivot on the ground, not the middle.
