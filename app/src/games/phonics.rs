@@ -47,6 +47,9 @@ pub struct PhonicsScene {
     frog_kind: usize,
     /// Total frog taps this session (selects + cycles the reaction).
     frog_taps: u32,
+    /// Seed for the done-scene garden — re-rolled each session so a fresh mix of
+    /// plants "grows" at the payoff ("what grew this time?").
+    garden_seed: u32,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
 }
@@ -78,6 +81,7 @@ impl PhonicsScene {
             frog_t: 99.0,
             frog_kind: 0,
             frog_taps: 0,
+            garden_seed: seed ^ 0x9e37_79b9,
             confetti: crate::confetti::Confetti::new(seed ^ 0x00c0_ffee),
             sync,
         }
@@ -91,6 +95,8 @@ impl PhonicsScene {
         self.frog_kind = 0;
         self.frog_taps = 0;
         self.hop_time = 99.0;
+        // Re-roll the garden so replaying grows a fresh mix of plants.
+        self.garden_seed = (self.rng.next_f64() * u32::MAX as f64) as u32 ^ 0x9e37_79b9;
         self.queue = srs::build_queue(&self.state, now, &mut self.rng);
         srs::avoid_repeat(&mut self.queue, self.last);
         self.qi = 0;
@@ -141,8 +147,21 @@ impl PhonicsScene {
         draw::rainbow(rcx, rhoriz, rscale, rstroke, 7);
         draw::vgradient(0.0, gy, f.w, f.h - gy, palette::GROUND_TOP, palette::GROUND_BOT);
         draw_line(0.0, gy, f.w, gy, 3.0, palette::hex(0x2f7d2f));
-        draw::plant(f.w * 0.28, gy, f.vmin(0.06));
-        draw::plant(f.w * 0.74, gy, f.vmin(0.05));
+        // The garden: a varied mix of vector plants that grows behind the frog.
+        // Built from the per-session seed (deterministic) and drawn far→near so
+        // foreground clumps overlap the back row; the frog (next) sits on top.
+        let garden = build_garden(self.garden_seed, f, gy, replay, home_b, br);
+        for g in &garden {
+            if matches!(g.kind, GardenLayer::Grass) {
+                draw::grass_tuft(g.pos.x, g.pos.y, g.size, palette::hex(0x47a64a), (ctx.time * 0.9 + g.phase).sin() * 0.5);
+            }
+        }
+        for g in &garden {
+            if let GardenLayer::Plant(kind) = g.kind {
+                let sway = (ctx.time * 1.1 + g.phase).sin();
+                draw::garden_plant(g.pos.x, g.pos.y, g.size, kind, g.color, sway);
+            }
+        }
         let rx = &REACTIONS[self.frog_kind];
         let pose = if self.frog_t < rx.dur {
             react_pose(rx, self.frog_t, fr)
@@ -421,6 +440,82 @@ fn done_rainbow(f: &crate::layout::Frame, gy: f32) -> (f32, f32, f32, f32) {
     let fit = ((horizon - 12.0) / 72.0).max(0.2);
     let scale = desired.min(fit);
     (f.w / 2.0, horizon, scale, (14.0 * scale).max(10.0))
+}
+
+/// One drawn element of the done-scene garden (sorted far→near for overlap).
+enum GardenLayer {
+    Grass,
+    Plant(draw::Plant),
+}
+
+struct GardenItem {
+    pos: Vec2,
+    size: f32,
+    kind: GardenLayer,
+    color: Color,
+    phase: f32,
+}
+
+/// Vivid bloom colors the garden flowers draw from (shuffled per session).
+const BLOOM: [u32; 8] =
+    [0xff5d8f, 0xff4d6d, 0xff8c42, 0xffd23f, 0xb364e5, 0x6e72e7, 0x38b3e2, 0xff8cbe];
+
+/// Lay out the done-scene garden deterministically from `seed`. Four foreground
+/// "hero" plants frame the frog in fixed spots (predictable layout across
+/// sessions), each a freshly-rolled species + color; a sparse back row and grass
+/// tufts fill the meadow. The frog column (center) and the two corner buttons
+/// (`replay`/`home`) stay clear, so nothing the kid taps is occluded.
+fn build_garden(
+    seed: u32,
+    f: &crate::layout::Frame,
+    gy: f32,
+    replay: Vec2,
+    home_b: Vec2,
+    br: f32,
+) -> Vec<GardenItem> {
+    let mut rng = Mulberry32::new(seed);
+    let gh = f.h - gy;
+    let base = f.vmin(0.06);
+    // Keep every plant base above the corner buttons so none is overlapped.
+    let floor = replay.y.min(home_b.y) - br - 6.0;
+
+    let mut species: Vec<draw::Plant> = draw::GARDEN_SPECIES.to_vec();
+    rng.shuffle(&mut species);
+    let mut blooms: Vec<u32> = BLOOM.to_vec();
+    rng.shuffle(&mut blooms);
+
+    let mut items: Vec<GardenItem> = Vec::new();
+    let mut si = 0usize;
+    let place = |rng: &mut Mulberry32, items: &mut Vec<GardenItem>, si: &mut usize, xf: f32, depth: f32, smul: f32| {
+        let kind = species[*si % species.len()];
+        let color = palette::hex(blooms[*si % blooms.len()]);
+        *si += 1;
+        let x = xf * f.w + rng.range(-0.015, 0.015) * f.w;
+        let y = (gy + depth * gh * rng.range(0.9, 1.1)).min(floor);
+        let size = base * smul * rng.range(0.92, 1.10);
+        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Plant(kind), color, phase: rng.range(0.0, 6.28) });
+    };
+
+    // Foreground heroes: two clumps flanking the frog (back→front within each).
+    for &(xf, depth, smul) in &[(0.27f32, 0.30f32, 0.98f32), (0.13, 0.58, 1.30), (0.73, 0.30, 0.98), (0.87, 0.58, 1.30)] {
+        place(&mut rng, &mut items, &mut si, xf, depth, smul);
+    }
+    // Sparse back row along the horizon (count varies per session).
+    for &xf in &[0.05f32, 0.16, 0.34, 0.66, 0.84, 0.95] {
+        if rng.next_f32() < 0.7 {
+            place(&mut rng, &mut items, &mut si, xf, 0.05, 0.55);
+        }
+    }
+    // Grass tufts scattered through the meadow.
+    for _ in 0..8 {
+        let x = rng.range(0.03, 0.97) * f.w;
+        let y = (gy + rng.range(0.0, 0.55) * gh).min(floor);
+        let size = base * rng.range(0.40, 0.75);
+        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Grass, color: palette::WHITE, phase: rng.range(0.0, 6.28) });
+    }
+
+    items.sort_by(|a, b| a.pos.y.total_cmp(&b.pos.y));
+    items
 }
 
 /// One frog reaction — a *real jump* (the frog leaves the ground). Tapping the
