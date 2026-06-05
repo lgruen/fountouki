@@ -143,13 +143,13 @@ struct LetterCard { letter: char, canonical: Exemplar, variants: Vec<Exemplar> }
 | f | 🐟 fish | 🐸 frog, 🌸 flower |
 | g | 🐐 goat | 🍇 grapes, 🎁 gift |
 | h | 🐴 horse | 🏠 house, 🎩 hat |
-| i | 🛖 igloo (drawn vector — no glyph exists) | 🪻 iris |
+| i | 🛖 igloo (drawn vector — no glyph exists) | 🐛 insect |
 | j | 🪼 jellyfish | 🎷 jazz, 🃏 joker |
 | k | 🦘 kangaroo | 🗝️ key, 🪁 kite |
 | l | 🦁 lion | 🍋 lemon, 🐞 ladybug |
 | m | 🐵 monkey | 🌙 moon, 🍄 mushroom |
 | n | 🪺 nest | 👃 nose, 🥜 nut |
-| o | 🐙 octopus | 🦉 owl, 🍊 orange |
+| o | 🐙 octopus | 🍊 orange |
 | p | 🐼 panda | 🍍 pineapple, 🐧 penguin |
 | q | 👸 queen | 🪶 quill, ❓ question |
 | r | 🌈 rainbow | 🐰 rabbit, 🤖 robot |
@@ -158,7 +158,7 @@ struct LetterCard { letter: char, canonical: Exemplar, variants: Vec<Exemplar> }
 | u | ☂️ umbrella | 🆙 up |
 | v | 🚐 van | 🎻 violin, 🌋 volcano |
 | w | 🐳 whale | 🌊 wave, 🍉 watermelon |
-| x | 🩻 x-ray | 📦 box, 6️⃣ six |
+| x | 🦊 fox | 📦 box, 6️⃣ six |
 | y | 🪀 yo-yo | 🟡 yellow |
 | z | 🦓 zebra | 0️⃣ zero, 💤 zzz |
 

@@ -105,7 +105,9 @@ pub const DECK: [LetterCard; 26] = [
         // 🛖 'hut' codepoint as the nearest standin, never drawn as a sprite.
         letter: 'i',
         canonical: ex("🛖", "igloo"),
-        variants: &[ex("🪻", "iris")],
+        // 'iris' is long-i (/ˈaɪrɪs/) — wrong sound, and obscure. 'insect'
+        // (the former canonical) is a clean short-i anchor.
+        variants: &[ex("🐛", "insect")],
     },
     LetterCard {
         letter: 'j',
@@ -135,7 +137,9 @@ pub const DECK: [LetterCard; 26] = [
     LetterCard {
         letter: 'o',
         canonical: ex("🐙", "octopus"),
-        variants: &[ex("🦉", "owl"), ex("🍊", "orange")],
+        // 'owl' is a diphthong (/aʊl/), not short-o — dropped. 'orange' is the
+        // standard short-o picture word.
+        variants: &[ex("🍊", "orange")],
     },
     LetterCard {
         letter: 'p',
@@ -178,8 +182,11 @@ pub const DECK: [LetterCard; 26] = [
         variants: &[ex("🌊", "wave"), ex("🍉", "watermelon")],
     },
     LetterCard {
+        // x's sound is /ks/, which only occurs word-finally — so the picture
+        // words end in x (fox/box/six). 'x-ray' teaches the letter *name*
+        // (/ɛks/), not the sound, so 'fox' is the canonical anchor.
         letter: 'x',
-        canonical: ex("🩻", "x-ray"),
+        canonical: ex("🦊", "fox"),
         variants: &[ex("📦", "box"), ex("6️⃣", "six")],
     },
     LetterCard {
@@ -270,7 +277,7 @@ mod tests {
         assert_eq!(exemplar('s'), Some(ex("☀️", "sun")));
         assert_eq!(exemplar('r'), Some(ex("🌈", "rainbow")));
         assert_eq!(exemplar('z'), Some(ex("🦓", "zebra")));
-        assert_eq!(exemplar('x'), Some(ex("🩻", "x-ray")));
+        assert_eq!(exemplar('x'), Some(ex("🦊", "fox")));
         assert_eq!(exemplar('?'), None);
     }
 
