@@ -871,7 +871,10 @@ fn finale_layout(f: &crate::layout::Frame, car_period: usize) -> FinaleLayout {
         home,
         btn_r: br,
         show_far_hills: !f.is_phone(),
-        show_bunting: !f.is_phone(),
+        // Bunting is the rainbow-triangle "finish line" string — show it on every
+        // device. It hangs high in the sky (clear of the train), so the short
+        // phone foreground that gates the far-hills/flowers doesn't apply here.
+        show_bunting: true,
     }
 }
 
