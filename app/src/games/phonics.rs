@@ -350,15 +350,15 @@ impl Scene for PhonicsScene {
                 text::draw_centered(
                     &glyph,
                     cx,
-                    p.card.y + p.card.h * 0.30,
-                    (p.letter_size as f32 * 0.62) as u16,
+                    p.card.y + p.card.h * 0.24,
+                    (p.letter_size as f32 * 0.58) as u16,
                     &ctx.fonts.cursive,
                     palette::INK,
                 );
                 // Picture only — no word label (distracting at this age), and
                 // pushed well below the letter so the two never crowd.
                 if let Some(ex) = &self.reveal {
-                    let ecy = p.card.y + p.card.h * 0.64;
+                    let ecy = p.card.y + p.card.h * 0.72;
                     if ex.word == "igloo" {
                         // No igloo glyph exists — draw it as a vector.
                         draw::igloo(cx, ecy, p.card.h * 0.46);
