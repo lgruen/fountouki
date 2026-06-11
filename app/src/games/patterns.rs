@@ -27,6 +27,8 @@ use macroquad::prelude::*;
 const LEVEL_UP_STREAK: u32 = 4;
 const ADVANCE_DELAY: f32 = 0.85;
 const RETRY_DELAY: f32 = 0.55;
+/// Level-up drive-by: how long the mini train takes to cross the screen.
+const DRIVE_DUR: f32 = 3.0;
 
 /// Which scene we're in: the round-by-round game, or the train celebration that
 /// crowns mastering the final level.
@@ -71,6 +73,11 @@ pub struct PatternsScene {
     engine_taps: u32,
     /// Accumulator for the steady confetti-rain trickle.
     rain_acc: f32,
+    // --- level-up drive-by (a mini Pattern Train crosses the bottom) ---
+    /// Seconds since a level-up fired the drive-by; `None` when parked offstage.
+    drive_t: Option<f32>,
+    /// The just-solved unit riding the drive-by cars (one item per car).
+    drive_items: Vec<Item>,
 }
 
 impl PatternsScene {
@@ -109,6 +116,8 @@ impl PatternsScene {
             react_kind: 0,
             engine_taps: 0,
             rain_acc: 0.0,
+            drive_t: None,
+            drive_items: Vec::new(),
         }
     }
 
@@ -161,6 +170,11 @@ impl PatternsScene {
                 self.streak = 0;
                 self.level += 1;
                 ctx.audio.level_up();
+                // Level-up spectacle: a mini Pattern Train carrying the unit the
+                // kid just mastered drives across the bottom — a taste of the
+                // finale that gets closer with every level.
+                self.drive_t = Some(0.0);
+                self.drive_items = self.round.unit_items.clone();
             } else {
                 // Mastered the final level on a clean streak → All aboard!
                 self.enter_finale(ctx);
@@ -175,6 +189,7 @@ impl PatternsScene {
     /// train's cargo, fire the grand fanfare + an opening confetti burst.
     fn enter_finale(&mut self, ctx: &Ctx) {
         self.phase = Phase::Finale;
+        self.drive_t = None;
         self.finale_t = 0.0;
         self.react_t = 99.0;
         self.react_kind = 0;
@@ -216,7 +231,54 @@ impl PatternsScene {
         self.stars = 0;
         self.streak = 0;
         self.finale_t = 0.0;
+        self.drive_t = None;
         self.next_round();
+    }
+
+    /// Draw the level-up drive-by: a mini engine + the just-mastered unit on
+    /// cars, crossing the bottom band left→right. Purely decorative (no hit
+    /// target); skipped when the band would touch the choices/FAB.
+    fn draw_driveby(&self, ctx: &Ctx, p: &PLayout) {
+        let Some(t) = self.drive_t else { return };
+        let f = &ctx.frame;
+        let Some((by, r)) = drive_band(f, p, self.mode) else { return };
+        let wheel_r = r * 0.5;
+        let n = self.drive_items.len().max(1);
+        let car_h = r * 1.15;
+        let car_w = car_h * 1.25;
+        let pitch = car_w * 1.18;
+        let train_w = r * 4.6 + n as f32 * pitch;
+        let ex = -train_w + (f.w + 2.0 * train_w) * (t / DRIVE_DUR).clamp(0.0, 1.0);
+        let wheel_ang = -ex / wheel_r;
+        // Cars trail the engine; the unit still reads left→right.
+        let leftmost = ex - r * 2.05 - car_w * 0.5 - (n - 1) as f32 * pitch;
+        for (j, item) in self.drive_items.iter().enumerate() {
+            let cx = leftmost + j as f32 * pitch;
+            let body = Rect::new(cx - car_w / 2.0, by - wheel_r - car_h, car_w, car_h);
+            draw::train_car_chassis(body, by, wheel_r);
+            let seat = car_h * 0.62;
+            let seat_cy = body.y + body.h * 0.46;
+            draw_cell(cx, seat_cy, seat, palette::WHITE, palette::CELL_BORDER);
+            draw_item(item, cx, seat_cy, seat * 0.78, ctx);
+        }
+        let ep = draw::EnginePose { dy: 0.4 * (ctx.time * 6.0).sin(), ..Default::default() };
+        draw::train_engine(ex, by, r, ep, wheel_ang, 0.3, idle_frog(ctx.time));
+        // A short trail of steam puffs, drifting up and back.
+        let tip = draw::engine_funnel_tip(ex, by, r);
+        let cad = 0.35;
+        let life = 0.9;
+        let kmax = (t / cad).floor() as i32;
+        let kmin = (((t - life) / cad).ceil() as i32).max(0);
+        for k in kmin..=kmax {
+            let age = t - k as f32 * cad;
+            if !(0.0..=life).contains(&age) {
+                continue;
+            }
+            let a = age / life;
+            // Puffs anchor where the funnel was when they were born.
+            let born_ex = -train_w + (f.w + 2.0 * train_w) * ((k as f32 * cad) / DRIVE_DUR).clamp(0.0, 1.0);
+            draw::steam_puff(born_ex + r * 0.95, tip.y - 30.0 * age, r * 0.20 * (1.0 + a), 0.7 * (1.0 - a));
+        }
     }
 
     fn update_finale(&mut self, ctx: &Ctx) -> Nav {
@@ -454,10 +516,32 @@ impl PatternsScene {
     pub(crate) fn unit_selection(&self) -> Option<(usize, usize)> {
         self.sel
     }
+    pub(crate) fn drive_active(&self) -> bool {
+        self.drive_t.is_some()
+    }
 }
 
 fn unit_fab(f: &crate::layout::Frame) -> (Vec2, f32) {
     (vec2(f.w / 2.0, f.h * 0.78), (f.w * 0.06).clamp(60.0, 90.0))
+}
+
+/// The bottom band for the level-up drive-by: `(track_y, r_boiler)` when a mini
+/// train clears the choices (and the unit FAB) with margin; `None` on cramped
+/// viewports (short phone-landscape), which keep the fanfare + pips only.
+fn drive_band(f: &crate::layout::Frame, p: &PLayout, mode: GameMode) -> Option<(f32, f32)> {
+    let r = f.vmin(0.032).clamp(14.0, 26.0);
+    let track = f.h - f.safe.bottom.max(6.0) - r * 0.3;
+    let mut clutter_bottom = p.choices.iter().map(|c| c.y + c.h).fold(0.0_f32, f32::max);
+    if mode == GameMode::Unit {
+        let fab = unit_fab(f);
+        clutter_bottom = clutter_bottom.max(fab.0.y + fab.1);
+    }
+    // 3.1r = the engine's full height (funnel + frog head included).
+    if track - r * 3.1 > clutter_bottom + 8.0 {
+        Some((track, r))
+    } else {
+        None
+    }
 }
 
 fn gen(level: u32, choice: ThemeChoice, mode: GameMode, diff: Difficulty, rng: &mut Mulberry32) -> Round {
@@ -469,6 +553,10 @@ impl Scene for PatternsScene {
     fn update(&mut self, ctx: &Ctx) -> Nav {
         self.fb_time += ctx.dt;
         self.confetti.update(ctx.dt);
+        if let Some(t) = self.drive_t {
+            let t = t + ctx.dt;
+            self.drive_t = if t > DRIVE_DUR { None } else { Some(t) };
+        }
         if self.phase == Phase::Finale {
             self.finale_t += ctx.dt;
             self.react_t += ctx.dt;
@@ -598,6 +686,7 @@ impl Scene for PatternsScene {
             }
         }
 
+        self.draw_driveby(ctx, &p);
         self.confetti.draw();
     }
 }

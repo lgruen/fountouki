@@ -21,7 +21,8 @@ pub use glyphs::{
 };
 pub use prim::{card, fill_ellipse, pop_clip, push_clip, rounded_rect, star, vgradient};
 pub use scenery::{
-    cloud, garden_plant, grass_tuft, igloo, plant, rainbow, sun, Plant, GARDEN_SPECIES,
+    cloud, garden_plant, grass_tuft, igloo, plant, rainbow, rainbow_ghost, sun, Plant,
+    GARDEN_SPECIES,
 };
 pub use train::{
     bunting, checker_flag, engine_funnel_tip, engine_hit_rect, steam_puff, train_car_chassis,

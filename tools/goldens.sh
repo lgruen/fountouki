@@ -13,7 +13,7 @@ BIN="$ROOT/target/debug/fountouki"
 mkdir -p "$OUT"
 ( cd "$ROOT" && cargo build -q -p fountouki )
 
-scenes=(picker phonics phonics-miss phonics-miss-igloo phonics-done patterns patterns-emoji patterns-unit patterns-hard patterns-done parent-patterns parent-phonics)
+scenes=(picker phonics phonics-miss phonics-miss-igloo phonics-done patterns patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done parent-patterns parent-phonics)
 # label width height
 resolutions=(
   "ipad-landscape 1194 834"

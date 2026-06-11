@@ -35,6 +35,19 @@ pub fn rainbow(cx: f32, horizon_y: f32, scale: f32, stroke: f32, filled: usize) 
     }
 }
 
+/// A pale "to be filled" rainbow: all 7 bands washed toward the background, so
+/// the meter's shape is visible from zero stars and fills over it in color.
+/// Opaque (mixed, not alpha) — translucent stroked paths would self-overlap
+/// into blotchy joints.
+pub fn rainbow_ghost(cx: f32, horizon_y: f32, scale: f32, stroke: f32, bg: Color) {
+    for i in (0..7).rev() {
+        let t = i as f32 / 6.0;
+        let sagitta = (65.0 - 40.0 * t) * scale;
+        let c = mix(palette::RAINBOW[i], bg, 0.82);
+        rainbow_arc(cx, horizon_y, sagitta, stroke, c);
+    }
+}
+
 /// A soft white cloud: a few overlapping round puffs on a flat base.
 pub fn cloud(cx: f32, cy: f32, scale: f32) {
     let c = Color::new(1.0, 1.0, 1.0, 0.9);

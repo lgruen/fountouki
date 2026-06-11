@@ -144,6 +144,35 @@ async fn main() {
                 }
                 Box::new(sc)
             }
+            "patterns-levelup" => {
+                // A clean streak of 4 fires the level-up drive-by; settle ~1.2 s
+                // so the golden catches the mini train mid-crossing.
+                {
+                    let mut kv = db.borrow_kv_mut();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "shapes".to_string(),
+                        ..Default::default()
+                    };
+                    fountouki_core::settings::save_patterns(&mut **kv, &ps);
+                }
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = PatternsScene::new(db.clone(), 7, now);
+                let idle = Pointer::default();
+                for i in 0..4 {
+                    let ptr = tap(sc.choice_center(&frame, sc.correct_index()));
+                    let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                    if i < 3 {
+                        let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                        sc.update(&ctx);
+                    }
+                }
+                for _ in 0..12 {
+                    let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                Box::new(sc)
+            }
             "patterns-emoji" => {
                 {
                     let mut kv = db.borrow_kv_mut();
@@ -480,6 +509,19 @@ async fn main() {
                 println!("PASS patterns-level-streak");
             } else {
                 println!("FAIL patterns-level-streak (held={}, level {}->{}, stars={})", held, lvl, sc.level, sc.stars);
+                fails += 1;
+            }
+            // The level-up fired the drive-by; it parks again after DRIVE_DUR.
+            let active = sc.drive_active();
+            let idle = Pointer::default();
+            for _ in 0..4 {
+                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if active && !sc.drive_active() {
+                println!("PASS patterns-levelup-driveby");
+            } else {
+                println!("FAIL patterns-levelup-driveby (fired={}, parked={})", active, !sc.drive_active());
                 fails += 1;
             }
         }

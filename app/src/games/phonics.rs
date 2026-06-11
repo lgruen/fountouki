@@ -203,6 +203,13 @@ impl PhonicsScene {
         self.streak += 1;
         ctx.audio.correct(self.streak);
         self.hop_time = 0.0;
+        // The companion frog celebrates every star — a different jump each time —
+        // and a sparkle pops from the rainbow stripe that just filled in.
+        self.frog_kind = (self.stars.saturating_sub(1) as usize) % REACTIONS.len();
+        self.frog_t = 0.0;
+        let stripe = self.stars.saturating_sub(1) as f32 / 6.0;
+        let sag = (65.0 - 40.0 * stripe) * p.rb_scale;
+        self.confetti.burst(vec2(p.rb_cx, p.rb_horizon - sag), 18, 30.0 * p.rb_scale);
         self.save();
         self.sync.queue_push(&self.state.serialize_json(), ctx.now);
         if self.stars >= GOAL {
@@ -284,6 +291,16 @@ impl Scene for PhonicsScene {
         if !pt.tapped() {
             return Nav::Stay;
         }
+        // The companion frog responds to a tap (ribbit + a jump) — pure joy,
+        // no game effect, mirroring the done-scene frog.
+        if input::hit_circle(pt.pos, p.frog.0.x, p.frog.0.y, p.frog.1 * 1.3) {
+            self.frog_taps += 1;
+            self.frog_kind = (self.frog_taps.saturating_sub(1) as usize) % REACTIONS.len();
+            self.frog_t = 0.0;
+            ctx.audio.frog();
+            self.confetti.burst(vec2(p.frog.0.x, p.frog.0.y - p.frog.1 * 0.95), 10, p.frog.1 * 0.5);
+            return Nav::Stay;
+        }
         match self.phase {
             Phase::Card => {
                 if input::hit_circle(pt.pos, p.got.0.x, p.got.0.y, p.got.1) {
@@ -314,9 +331,21 @@ impl Scene for PhonicsScene {
         // Topbar chrome.
         chrome::draw_topbar(&chrome::topbar(&ctx.frame), ctx);
 
-        // Rainbow (filled = stars). When done, show the full arc.
+        // Rainbow progress meter: a pale ghost of all 7 bands (so the goal is
+        // visible from zero stars), filled over in color star by star.
         let filled = if self.phase == Phase::Done { GOAL } else { self.stars };
+        draw::rainbow_ghost(p.rb_cx, p.rb_horizon, p.rb_scale, p.rb_stroke, palette::BG);
         draw::rainbow(p.rb_cx, p.rb_horizon, p.rb_scale, p.rb_stroke, filled as usize);
+
+        // The companion frog at the rainbow's foot: calm idle between answers,
+        // a celebratory jump on each star (or when tapped).
+        let rx = &REACTIONS[self.frog_kind];
+        let pose = if self.frog_t < rx.dur {
+            react_pose(rx, self.frog_t, p.frog.1)
+        } else {
+            idle_pose(ctx.time)
+        };
+        draw::frog(p.frog.0.x, p.frog.0.y, p.frog.1, palette::RAINBOW[3], pose);
 
         // Card.
         let miss_tint = if self.phase == Phase::Miss {
@@ -407,6 +436,9 @@ struct PLayout {
     miss: (Vec2, f32),
     got: (Vec2, f32),
     advance: (Vec2, f32),
+    /// The in-play companion frog: perched at the left foot of the rainbow
+    /// (center, radius). Calm idle; reacts on a correct answer or a tap.
+    frog: (Vec2, f32),
 }
 
 /// Done-scene geometry shared by update + draw.
@@ -607,6 +639,14 @@ fn plan(f: &crate::layout::Frame) -> PLayout {
     let rb_fit = ((rb_horizon - tb.y - 4.0) / 70.0).max(0.2);
     let rb_scale = rb_desired.min(rb_fit);
 
+    // Companion frog at the left foot of the rainbow, feet on the horizon. The
+    // rainbow's outer band meets the horizon ~84.7*scale left of center (radius
+    // 65s/(1-cos75°) ≈ 87.7s, half-width = r·sin75°); the frog sits just beyond
+    // it — beside the card, never over it, clear of every tap target.
+    let fr = (card_h * 0.17).clamp(24.0, 54.0);
+    let frog_x = cx - 84.7 * rb_scale - fr * 0.55;
+    let frog = (vec2(frog_x, rb_horizon - 0.92 * fr), fr);
+
     PLayout {
         card,
         letter_size: (card_h * 0.6) as u16,
@@ -617,6 +657,7 @@ fn plan(f: &crate::layout::Frame) -> PLayout {
         miss: (vec2(x0 + slot / 2.0, by), miss_r),
         got: (vec2(x0 + slot + gap + slot / 2.0, by), got_r),
         advance: (vec2(cx, by), got_r),
+        frog,
     }
 }
 
