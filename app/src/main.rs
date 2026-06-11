@@ -319,9 +319,44 @@ async fn main() {
                 sc.update(&ctx);
                 Box::new(sc)
             }
+            "tracing-reward" => {
+                // The between-letter reward beat: finished glyph at full ink +
+                // the next house part riding the crane cable down.
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = TracingScene::new(db.clone(), 7, now);
+                sc.debug_set_letter('c');
+                sc.skip_watch();
+                for i in 0..=40 {
+                    let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
+                    let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                // Settle into the install: walls mid-descent on the cable.
+                let idle = Pointer::default();
+                for _ in 0..6 {
+                    let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                Box::new(sc)
+            }
             "tracing-done" => {
+                // The house-warming finale, settled (flags up, smoke going),
+                // with one window lamp tapped on.
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = TracingScene::new(db.clone(), 7, now);
                 sc.debug_finish_session();
+                let idle = Pointer::default();
+                for _ in 0..4 {
+                    let ctx = Ctx { dt: 0.2, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                let ptr = tap(sc.window_center(&frame, 0));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                for _ in 0..4 {
+                    let ctx = Ctx { dt: 0.15, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
                 Box::new(sc)
             }
             "phonics-done" => {
@@ -742,6 +777,34 @@ async fn main() {
                     "FAIL tracing-session (skipped={skipped}, errorless={errorless}, graded={graded_each_time}, done={}, stars={}, persisted={persisted})",
                     sc.is_done(),
                     sc.stars
+                );
+                fails += 1;
+            }
+            // House-warming finale: the door rings + swings (and the scene
+            // stays), a window lamp lights and STAYS lit (monotonic).
+            let ptr = tap(sc.door_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let door_ok = sc.is_done() && sc.door_taps() == 1;
+            let ptr = tap(sc.window_center(&frame, 1));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            // A party-guest frog reacts to its tap too.
+            let ptr = tap(sc.friend_center(&frame, 0));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let friend_ok = sc.friend_taps() == 1;
+            let idle2 = Pointer::default();
+            let ctx = Ctx { dt: 2.0, time: 0.0, now, pointer: &idle2, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if door_ok && friend_ok && sc.is_done() && sc.window_lit(1) && !sc.window_lit(0) {
+                println!("PASS tracing-housewarming");
+            } else {
+                println!(
+                    "FAIL tracing-housewarming (door_ok={door_ok}, friend_ok={friend_ok}, done={}, lit1={}, lit0={})",
+                    sc.is_done(),
+                    sc.window_lit(1),
+                    sc.window_lit(0)
                 );
                 fails += 1;
             }

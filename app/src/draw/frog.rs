@@ -126,6 +126,36 @@ pub fn frog(cx: f32, cy: f32, r: f32, color: Color, pose: FrogPose) {
     }
 }
 
+/// A party cone hat perched on the frog's eye bulges, pompom on top — for the
+/// house-warming guests. Draw AFTER [`frog`] with the same anchor + pose.
+pub fn frog_party_hat(cx: f32, cy: f32, r: f32, pose: FrogPose, color: Color) {
+    let rs = (pose.sx * pose.sy).sqrt();
+    let tf = |lx: f32, ly: f32| frog_point(cx, cy, r, pose, lx, ly);
+    let l = tf(-0.30 * r, -1.02 * r);
+    let rr = tf(0.30 * r, -1.02 * r);
+    let apex = tf(0.0, -1.58 * r);
+    draw_triangle(l, rr, apex, color);
+    // A jaunty stripe + the pompom.
+    let s0 = tf(-0.19 * r, -1.22 * r);
+    let s1 = tf(0.19 * r, -1.22 * r);
+    stroke_path(&[s0, s1], (0.07 * r * rs).max(2.0), palette::WHITE);
+    disc(apex.x, apex.y, 0.11 * r * rs, mix(color, palette::WHITE, 0.55));
+}
+
+/// A builder's hard hat perched on the frog's eye bulges — draw AFTER [`frog`]
+/// with the same anchor + pose so it rides every hop, squash and tilt.
+pub fn frog_hard_hat(cx: f32, cy: f32, r: f32, pose: FrogPose) {
+    let rs = (pose.sx * pose.sy).sqrt();
+    let rot_deg = pose.rot.to_degrees();
+    let tf = |lx: f32, ly: f32| frog_point(cx, cy, r, pose, lx, ly);
+    let dome = tf(0.0, -1.10 * r);
+    let brim = tf(0.0, -1.02 * r);
+    let ridge = tf(0.0, -1.34 * r);
+    fill_ellipse(dome.x, dome.y, 0.56 * r * rs, 0.36 * r * rs, rot_deg, palette::GOLD);
+    fill_ellipse(ridge.x, ridge.y, 0.17 * r * rs, 0.09 * r * rs, rot_deg, mix(palette::GOLD, palette::WHITE, 0.35));
+    fill_ellipse(brim.x, brim.y, 0.78 * r * rs, 0.11 * r * rs, rot_deg, shade(palette::GOLD, 0.86));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

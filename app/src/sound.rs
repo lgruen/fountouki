@@ -13,6 +13,10 @@ pub struct Audio {
     frog: Option<Sound>,
     train_whistle: Option<Sound>,
     finale: Option<Sound>,
+    hammer: Option<Sound>,
+    doorbell: Option<Sound>,
+    twinkle: Option<Sound>,
+    trace_ticks: Vec<Sound>, // index = pentatonic step
     muted: Cell<bool>,
     silent: bool,
 }
@@ -28,6 +32,10 @@ impl Audio {
             frog: None,
             train_whistle: None,
             finale: None,
+            hammer: None,
+            doorbell: None,
+            twinkle: None,
+            trace_ticks: Vec::new(),
             muted: Cell::new(true),
             silent: true,
         }
@@ -39,6 +47,10 @@ impl Audio {
         for s in 0..=5u32 {
             correct.push(load_pcm(&synth::correct(s)).await);
         }
+        let mut trace_ticks = Vec::with_capacity(synth::TRACE_TICK_STEPS as usize);
+        for s in 0..synth::TRACE_TICK_STEPS {
+            trace_ticks.push(load_pcm(&synth::trace_tick(s)).await);
+        }
         Audio {
             correct,
             incorrect: Some(load_pcm(&synth::incorrect()).await),
@@ -47,6 +59,10 @@ impl Audio {
             frog: Some(load_pcm(&synth::frog()).await),
             train_whistle: Some(load_pcm(&synth::train_whistle()).await),
             finale: Some(load_pcm(&synth::finale()).await),
+            hammer: Some(load_pcm(&synth::hammer()).await),
+            doorbell: Some(load_pcm(&synth::doorbell()).await),
+            twinkle: Some(load_pcm(&synth::twinkle()).await),
+            trace_ticks,
             muted: Cell::new(muted),
             silent: false,
         }
@@ -93,6 +109,24 @@ impl Audio {
     }
     pub fn finale(&self) {
         self.play(&self.finale);
+    }
+    pub fn hammer(&self) {
+        self.play(&self.hammer);
+    }
+    pub fn doorbell(&self) {
+        self.play(&self.doorbell);
+    }
+    pub fn twinkle(&self) {
+        self.play(&self.twinkle);
+    }
+    pub fn trace_tick(&self, step: u32) {
+        if self.silent || self.muted.get() {
+            return;
+        }
+        let i = (step as usize).min(self.trace_ticks.len().saturating_sub(1));
+        if let Some(s) = self.trace_ticks.get(i) {
+            play_sound(s, PlaySoundParams { looped: false, volume: 1.0 });
+        }
     }
 }
 

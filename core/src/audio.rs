@@ -245,6 +245,57 @@ pub fn finale() -> Vec<f32> {
     mix(&notes)
 }
 
+/// `hammer()` — the build "clonk-clonk": two low woody knocks, each a deep
+/// triangle thump with a brighter tap transient on top. Plays when a house
+/// part lands in the tracing game's build-a-house meter.
+pub fn hammer() -> Vec<f32> {
+    use Waveform::{Sine, Triangle};
+    let knock = |start: f32, freq: f32| {
+        [
+            Note { freq, start, dur: 0.10, gain: 0.20, waveform: Triangle },
+            Note { freq: freq * 2.7, start, dur: 0.05, gain: 0.08, waveform: Sine },
+        ]
+    };
+    let mut notes = Vec::with_capacity(4);
+    notes.extend(knock(0.00, 130.0));
+    notes.extend(knock(0.13, 110.0));
+    mix(&notes)
+}
+
+/// Number of distinct [`trace_tick`] pitches (steps above this clamp).
+pub const TRACE_TICK_STEPS: u32 = 8;
+
+/// `trace_tick(step)` — a tiny sparkle "tick" that climbs a C-major pentatonic
+/// ladder as the finger advances along a stroke. Much quieter than [`tap`] so
+/// it can repeat several times per stroke without crowding the moment.
+pub fn trace_tick(step: u32) -> Vec<f32> {
+    // Pentatonic: every consecutive pair is consonant, so any tick cadence
+    // sounds melodic rather than like an alarm.
+    const LADDER: [f32; 8] = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51];
+    let freq = LADDER[(step.min(TRACE_TICK_STEPS - 1)) as usize];
+    let notes = [Note { freq, start: 0.0, dur: 0.06, gain: 0.055, waveform: Waveform::Sine }];
+    mix(&notes)
+}
+
+/// `doorbell()` — a friendly two-note "ding-dong" (E6→C6) for the finished
+/// house's front door in the tracing finale.
+pub fn doorbell() -> Vec<f32> {
+    let notes = [
+        Note { freq: 1318.51, start: 0.00, dur: 0.28, gain: 0.14, waveform: Waveform::Sine }, // E6
+        Note { freq: 1046.50, start: 0.22, dur: 0.40, gain: 0.14, waveform: Waveform::Sine }, // C6
+    ];
+    mix(&notes)
+}
+
+/// `twinkle()` — a two-sparkle chime (G6→C7) for a window light flicking on.
+pub fn twinkle() -> Vec<f32> {
+    let notes = [
+        Note { freq: 1567.98, start: 0.00, dur: 0.10, gain: 0.10, waveform: Waveform::Sine }, // G6
+        Note { freq: 2093.00, start: 0.07, dur: 0.16, gain: 0.08, waveform: Waveform::Sine }, // C7
+    ];
+    mix(&notes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,14 +338,52 @@ mod tests {
         assert_clean(&frog());
         assert_clean(&train_whistle());
         assert_clean(&finale());
+        assert_clean(&hammer());
+        assert_clean(&doorbell());
+        assert_clean(&twinkle());
+        for step in 0..=TRACE_TICK_STEPS {
+            assert_clean(&trace_tick(step));
+        }
     }
 
     #[test]
     fn all_sounds_nonempty_and_in_range() {
-        for buf in [correct(0), incorrect(), level_up(), tap(), frog(), train_whistle(), finale()] {
+        for buf in [
+            correct(0),
+            incorrect(),
+            level_up(),
+            tap(),
+            frog(),
+            train_whistle(),
+            finale(),
+            hammer(),
+            doorbell(),
+            twinkle(),
+            trace_tick(0),
+        ] {
             assert!(!buf.is_empty());
             assert!(max_abs(&buf) <= 1.0);
         }
+    }
+
+    #[test]
+    fn trace_ticks_climb_in_pitch() {
+        // Same single-note shape per step, only freq rises — so a later step
+        // must show more zero-crossings. Steps past the ladder clamp.
+        let lo = trace_tick(0);
+        let hi = trace_tick(TRACE_TICK_STEPS - 1);
+        assert_eq!(lo.len(), hi.len(), "tick length must not vary with step");
+        assert!(zero_crossings(&hi) > zero_crossings(&lo));
+        assert_eq!(trace_tick(TRACE_TICK_STEPS - 1), trace_tick(TRACE_TICK_STEPS + 5));
+    }
+
+    #[test]
+    fn hammer_is_two_knocks() {
+        // Second knock starts 0.13, dur 0.10 -> ends 0.23 s.
+        let buf = hammer();
+        let expected = ((0.23f32 * SAMPLE_RATE as f32).ceil() as usize) + 1;
+        assert_eq!(buf.len(), expected);
+        assert!(max_abs(&buf) > 0.0, "hammer must produce sound");
     }
 
     #[test]
