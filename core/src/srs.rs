@@ -1,7 +1,10 @@
-//! Phonics SRS — the heart of the game. A Leitner spaced-repetition system
-//! plus a Jolly-Phonics drip-in gate that controls which letters are active.
+//! Per-letter Leitner SRS — a spaced-repetition system plus a drip-in gate
+//! that controls which letters are active. Shared by phonics (over
+//! `deck::INTRO_ORDER`, Jolly Phonics) and tracing (over `tracing::ORDER`,
+//! motor-skill groups): the order-dependent functions take the introduction
+//! order as a parameter.
 //!
-//! Persistent model (`PhonicsState`) is the ONLY thing saved/synced. JSON key
+//! Persistent model (`LeitnerState`) is the ONLY thing saved/synced. JSON key
 //! names + numeric constants are load-bearing: they must match the existing TS
 //! clients byte-for-byte so save files and cross-device sync interoperate.
 //!
@@ -12,7 +15,7 @@ use std::collections::HashMap;
 
 use nanoserde::{DeJson, SerJson};
 
-use crate::deck::{INTRO_ORDER, LETTERS};
+use crate::deck::LETTERS;
 use crate::rng::Mulberry32;
 
 // --- Constants (load-bearing) ----------------------------------------------
@@ -51,10 +54,11 @@ pub struct LetterState {
     pub last_seen: i64,
 }
 
-/// The full persisted phonics state. JSON keys: `schemaVersion`, `version`,
-/// `letters` (a map keyed by the single-character lowercase letter string).
+/// The full persisted per-game Leitner state. JSON keys: `schemaVersion`,
+/// `version`, `letters` (a map keyed by the single-character lowercase letter
+/// string).
 #[derive(Clone, Debug, PartialEq, Eq, SerJson, DeJson)]
-pub struct PhonicsState {
+pub struct LeitnerState {
     #[nserde(rename = "schemaVersion")]
     pub schema_version: u32,
     /// Monotonic counter, +1 on every mutating grade.
@@ -66,8 +70,8 @@ pub struct PhonicsState {
 }
 
 /// Fresh / empty state: `{ schemaVersion: 1, version: 0, letters: {} }`.
-pub fn empty_state() -> PhonicsState {
-    PhonicsState {
+pub fn empty_state() -> LeitnerState {
+    LeitnerState {
         schema_version: SCHEMA_VERSION,
         version: 0,
         letters: HashMap::new(),
@@ -79,7 +83,7 @@ pub fn empty_state() -> PhonicsState {
 ///
 /// Called right after load and after every remote merge so a loaded state
 /// always has all 26 letters with at least a box-0 default.
-pub fn ensure_letters(state: &mut PhonicsState, now: i64) {
+pub fn ensure_letters(state: &mut LeitnerState, now: i64) {
     for &c in LETTERS.iter() {
         let key = c.to_string();
         state.letters.entry(key).or_insert(LetterState {
@@ -130,7 +134,7 @@ pub fn missed(ls: &mut LetterState, now: i64) {
 
 /// Grade a letter correct on the whole state, bumping `version`. No-op (no
 /// version bump) if the letter isn't in the map. Convenience over `got_it`.
-pub fn grade_got_it(state: &mut PhonicsState, letter: char, now: i64) {
+pub fn grade_got_it(state: &mut LeitnerState, letter: char, now: i64) {
     if let Some(ls) = state.letters.get_mut(&letter.to_string()) {
         got_it(ls, now);
         state.version += 1;
@@ -139,14 +143,14 @@ pub fn grade_got_it(state: &mut PhonicsState, letter: char, now: i64) {
 
 /// Grade a letter missed on the whole state, bumping `version`. No-op (no
 /// version bump) if the letter isn't in the map. Convenience over `missed`.
-pub fn grade_missed(state: &mut PhonicsState, letter: char, now: i64) {
+pub fn grade_missed(state: &mut LeitnerState, letter: char, now: i64) {
     if let Some(ls) = state.letters.get_mut(&letter.to_string()) {
         missed(ls, now);
         state.version += 1;
     }
 }
 
-/// Validate a raw JSON blob into a `PhonicsState`. Returns `None` (→ caller
+/// Validate a raw JSON blob into a `LeitnerState`. Returns `None` (→ caller
 /// falls back to `empty_state`) unless ALL hold:
 /// - parses as an object,
 /// - `schemaVersion == SCHEMA_VERSION` (1),
@@ -156,15 +160,15 @@ pub fn grade_missed(state: &mut PhonicsState, letter: char, now: i64) {
 /// On success keeps only `{ schemaVersion, version, letters }` (any extra
 /// fields are dropped) and the per-letter fields verbatim (no coercion beyond
 /// what the typed deserialize already enforces).
-pub fn validate(json: &str) -> Option<PhonicsState> {
+pub fn validate(json: &str) -> Option<LeitnerState> {
     // nanoserde's typed deserialize already enforces: object shape, that
     // `version` is numeric (u64), and that `letters` is an object of
     // `LetterState`. A missing/malformed field fails → None.
-    let state = PhonicsState::deserialize_json(json).ok()?;
+    let state = LeitnerState::deserialize_json(json).ok()?;
     if state.schema_version != SCHEMA_VERSION {
         return None;
     }
-    Some(PhonicsState {
+    Some(LeitnerState {
         schema_version: SCHEMA_VERSION,
         version: state.version,
         letters: state.letters,
@@ -178,7 +182,7 @@ pub fn validate(json: &str) -> Option<PhonicsState> {
 ///
 /// `now` is used by the trailing `ensure_letters` for any letter present in
 /// neither side.
-pub fn merge(local: &PhonicsState, remote: &PhonicsState, now: i64) -> PhonicsState {
+pub fn merge(local: &LeitnerState, remote: &LeitnerState, now: i64) -> LeitnerState {
     let mut letters: HashMap<String, LetterState> = local.letters.clone();
     for (key, r) in remote.letters.iter() {
         match letters.get(key) {
@@ -194,7 +198,7 @@ pub fn merge(local: &PhonicsState, remote: &PhonicsState, now: i64) -> PhonicsSt
             }
         }
     }
-    let mut merged = PhonicsState {
+    let mut merged = LeitnerState {
         schema_version: SCHEMA_VERSION,
         version: local.version.max(remote.version),
         letters,
@@ -206,7 +210,7 @@ pub fn merge(local: &PhonicsState, remote: &PhonicsState, now: i64) -> PhonicsSt
 // --- Active set (drip-in gate) ---------------------------------------------
 
 /// Box for `letter` in `state`, defaulting to 0 if absent.
-fn box_of(state: &PhonicsState, letter: char) -> u8 {
+fn box_of(state: &LeitnerState, letter: char) -> u8 {
     state
         .letters
         .get(&letter.to_string())
@@ -216,7 +220,7 @@ fn box_of(state: &PhonicsState, letter: char) -> u8 {
 
 /// The letters eligible to be queued right now (the drip-in frontier).
 ///
-/// Walk `INTRO_ORDER` from the start, gathering letters until the frontier is
+/// Walk `order` from the start, gathering letters until the frontier is
 /// hit, then STOP. A letter counts as "unsettled" (a consumed buffer slot)
 /// while its box < `INTRODUCED_BOX_MIN`. Once `NEW_LETTER_BUFFER` unsettled
 /// letters are active, the frontier is reached and the loop breaks.
@@ -224,15 +228,16 @@ fn box_of(state: &PhonicsState, letter: char) -> u8 {
 /// CRITICAL: the `break` gates BOTH branches (introduced AND new). Letters
 /// *beyond* the frontier — even ones already at box >= 1 from a legacy /
 /// out-of-order state — are PARKED: their box is retained but they are not
-/// queued until the kid drips far enough down `INTRO_ORDER` to reach them.
+/// queued until the kid drips far enough down `order` to reach them.
 /// (If the gate only counted box-0 letters, a tail polluted to box >= 1 would
 /// leak the entire tail, since no box-0 letter would remain to stop on.)
 ///
-/// Fresh learner (all box 0) → first 3 INTRO_ORDER letters = `s, a, t`.
-pub fn active_letters(state: &PhonicsState) -> Vec<char> {
+/// Fresh learner (all box 0) → the first 3 letters of `order` (phonics:
+/// `s, a, t`; tracing: `c, a, d`).
+pub fn active_letters(state: &LeitnerState, order: &[char]) -> Vec<char> {
     let mut active = Vec::new();
     let mut unsettled = 0usize;
-    for &letter in INTRO_ORDER.iter() {
+    for &letter in order.iter() {
         if unsettled >= NEW_LETTER_BUFFER {
             break; // frontier reached — stop (gates both branches)
         }
@@ -249,7 +254,7 @@ pub fn active_letters(state: &PhonicsState) -> Vec<char> {
 /// Build the play queue: a permutation of currently-active letters.
 ///
 /// ```text
-/// active = activeLetters(state).filter(present in state.letters)
+/// active = activeLetters(state, order).filter(present in state.letters)
 /// due    = active.filter(due <= now)
 /// if !due.is_empty():  return shuffle(due)             // due-preferred
 /// else:                shuffle(active); stable-sort by box asc; return
@@ -263,8 +268,13 @@ pub fn active_letters(state: &PhonicsState) -> Vec<char> {
 ///   ascending → weaker letters first, within-box order stays shuffled.
 /// - Avoiding the same letter twice in a row across rebuilds is the caller's
 ///   job (`avoid_repeat`), not this function's.
-pub fn build_queue(state: &PhonicsState, now: i64, rng: &mut Mulberry32) -> Vec<char> {
-    let active: Vec<char> = active_letters(state)
+pub fn build_queue(
+    state: &LeitnerState,
+    order: &[char],
+    now: i64,
+    rng: &mut Mulberry32,
+) -> Vec<char> {
+    let active: Vec<char> = active_letters(state, order)
         .into_iter()
         .filter(|l| state.letters.contains_key(&l.to_string()))
         .collect();
@@ -321,6 +331,7 @@ pub fn avoid_repeat(queue: &mut Vec<char>, last_letter: Option<char>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deck::INTRO_ORDER;
 
     fn ls(box_: u8, due: i64, last_seen: i64) -> LetterState {
         LetterState {
@@ -330,7 +341,7 @@ mod tests {
         }
     }
 
-    fn fresh(now: i64) -> PhonicsState {
+    fn fresh(now: i64) -> LeitnerState {
         let mut s = empty_state();
         ensure_letters(&mut s, now);
         s
@@ -447,7 +458,7 @@ mod tests {
     #[test]
     fn fresh_learner_active_is_s_a_t() {
         let s = fresh(0);
-        assert_eq!(active_letters(&s), vec!['s', 'a', 't']);
+        assert_eq!(active_letters(&s, &INTRO_ORDER), vec!['s', 'a', 't']);
     }
 
     #[test]
@@ -459,7 +470,7 @@ mod tests {
         // Now s is settled; the gate should reach the 4th INTRO letter 'i'.
         // active walks: s(box1,settled) a(0) t(0) i(0) -> after pushing i,
         // unsettled hits 3 and the next iteration breaks.
-        assert_eq!(active_letters(&s), vec!['s', 'a', 't', 'i']);
+        assert_eq!(active_letters(&s, &INTRO_ORDER), vec!['s', 'a', 't', 'i']);
     }
 
     #[test]
@@ -470,7 +481,7 @@ mod tests {
             grade_got_it(&mut s, l, now);
         }
         // s,a,t all box1 (settled). Unsettled budget refills with i,p,n.
-        assert_eq!(active_letters(&s), vec!['s', 'a', 't', 'i', 'p', 'n']);
+        assert_eq!(active_letters(&s, &INTRO_ORDER), vec!['s', 'a', 't', 'i', 'p', 'n']);
     }
 
     #[test]
@@ -484,7 +495,7 @@ mod tests {
         for c in ['i', 'h', 'm'] {
             s.letters.get_mut(&c.to_string()).unwrap().box_ = 0;
         }
-        let active = active_letters(&s);
+        let active = active_letters(&s, &INTRO_ORDER);
         // INTRO_ORDER[0..=index_of('m')] = s,a,t,i,p,n,c,k,e,h,r,m
         assert_eq!(
             active,
@@ -506,7 +517,7 @@ mod tests {
         let now = 1000;
         let s = fresh(now); // all due == now <= now => all due
         let mut rng = Mulberry32::new(1);
-        let mut q = build_queue(&s, now, &mut rng);
+        let mut q = build_queue(&s, &INTRO_ORDER, now, &mut rng);
         q.sort_unstable();
         assert_eq!(q, vec!['a', 's', 't']);
     }
@@ -520,7 +531,7 @@ mod tests {
         s.letters.get_mut("a").unwrap().due = now + 10_000;
         s.letters.get_mut("t").unwrap().due = now - 1;
         let mut rng = Mulberry32::new(3);
-        let q = build_queue(&s, now, &mut rng);
+        let q = build_queue(&s, &INTRO_ORDER, now, &mut rng);
         assert_eq!(q, vec!['t']); // only the due one
     }
 
@@ -538,9 +549,9 @@ mod tests {
         s.letters.get_mut("a").unwrap().box_ = 0;
         s.letters.get_mut("t").unwrap().box_ = 1;
         let mut rng = Mulberry32::new(9);
-        let q = build_queue(&s, now, &mut rng);
+        let q = build_queue(&s, &INTRO_ORDER, now, &mut rng);
         // Fallback returns all active letters, stable-sorted by box ascending.
-        let mut active = active_letters(&s);
+        let mut active = active_letters(&s, &INTRO_ORDER);
         active.sort_unstable();
         let mut got = q.clone();
         got.sort_unstable();
@@ -567,7 +578,7 @@ mod tests {
         let mut firsts = std::collections::HashSet::new();
         for seed in 0..8u32 {
             let mut rng = Mulberry32::new(seed.wrapping_mul(2654435761).wrapping_add(1));
-            let q = build_queue(&s, now, &mut rng);
+            let q = build_queue(&s, &INTRO_ORDER, now, &mut rng);
             firsts.insert(q[0]);
         }
         assert!(
@@ -618,7 +629,7 @@ mod tests {
         let s = fresh(now); // s,a,t all due
         for seed in 0..40u32 {
             let mut rng = Mulberry32::new(seed.wrapping_add(7));
-            let mut q = build_queue(&s, now, &mut rng);
+            let mut q = build_queue(&s, &INTRO_ORDER, now, &mut rng);
             let last = Some('s');
             avoid_repeat(&mut q, last);
             assert_ne!(q[0], 's', "seed {seed} led with the just-shown letter");
@@ -682,7 +693,7 @@ mod tests {
         assert!(out.contains("\"lastSeen\":900"), "got: {out}");
         assert!(out.contains("\"schemaVersion\":1"));
         // Round-trips.
-        let back = PhonicsState::deserialize_json(&out).unwrap();
+        let back = LeitnerState::deserialize_json(&out).unwrap();
         assert_eq!(back, s);
     }
 

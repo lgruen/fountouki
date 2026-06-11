@@ -25,8 +25,9 @@ ios/ android/  optional native build scaffolds + READMEs.
 ```
 
 ### `core/` modules (pure, testable)
-- `srs` — phonics Leitner SRS: boxes 0–4, intervals, INTRO_ORDER frontier gate,
-  `merge` (last-seen-wins), validate/ensure_letters, `build_queue`.
+- `srs` — shared per-letter Leitner SRS (phonics + tracing): boxes 0–4,
+  intervals, frontier gate over a caller-supplied intro order, `merge`
+  (last-seen-wins), validate/ensure_letters, `build_queue`.
 - `patterns` — round generation: levels, period scaling, choice rules, the
   `mulberry32` RNG (consumption order matters for reproducibility).
 - `themes` — the 9 theme item pools (`Item::Glyph`/`Item::Shape`), `ThemeChoice`.
@@ -41,8 +42,9 @@ ios/ android/  optional native build scaffolds + READMEs.
 - `tracing` — letter-tracing stroke data + progress logic: per-letter pen
   centerlines baked from VicModernCursive by `tools/trace_extract/extract.py`
   (chart-accurate stroke order; macroquad can't read glyph outlines at
-  runtime), corridor-follow `advance_progress`, teaching `ORDER`, persisted
-  next-letter state.
+  runtime), corridor-follow `advance_progress`, and the motor-skill teaching
+  `ORDER` driving the shared Leitner SRS (persisted + synced `LeitnerState`,
+  migrated from the legacy next-letter blob).
 
 ### `app/` modules (rendering)
 - Engine: `palette` `text` (cursive + UI font) `draw` (vector primitives,

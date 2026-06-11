@@ -264,10 +264,11 @@ async fn main() {
             }
             "picker" => Box::new(PickerScene::new(db.clone())),
             "tracing" => {
-                // Mid-trace of the first letter: guides, faded glyph, laid ink,
-                // breadcrumbs, pen marker and the red end dot all visible.
+                // Mid-trace of 'c' (pinned — the SRS queue is shuffled): guides,
+                // faded glyph, laid ink, breadcrumbs, pen marker, red end dot.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = TracingScene::new(db.clone(), 7, now);
+                sc.debug_set_letter('c');
                 sc.skip_watch();
                 for i in 0..=20 {
                     let ptr = drag(sc.stroke_point_px(&frame, 0.45 * i as f32 / 20.0));
@@ -280,6 +281,7 @@ async fn main() {
                 // The animated stroke-order demo, caught mid-stroke.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = TracingScene::new(db.clone(), 7, now);
+                sc.debug_set_letter('c');
                 let idle = Pointer::default();
                 for _ in 0..12 {
                     let ctx = Ctx { dt: 0.075, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
@@ -298,6 +300,23 @@ async fn main() {
                     let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
+                Box::new(sc)
+            }
+            "tracing-grade" => {
+                // A finished 'c' awaiting the parent's ✓/✗ under the card.
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = TracingScene::new(db.clone(), 7, now);
+                sc.debug_set_letter('c');
+                sc.skip_watch();
+                for i in 0..=40 {
+                    let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
+                    let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                // Settle through the reward beat into the grade phase.
+                let idle = Pointer::default();
+                let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
                 Box::new(sc)
             }
             "tracing-done" => {
@@ -658,8 +677,9 @@ async fn main() {
                 fails += 1;
             }
         }
-        // tracing: drag along every stroke of every session letter; the session
-        // completes, stars climb monotonically, and progression persists.
+        // tracing: drag along every stroke of every session letter and grade
+        // each one ✓; the session completes, stars climb monotonically, and the
+        // Leitner state persists (every ✓-graded letter promoted to box >= 1).
         {
             let db = Db::mem();
             let mut sc = TracingScene::new(db.clone(), 7, now);
@@ -678,8 +698,10 @@ async fn main() {
             sc.update(&ctx);
             let errorless = sc.stroke_index() == 0 && sc.stars == 0;
 
-            // Trace all SESSION_GOAL letters stroke by stroke, like a finger.
+            // Trace all SESSION_GOAL letters stroke by stroke, like a finger,
+            // with the parent tapping ✓ after each reward beat.
             let goal = fountouki_core::tracing::SESSION_GOAL as u32;
+            let mut graded_each_time = true;
             'session: for _ in 0..goal {
                 sc.skip_watch();
                 let mut guard = 0;
@@ -691,8 +713,12 @@ async fn main() {
                     }
                     guard += 1;
                 }
-                // Settle through the reward beat to the next letter / done.
+                // Settle through the reward beat into the parent grade.
                 let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                graded_each_time &= sc.in_grade();
+                let ptr = tap(sc.got_center(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
                 if sc.is_done() {
                     break 'session;
@@ -700,13 +726,20 @@ async fn main() {
             }
             let persisted = {
                 let kv = db.borrow_kv();
-                fountouki_core::tracing::load(&**kv).next
+                let st = fountouki_core::tracing::load(&**kv, now);
+                st.letters.values().filter(|ls| ls.box_ >= 1).count() as u32
             };
-            if skipped && errorless && sc.is_done() && sc.stars == goal && persisted == goal {
+            if skipped
+                && errorless
+                && graded_each_time
+                && sc.is_done()
+                && sc.stars == goal
+                && persisted == goal
+            {
                 println!("PASS tracing-session");
             } else {
                 println!(
-                    "FAIL tracing-session (skipped={skipped}, errorless={errorless}, done={}, stars={}, persisted={persisted})",
+                    "FAIL tracing-session (skipped={skipped}, errorless={errorless}, graded={graded_each_time}, done={}, stars={}, persisted={persisted})",
                     sc.is_done(),
                     sc.stars
                 );
@@ -746,6 +779,39 @@ async fn main() {
                 println!("PASS tracing-dot-letter");
             } else {
                 println!("FAIL tracing-dot-letter (stars={}, letter={})", sc.stars, sc.current_letter());
+                fails += 1;
+            }
+        }
+        // tracing: the parent's ✗ keeps the kid's star (monotonic) but holds
+        // the letter's Leitner box down, and the session moves on to a
+        // different letter.
+        {
+            let mut sc = TracingScene::new(Db::mem(), 7, now);
+            let idle = Pointer::default();
+            sc.debug_set_letter('c');
+            sc.skip_watch();
+            for i in 0..=40 {
+                let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
+                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let graded = sc.in_grade();
+            let ptr = tap(sc.miss_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let moved_on = !sc.is_done() && sc.in_watch() && sc.current_letter() != 'c';
+            if graded && sc.stars == 1 && sc.letter_box('c') == 0 && moved_on {
+                println!("PASS tracing-grade-miss");
+            } else {
+                println!(
+                    "FAIL tracing-grade-miss (graded={graded}, stars={}, box={}, letter={}, watch={})",
+                    sc.stars,
+                    sc.letter_box('c'),
+                    sc.current_letter(),
+                    sc.in_watch()
+                );
                 fails += 1;
             }
         }

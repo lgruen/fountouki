@@ -9,8 +9,12 @@
 //!
 //! Tracing is errorless coaching, not pass/fail: progress only ever moves
 //! forward along the path, a wandering finger simply stops advancing, and
-//! the teaching lives in the animated demo + start/end dots.
+//! the teaching lives in the animated demo + start/end dots. Which letters
+//! come up is driven by the shared Leitner SRS (`crate::srs`) over the
+//! motor-skill `ORDER`; the parent grades each finished trace ✓/✗ (scheduling
+//! only — the kid always gets the star).
 
+use crate::srs;
 use crate::storage::KeyValueStore;
 use nanoserde::{DeJson, SerJson};
 
@@ -123,12 +127,13 @@ fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
     ((a.0 - b.0) * (a.0 - b.0) + (a.1 - b.1) * (a.1 - b.1)).sqrt()
 }
 
-// --- teaching order + persisted progression ---------------------------------
+// --- teaching order + persisted Leitner progression --------------------------
 
 /// Lowercase teaching order, grouped by stroke family (anticlockwise "magic c"
 /// letters first, then straight-down letters, then down + hump, then the
 /// trickier diagonals) — easiest motor patterns first, à la HWT, adapted to
-/// VMC's lowercase-first curriculum.
+/// VMC's lowercase-first curriculum. This is the SRS drip-in order (tracing's
+/// counterpart of phonics' `deck::INTRO_ORDER`).
 pub const ORDER: [char; 26] = [
     'c', 'a', 'd', 'o', 'g', 'q', 'e', 's', // magic-c family
     'l', 'i', 't', 'u', 'j', 'y', // big/little lines down
@@ -139,52 +144,81 @@ pub const ORDER: [char; 26] = [
 /// Letters traced per session (~5 minutes at a preschool pace).
 pub const SESSION_GOAL: usize = 5;
 
-pub const SCHEMA_VERSION: u32 = 1;
+/// Which letters the SRS allows right now (drip-in frontier over `ORDER`).
+/// Fresh learner → `c, a, d`.
+pub fn active_letters(state: &srs::LeitnerState) -> Vec<char> {
+    srs::active_letters(state, &ORDER)
+}
 
-/// Persisted progression: how far through `ORDER` the drip-in has reached.
-/// Scores/stars stay session-only (never persisted), like every game here.
+/// Due-preferred shuffled play queue over the active letters (see
+/// `srs::build_queue`). The scene rebuilds it whenever it runs out.
+pub fn build_queue(
+    state: &srs::LeitnerState,
+    now: i64,
+    rng: &mut crate::rng::Mulberry32,
+) -> Vec<char> {
+    srs::build_queue(state, &ORDER, now, rng)
+}
+
+/// The legacy persisted progression (pre-Leitner): an index into `ORDER` of
+/// the next letter to introduce. Only kept so `load` can migrate it.
 #[derive(Clone, Debug, PartialEq, Eq, SerJson, DeJson)]
-pub struct TracingState {
-    pub schema_version: u32,
-    /// Index into `ORDER` of the next letter to introduce.
-    pub next: u32,
+struct LegacyState {
+    schema_version: u32,
+    next: u32,
 }
 
-pub fn empty_state() -> TracingState {
-    TracingState { schema_version: SCHEMA_VERSION, next: 0 }
-}
-
-pub fn validate(json: &str) -> Option<TracingState> {
-    let st: TracingState = DeJson::deserialize_json(json).ok()?;
-    if st.schema_version != SCHEMA_VERSION {
+/// Seed a Leitner state from the legacy linear progression: every letter the
+/// kid had already reached (`ORDER[0..next]`) starts introduced (box 1) and
+/// immediately due, so the first Leitner session reviews exactly what they
+/// knew. `lastSeen = now` marks them seen (parent view + merge priority).
+fn migrate_legacy(json: &str, now: i64) -> Option<srs::LeitnerState> {
+    let legacy: LegacyState = DeJson::deserialize_json(json).ok()?;
+    if legacy.schema_version != 1 {
         return None;
     }
-    Some(TracingState { next: st.next.min(ORDER.len() as u32 - 1), ..st })
+    let mut st = srs::empty_state();
+    srs::ensure_letters(&mut st, now);
+    let n = (legacy.next as usize).min(ORDER.len());
+    for &c in &ORDER[..n] {
+        if let Some(ls) = st.letters.get_mut(&c.to_string()) {
+            ls.box_ = 1;
+            ls.due = now;
+            ls.last_seen = now;
+        }
+    }
+    st.version = n as u64;
+    Some(st)
 }
 
-pub fn load<S: KeyValueStore + ?Sized>(store: &S) -> TracingState {
-    store
+/// Load the tracing Leitner state: current schema first, then the legacy
+/// `{schema_version, next}` blob (migrated in place on the next save), else
+/// fresh. Always returns a fully-populated 26-letter state.
+pub fn load<S: KeyValueStore + ?Sized>(store: &S, now: i64) -> srs::LeitnerState {
+    let mut st = store
         .get(&crate::storage::ns_key("tracing", "state"))
-        .and_then(|raw| validate(&raw))
-        .unwrap_or_else(empty_state)
+        .and_then(|raw| srs::validate(&raw).or_else(|| migrate_legacy(&raw, now)))
+        .unwrap_or_else(srs::empty_state);
+    srs::ensure_letters(&mut st, now);
+    st
 }
 
-pub fn save<S: KeyValueStore + ?Sized>(store: &mut S, st: &TracingState) {
+pub fn save<S: KeyValueStore + ?Sized>(store: &mut S, st: &srs::LeitnerState) {
     store.set(&crate::storage::ns_key("tracing", "state"), &st.serialize_json());
 }
 
-/// The letters for one session: `SESSION_GOAL` consecutive letters of `ORDER`
-/// starting at `next`, wrapping back to the start once the alphabet is done
-/// (steady review pass — generous repetition over novelty).
-pub fn session_queue(st: &TracingState) -> Vec<char> {
-    (0..SESSION_GOAL)
-        .map(|i| ORDER[(st.next as usize + i) % ORDER.len()])
-        .collect()
-}
-
-/// Advance the progression after a letter is completed.
-pub fn letter_completed(st: &mut TracingState) {
-    st.next = (st.next + 1) % ORDER.len() as u32;
+/// Start-over state: every letter back to box 0 and due now, but with
+/// `lastSeen = now` (not 0) and a bumped version — so a parent's reset beats
+/// the pre-reset entries in the last-seen-wins sync merge instead of being
+/// resurrected by the first pull.
+pub fn start_over(st: &srs::LeitnerState, now: i64) -> srs::LeitnerState {
+    let mut fresh = srs::empty_state();
+    srs::ensure_letters(&mut fresh, now);
+    for ls in fresh.letters.values_mut() {
+        ls.last_seen = now;
+    }
+    fresh.version = st.version + 1;
+    fresh
 }
 
 #[cfg(test)]
@@ -285,28 +319,89 @@ mod tests {
         }
     }
 
+    use crate::storage::MemStore;
+
     #[test]
-    fn state_roundtrip_and_validation() {
-        let mut st = empty_state();
-        assert_eq!(session_queue(&st), vec!['c', 'a', 'd', 'o', 'g']);
-        letter_completed(&mut st);
-        assert_eq!(st.next, 1);
-        let json = st.serialize_json();
-        assert_eq!(validate(&json), Some(st.clone()));
-        // Wrong schema or garbage → None (caller falls back to empty_state).
-        assert_eq!(validate("{\"schema_version\":99,\"next\":0}"), None);
-        assert_eq!(validate("not json"), None);
-        // Out-of-range index is clamped.
-        let clamped = validate("{\"schema_version\":1,\"next\":999}").unwrap();
-        assert!((clamped.next as usize) < ORDER.len());
+    fn fresh_active_letters_are_the_magic_c_start() {
+        let now = 1000;
+        let mut st = srs::empty_state();
+        srs::ensure_letters(&mut st, now);
+        assert_eq!(active_letters(&st), vec!['c', 'a', 'd']);
+        // Fresh learner: everything due → the queue is a permutation of them.
+        let mut rng = crate::rng::Mulberry32::new(7);
+        let mut q = build_queue(&st, now, &mut rng);
+        q.sort_unstable();
+        assert_eq!(q, vec!['a', 'c', 'd']);
     }
 
     #[test]
-    fn session_queue_wraps() {
-        let st = TracingState { schema_version: SCHEMA_VERSION, next: 24 };
-        let q = session_queue(&st);
-        assert_eq!(q.len(), SESSION_GOAL);
-        assert_eq!(q[0], ORDER[24]);
-        assert_eq!(q[2], ORDER[0]);
+    fn promotion_unlocks_down_the_motor_order() {
+        let now = 1000;
+        let mut st = srs::empty_state();
+        srs::ensure_letters(&mut st, now);
+        for c in ['c', 'a', 'd'] {
+            srs::grade_got_it(&mut st, c, now);
+        }
+        // c,a,d settled → the buffer refills with o,g,q.
+        assert_eq!(active_letters(&st), vec!['c', 'a', 'd', 'o', 'g', 'q']);
+    }
+
+    #[test]
+    fn load_migrates_the_legacy_progression() {
+        let now = 5_000;
+        let mut store = MemStore::new();
+        store.set(
+            &crate::storage::ns_key("tracing", "state"),
+            "{\"schema_version\":1,\"next\":5}",
+        );
+        let st = load(&store, now);
+        // The 5 reached letters start introduced (box 1, due now, seen now)...
+        for &c in &ORDER[..5] {
+            let ls = st.letters.get(&c.to_string()).unwrap();
+            assert_eq!((ls.box_, ls.due, ls.last_seen), (1, now, now), "{c}");
+        }
+        // ...the rest are fresh box-0.
+        for &c in &ORDER[5..] {
+            let ls = st.letters.get(&c.to_string()).unwrap();
+            assert_eq!((ls.box_, ls.last_seen), (0, 0), "{c}");
+        }
+        assert_eq!(st.version, 5);
+        // Migrated progress resumes mid-order: q is the next new letter.
+        assert_eq!(active_letters(&st), ORDER[..8].to_vec());
+    }
+
+    #[test]
+    fn load_falls_back_to_fresh_and_roundtrips() {
+        let now = 77;
+        let mut store = MemStore::new();
+        // Nothing stored / garbage → fresh fully-populated state.
+        let st = load(&store, now);
+        assert_eq!(st.letters.len(), 26);
+        assert_eq!(st.version, 0);
+        store.set(&crate::storage::ns_key("tracing", "state"), "not json");
+        assert_eq!(load(&store, now).version, 0);
+        // Save → load roundtrips the current schema.
+        let mut st = st;
+        srs::grade_got_it(&mut st, 'c', now);
+        save(&mut store, &st);
+        assert_eq!(load(&store, now), st);
+    }
+
+    #[test]
+    fn start_over_zeroes_boxes_but_wins_merges() {
+        let now = 9_000;
+        let mut st = srs::empty_state();
+        srs::ensure_letters(&mut st, 100);
+        for c in ['c', 'a', 'd'] {
+            srs::grade_got_it(&mut st, c, 100);
+        }
+        let reset = start_over(&st, now);
+        assert_eq!(reset.version, st.version + 1);
+        for ls in reset.letters.values() {
+            assert_eq!((ls.box_, ls.due, ls.last_seen), (0, now, now));
+        }
+        // A pre-reset remote (older lastSeen) must NOT resurrect progress.
+        let merged = srs::merge(&reset, &st, now);
+        assert!(merged.letters.values().all(|ls| ls.box_ == 0));
     }
 }

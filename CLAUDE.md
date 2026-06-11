@@ -37,7 +37,7 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 - `--capture <png> <scene> [w] [h]` — render a scene offscreen to a PNG.
   Scenes: `picker phonics phonics-miss phonics-miss-igloo phonics-done patterns
   patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done
-  tracing tracing-watch tracing-two-stroke tracing-done parent-patterns
+  tracing tracing-watch tracing-two-stroke tracing-grade tracing-done parent-patterns
   parent-phonics parent-tracing`.
 - `--playtest` — scripted taps drive the real scenes + assert invariants; exits
   non-zero on failure.
@@ -108,9 +108,9 @@ minimal. The constraints below remove *noise around the target*, not the joy.
 ## Parent menu (long-press ←)
 - Long-press the in-game ← (500 ms) opens the parent settings overlay
   (`app/src/parent.rs`): universal sync token/endpoint + a per-game section
-  (patterns theme/difficulty/mode/hint cyclers + start-over; phonics read-only
-  mastery grid; tracing next-letter progress + start-over). No visible chrome /
-  no topbar gear.
+  (patterns theme/difficulty/mode/hint cyclers + start-over; phonics + tracing
+  read-only mastery grids; tracing start-over). No visible chrome / no topbar
+  gear.
 
 ## Settings + storage + sync
 - Mute is shared (one toggle). Per-game settings under
@@ -118,7 +118,7 @@ minimal. The constraints below remove *noise around the target*, not the joy.
 - Scores/streak/level are session-only — never persisted.
 - Sync: one family token; `core::sync` defines the protocol + merge
   (last-seen-wins). Transport is `app/src/net.rs` (poll-based `quad-net` HTTP):
-  phonics pulls+merges on mount, debounce-pushes on grade, flushes on leave. The
+  phonics + tracing pull+merge on mount, debounce-push on grade, flush on leave. The
   WASM build loads `web/sapp_jsutils.js` + `web/quad-net.js` before `load()`.
 
 ## No personal details in commits

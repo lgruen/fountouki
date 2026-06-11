@@ -51,9 +51,8 @@ pub struct ParentPanel {
     ptn: PatternsSettings,
     ptn_dirty: bool,
     start_over: bool,
+    /// Read-only Leitner mastery summary (phonics + tracing).
     mastery: Option<Mastery>,
-    /// Tracing progression (next-letter index), shown read-only + resettable.
-    tracing: Option<fountouki_core::tracing::TracingState>,
     seed: u32,
     /// Pixels the body content is scrolled up (0 = top). Clamped to the
     /// content's overflow each frame; always 0 when everything fits.
@@ -80,14 +79,8 @@ impl ParentPanel {
             let kv = db.borrow_kv();
             settings::load_patterns(&**kv)
         };
-        let mastery = if game == "phonics" {
-            Some(compute_mastery(&db, now))
-        } else {
-            None
-        };
-        let tracing = if game == "tracing" {
-            let kv = db.borrow_kv();
-            Some(fountouki_core::tracing::load(&**kv))
+        let mastery = if game == "phonics" || game == "tracing" {
+            Some(compute_mastery(&db, game, now))
         } else {
             None
         };
@@ -101,7 +94,6 @@ impl ParentPanel {
             ptn_dirty: false,
             start_over: false,
             mastery,
-            tracing,
             seed,
             scroll: 0.0,
             drag_y: None,
@@ -246,10 +238,13 @@ impl ParentPanel {
             }
         }
         if self.game == "tracing" && in_body && hit(pt.pos, l.start_over) {
-            // Start over = restart the letter progression from the first letter.
+            // Start over = all letters back to box 0, stamped lastSeen=now so
+            // the reset wins the last-seen-wins sync merge.
             {
+                use fountouki_core::tracing as tr;
                 let mut kv = self.db.borrow_kv_mut();
-                fountouki_core::tracing::save(&mut **kv, &fountouki_core::tracing::empty_state());
+                let cur = tr::load(&**kv, ctx.now);
+                tr::save(&mut **kv, &tr::start_over(&cur, ctx.now));
             }
             self.start_over = true;
             self.apply();
@@ -282,16 +277,7 @@ impl ParentPanel {
         if let Some(m) = &self.mastery {
             draw_mastery(l.mastery, m);
         }
-        if let Some(st) = &self.tracing {
-            let order = fountouki_core::tracing::ORDER;
-            let next = order[(st.next as usize) % order.len()];
-            text::ui_left(
-                &format!("next letter: {next}   ({} of {} reached)", st.next + 1, order.len()),
-                l.mastery.x,
-                l.mastery.y + 11.0,
-                15,
-                palette::MUTED,
-            );
+        if self.game == "tracing" {
             button(l.start_over, "start over", palette::ACCENT, palette::WHITE);
         }
         // Sync section.
@@ -361,13 +347,19 @@ fn none_if_empty(s: &str) -> Option<String> {
     }
 }
 
-fn compute_mastery(db: &Db, now: i64) -> Mastery {
-    let key = fountouki_core::storage::ns_key("phonics", "state");
-    let mut st = db
-        .get(&key)
-        .and_then(|raw| srs::validate(&raw))
-        .unwrap_or_else(srs::empty_state);
-    srs::ensure_letters(&mut st, now);
+fn compute_mastery(db: &Db, game: &str, now: i64) -> Mastery {
+    let st = if game == "tracing" {
+        let kv = db.borrow_kv();
+        fountouki_core::tracing::load(&**kv, now)
+    } else {
+        let key = fountouki_core::storage::ns_key("phonics", "state");
+        let mut st = db
+            .get(&key)
+            .and_then(|raw| srs::validate(&raw))
+            .unwrap_or_else(srs::empty_state);
+        srs::ensure_letters(&mut st, now);
+        st
+    };
     let (mut mastered, mut strong, mut learning, mut new) = (0, 0, 0, 0);
     let mut boxes: Vec<(char, u8)> = Vec::new();
     for c in 'a'..='z' {
@@ -469,7 +461,7 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
     } else if game == "phonics" {
         mastery_l = block(&mut ly, 78.0);
     } else if game == "tracing" {
-        mastery_l = block(&mut ly, 26.0); // next-letter progress line
+        mastery_l = block(&mut ly, 78.0); // Leitner mastery grid, like phonics
         start_l = block(&mut ly, BTN_H);
     }
     let token_l = labeled(&mut ly);

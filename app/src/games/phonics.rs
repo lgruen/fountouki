@@ -12,7 +12,7 @@ use crate::{
 use fountouki_core::{
     deck,
     rng::Mulberry32,
-    srs::{self, PhonicsState},
+    srs::{self, LeitnerState},
     storage::ns_key,
 };
 use macroquad::prelude::*;
@@ -31,7 +31,7 @@ enum Phase {
 
 pub struct PhonicsScene {
     db: Db,
-    state: PhonicsState,
+    state: LeitnerState,
     rng: Mulberry32,
     queue: Vec<char>,
     qi: usize,
@@ -66,7 +66,7 @@ impl PhonicsScene {
             .unwrap_or_else(srs::empty_state);
         srs::ensure_letters(&mut state, now);
         let mut rng = Mulberry32::new(seed);
-        let mut queue = srs::build_queue(&state, now, &mut rng);
+        let mut queue = srs::build_queue(&state, &deck::INTRO_ORDER, now, &mut rng);
         srs::avoid_repeat(&mut queue, None);
         let sync = crate::net::SyncClient::new(db.clone(), "phonics");
         PhonicsScene {
@@ -102,7 +102,7 @@ impl PhonicsScene {
         self.hop_time = 99.0;
         // Re-roll the garden so replaying grows a fresh mix of plants.
         self.garden_seed = (self.rng.next_f64() * u32::MAX as f64) as u32 ^ 0x9e37_79b9;
-        self.queue = srs::build_queue(&self.state, now, &mut self.rng);
+        self.queue = srs::build_queue(&self.state, &deck::INTRO_ORDER, now, &mut self.rng);
         srs::avoid_repeat(&mut self.queue, self.last);
         self.qi = 0;
     }
@@ -190,7 +190,7 @@ impl PhonicsScene {
         self.last = Some(self.current());
         self.qi += 1;
         if self.qi >= self.queue.len() {
-            self.queue = srs::build_queue(&self.state, now, &mut self.rng);
+            self.queue = srs::build_queue(&self.state, &deck::INTRO_ORDER, now, &mut self.rng);
             srs::avoid_repeat(&mut self.queue, self.last);
             self.qi = 0;
         }
