@@ -19,6 +19,12 @@ Outputs:
   routes change.
 - Per-glyph `cover=` numbers on stdout (fraction of skeleton pixels the route
   passes through; < ~0.95 usually means part of a letter was skipped).
+- A `!!` warning when a glyph's mid-line reversal count differs from
+  `EXPECTED_REVERSALS`: a ~180° turn on a degree-2 skeleton pixel with no
+  wedge branch beyond it is usually a waypoint that snapped past a junction,
+  sending the pen down the wrong branch and back (a visible jerk in the
+  demo). Nudge the waypoint; only grow the expected set for a genuine
+  pen-touch reversal verified on the debug sheet.
 
 ## How it works
 
@@ -84,6 +90,11 @@ Topology gotchas the lowercase pass hit (the debug sheet makes them obvious):
   can land on the wrong branch (the original 'a' skipped its bowl because
   the "bottom" waypoint snapped to the stem). Nudge coordinates, don't add
   precision.
+- **Snap overshoot past a junction**: a waypoint meant for "just after the
+  bowl closes" that snaps a few pixels down the *next* branch makes the pen
+  run out and double back (the original d/u spikes; an 'a' that detoured
+  down its stem and traced the tail twice). The mid-line-reversal check
+  above catches this; the debug sheet often hides it under other strokes.
 
 ## Verifying
 
