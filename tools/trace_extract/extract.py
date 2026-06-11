@@ -46,11 +46,11 @@ SMOOTH_WIN = 9  # boxcar window (px samples) to de-jag the skeleton
 # Each stroke is a list of (nx, ny) waypoints (bbox-normalized, y up), or
 # the string "dot" for the dot of i/j (nearest small component).
 ROUTES = {
-    "a": [[(0.95, 0.97), (0.45, 1.0), (0.02, 0.55), (0.15, 0.1), (0.35, 0.02),
-           (0.7, 0.15), (0.86, 0.55), (0.88, 0.88), (0.86, 0.3), (1.0, 0.3)]],
+    "a": [[(0.84, 0.88), (0.45, 1.0), (0.02, 0.55), (0.15, 0.1), (0.35, 0.02),
+           (0.7, 0.15), (0.86, 0.55), (0.86, 0.86), (0.86, 0.3), (1.0, 0.3)]],
     "b": [[(0.3, 1.0), (0.2, 0.05), (0.6, 0.0), (0.95, 0.25), (0.5, 0.55)]],
     "c": [[(0.95, 0.85), (0.4, 1.0), (0.03, 0.5), (0.45, 0.02), (0.95, 0.2)]],
-    "d": [[(0.8, 0.55), (0.4, 0.62), (0.03, 0.3), (0.35, 0.02), (0.78, 0.3),
+    "d": [[(0.72, 0.47), (0.4, 0.6), (0.03, 0.3), (0.35, 0.02), (0.78, 0.3),
            (0.82, 1.0), (0.8, 0.2), (1.0, 0.2)]],
     "e": [[(0.1, 0.45), (0.6, 0.55), (0.45, 1.0), (0.05, 0.6), (0.35, 0.02),
            (0.95, 0.25)]],
@@ -58,8 +58,8 @@ ROUTES = {
         [(1.0, 1.0), (0.55, 0.97), (0.35, 0.5), (0.15, 0.02)],
         [(0.02, 0.5), (0.98, 0.57)],
     ],
-    "g": [[(0.95, 0.97), (0.45, 1.0), (0.03, 0.75), (0.45, 0.5), (0.85, 0.8),
-           (0.9, 0.95), (0.75, 0.3), (0.45, 0.02), (0.05, 0.1)]],
+    "g": [[(0.84, 0.9), (0.45, 1.0), (0.03, 0.75), (0.45, 0.5), (0.85, 0.8),
+           (0.85, 0.88), (0.75, 0.3), (0.45, 0.02), (0.05, 0.1)]],
     "h": [[(0.15, 1.0), (0.05, 0.02), (0.5, 0.6), (0.8, 0.05), (1.0, 0.15)]],
     "i": [
         [(0.4, 0.97), (0.25, 0.1), (0.95, 0.25)],
@@ -70,7 +70,7 @@ ROUTES = {
         "dot",
     ],
     "k": [[(0.3, 1.0), (0.05, 0.03), (0.3, 0.55), (0.55, 0.62), (0.45, 0.45),
-           (0.75, 0.2), (1.0, 0.1)]],
+           (0.27, 0.4), (0.75, 0.2), (1.0, 0.1)]],
     "l": [[(0.4, 1.0), (0.2, 0.1), (1.0, 0.2)]],
     "m": [[(0.02, 0.7), (0.15, 0.95), (0.12, 0.05), (0.35, 0.95), (0.5, 0.05),
            (0.75, 0.95), (0.85, 0.05), (1.0, 0.3)]],
@@ -78,10 +78,10 @@ ROUTES = {
            (1.0, 0.3)]],
     "o": [[(0.85, 0.85), (0.4, 1.0), (0.03, 0.5), (0.5, 0.02), (0.97, 0.5),
            (0.85, 0.88), (1.0, 0.92)]],
-    "p": [[(0.2, 0.85), (0.05, 0.02), (0.15, 0.45), (0.55, 0.88), (0.7, 0.4),
+    "p": [[(0.25, 0.98), (0.05, 0.02), (0.15, 0.45), (0.55, 0.88), (0.7, 0.4),
            (1.0, 0.62)]],
-    "q": [[(0.9, 0.97), (0.4, 1.0), (0.03, 0.75), (0.45, 0.5), (0.8, 0.8),
-           (0.85, 0.95), (0.75, 0.3), (1.0, 0.2)]],
+    "q": [[(0.8, 0.9), (0.4, 1.0), (0.03, 0.75), (0.45, 0.5), (0.8, 0.8),
+           (0.8, 0.88), (0.75, 0.3), (1.0, 0.2)]],
     "r": [[(0.05, 0.75), (0.2, 0.95), (0.15, 0.05), (0.3, 0.7), (0.7, 0.95),
            (1.0, 0.85)]],
     "s": [[(0.9, 0.95), (0.4, 1.0), (0.2, 0.7), (0.7, 0.4), (0.4, 0.02),
@@ -210,25 +210,92 @@ def route_stroke(sk, bbox, vias):
     return path, None
 
 
-def extend_tip(path, sk, radius, at_start):
-    """Extend a stroke tip to the visual end of the ink (skeletons stop one
-    stroke-radius short). Only applied at true skeleton endpoints."""
-    pts = path if not at_start else path[::-1]
-    tip = pts[-1]
-    deg = degree_map(sk)
-    if deg[tip] != 1:
-        return path
-    # tangent from the last few pixels
-    back = pts[max(0, len(pts) - 8)]
-    v = (tip[0] - back[0], tip[1] - back[1])
+def unit_vec(v):
     n = math.hypot(*v)
-    if n < 1e-6:
-        return path
-    r = radius[tip] * 0.85
-    ext = (tip[0] + v[0] / n * r, tip[1] + v[1] / n * r)
-    if at_start:
-        return [ext] + path
-    return path + [ext]
+    return (v[0] / n, v[1] / n) if n > 1e-9 else (0.0, 0.0)
+
+
+def ray_extend(p, d, mask, radius, frac=0.85):
+    """Walk from `p` along unit direction `d` to the edge of the ink (capped at
+    a couple of stroke radii) — recovers the tapered tips and retrace wedges the
+    skeleton stops short of. Returns the extension point, or None."""
+    cap = max(3.0, radius[int(round(p[0])), int(round(p[1]))] * 2.4)
+    steps = 0
+    while steps < cap:
+        q = (int(round(p[0] + d[0] * (steps + 1))), int(round(p[1] + d[1] * (steps + 1))))
+        if not (0 <= q[0] < mask.shape[0] and 0 <= q[1] < mask.shape[1]) or not mask[q]:
+            break
+        steps += 1
+    if steps <= 1:
+        return None
+    return (p[0] + d[0] * steps * frac, p[1] + d[1] * steps * frac)
+
+
+TURN_LOOKAHEAD = 6  # px each side when measuring the turn angle
+TURN_COS = -0.17  # sharper than ~100° counts as a pen reversal/V-turn
+
+
+def sharp_turns(path):
+    """Indices of sharp V-turns along the routed pixel path (retraces collapse
+    to these after spur pruning: m/n stem bottoms, u/y peaks, the k pinch)."""
+    k = TURN_LOOKAHEAD
+    cands = []
+    for i in range(k, len(path) - k):
+        a = unit_vec((path[i][0] - path[i - k][0], path[i][1] - path[i - k][1]))
+        b = unit_vec((path[i + k][0] - path[i][0], path[i + k][1] - path[i][1]))
+        c = a[0] * b[0] + a[1] * b[1]
+        if c < TURN_COS:
+            cands.append((c, i))
+    cands.sort()  # sharpest first; suppress neighbours
+    chosen = []
+    for _c, i in cands:
+        if all(abs(i - j) > 8 for j in chosen):
+            chosen.append(i)
+    return sorted(chosen)
+
+
+def process_stroke(path, mask, radius, sk, to_units):
+    """Split the routed path at sharp turns, extend every tip (route ends at
+    skeleton endpoints + V-turn apexes) to the visual ink boundary, then smooth
+    each segment with its ends pinned — so reversals stay sharp and reach the
+    bottom of their wedge instead of being rounded off early."""
+    k = TURN_LOOKAHEAD
+    deg = degree_map(sk)
+    turns = sharp_turns(path)
+
+    # Extension point per boundary (None where there's nothing to recover).
+    ext = {}
+    if deg[path[0]] == 1:
+        d = unit_vec((path[0][0] - path[min(8, len(path) - 1)][0],
+                      path[0][1] - path[min(8, len(path) - 1)][1]))
+        ext[0] = ray_extend(path[0], d, mask, radius)
+    last = len(path) - 1
+    if deg[path[last]] == 1:
+        d = unit_vec((path[last][0] - path[max(0, last - 8)][0],
+                      path[last][1] - path[max(0, last - 8)][1]))
+        ext[last] = ray_extend(path[last], d, mask, radius)
+    for i in turns:
+        d_in = unit_vec((path[i][0] - path[i - k][0], path[i][1] - path[i - k][1]))
+        d_out = unit_vec((path[i + k][0] - path[i][0], path[i + k][1] - path[i][1]))
+        d = unit_vec((d_in[0] - d_out[0], d_in[1] - d_out[1]))
+        ext[i] = ray_extend(path[i], d, mask, radius)
+
+    bounds = [0] + turns + [last]
+    out = []
+    for s, e in zip(bounds, bounds[1:]):
+        seg = list(path[s:e + 1])
+        if s == 0 and ext.get(0):
+            seg = [ext[0]] + seg
+        elif s in ext and ext[s]:
+            seg = [ext[s]] + seg
+        if e in ext and ext[e]:
+            seg = seg + [ext[e]]
+        pts = smooth_resample(seg, to_units, RESAMPLE_UNITS)
+        if out:
+            out.extend(pts[1:])  # joint point already present
+        else:
+            out.extend(pts)
+    return out
 
 
 def smooth_resample(path, to_units, spacing):
@@ -303,9 +370,7 @@ def main():
                 print(f"!! {ch}: no path between {fail[0]} and {fail[1]}")
                 strokes.append([])
                 continue
-            path = extend_tip(path, sk, radius, at_start=True)
-            path = extend_tip(path, sk, radius, at_start=False)
-            strokes.append(smooth_resample(path, to_units, RESAMPLE_UNITS))
+            strokes.append(process_stroke(path, body, radius, sk, to_units))
 
         # coverage: skeleton pixels near the routed strokes
         route_px = []
