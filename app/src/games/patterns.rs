@@ -6,7 +6,7 @@
 //! Unit mode (select the repeating piece) is tracked separately — this builds
 //! `next` mode first; unit mode falls back to next for now.
 use crate::{
-    draw, input,
+    chrome, draw, input,
     palette,
     scene::{Ctx, Nav, Scene},
     store::Db,
@@ -364,11 +364,7 @@ impl PatternsScene {
         draw::checker_flag(fl.flag_x, by, fl.flag_top, fl.flag_w, fl.flag_h, ctx.time);
 
         // Replay / Home (phonics-identical placement for cross-finale predictability).
-        let white = Color::new(1.0, 1.0, 1.0, 0.94);
-        draw::circle_btn(fl.replay.x, fl.replay.y, fl.btn_r, white);
-        draw::replay_icon(fl.replay.x, fl.replay.y, fl.btn_r, palette::INK);
-        draw::circle_btn(fl.home.x, fl.home.y, fl.btn_r, white);
-        draw::house_icon(fl.home.x, fl.home.y, fl.btn_r, palette::INK);
+        chrome::draw_corner_buttons(fl.replay, fl.home, fl.btn_r);
     }
 
     /// Unit mode: tap cell `i` to start / extend / shrink the contiguous range.
@@ -486,19 +482,13 @@ impl Scene for PatternsScene {
 
         let pt = ctx.pointer;
         let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1, self.mode);
-        if pt.long_fired && input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
-            return Nav::OpenParent;
+        match chrome::handle_topbar(&chrome::topbar(&ctx.frame), ctx, &self.db) {
+            Some(chrome::TopbarAction::OpenParent) => return Nav::OpenParent,
+            Some(chrome::TopbarAction::Home) => return Nav::Home,
+            Some(chrome::TopbarAction::MuteToggled) => return Nav::Stay,
+            None => {}
         }
         if !pt.tapped() {
-            return Nav::Stay;
-        }
-        if input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
-            return Nav::Home;
-        }
-        if input::hit_circle(pt.pos, p.mute.0.x, p.mute.0.y, p.mute.1) {
-            let m = !ctx.audio.muted();
-            ctx.audio.set_muted(m);
-            crate::store::persist_mute(&self.db, m);
             return Nav::Stay;
         }
         match self.mode {
@@ -538,10 +528,7 @@ impl Scene for PatternsScene {
         let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1, self.mode);
 
         // Topbar: home, stars + level pips, mute.
-        draw::circle_btn(p.home.0.x, p.home.0.y, p.home.1, palette::CARD);
-        draw::chevron_left(p.home.0.x, p.home.0.y, p.home.1 * 0.9, palette::INK);
-        draw::circle_btn(p.mute.0.x, p.mute.0.y, p.mute.1, palette::CARD);
-        draw::speaker(p.mute.0.x, p.mute.0.y, p.mute.1 * 0.9, palette::INK, ctx.audio.muted());
+        chrome::draw_topbar(&chrome::topbar(&ctx.frame), ctx);
         draw_hud(&p, self.stars, self.level);
 
         // Sequence bar.
@@ -683,8 +670,6 @@ fn draw_hud(p: &PLayout, stars: u32, level: u32) {
 // --- layout -----------------------------------------------------------------
 
 struct PLayout {
-    home: (Vec2, f32),
-    mute: (Vec2, f32),
     hud: (Vec2, f32),
     seq: Rect,
     cell: f32,
@@ -752,8 +737,6 @@ fn plan(f: &crate::layout::Frame, n_choices: usize, seq_cells: usize, mode: Game
     }
 
     PLayout {
-        home: (vec2(tb.x + ir, tb.y + ir), ir),
-        mute: (vec2(tb.x + tb.w - ir, tb.y + ir), ir),
         hud: (vec2(tb.x + 2.2 * ir, tb.y + ir), ir),
         seq,
         cell,
@@ -845,10 +828,7 @@ fn finale_layout(f: &crate::layout::Frame, car_period: usize) -> FinaleLayout {
     let sun_r = if f.is_phone() { f.vmin(0.08) } else { f.vmin(0.12) };
     let sun_c = vec2(content.x + content.w * 0.80, by - f.vmin(0.05));
 
-    let br = f.icon_btn() / 2.0 * 1.2;
-    let m = 30.0 + f.safe.bottom.max(0.0);
-    let replay = vec2(f.safe.left + 30.0 + br, f.h - m - br);
-    let home = vec2(f.w - (f.safe.right + 30.0 + br), f.h - m - br);
+    let (replay, home, br) = chrome::corner_buttons(f);
 
     FinaleLayout {
         ground_y: by,

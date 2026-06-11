@@ -6,6 +6,7 @@
 use macroquad::prelude::*;
 
 mod anim;
+mod chrome;
 mod confetti;
 mod draw;
 mod emoji;

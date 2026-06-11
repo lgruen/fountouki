@@ -3,7 +3,7 @@
 //! reveals the canonical exemplar before advancing. Logic lives in
 //! `fountouki_core::srs`; this is the rendering + interaction shell.
 use crate::{
-    draw, input,
+    chrome, draw, input,
     palette,
     scene::{Ctx, Nav, Scene},
     store::Db,
@@ -169,11 +169,7 @@ impl PhonicsScene {
             idle_pose(ctx.time)
         };
         draw::frog(frog_c.x, frog_c.y, fr, palette::RAINBOW[3], pose);
-        let white = Color::new(1.0, 1.0, 1.0, 0.94);
-        draw::circle_btn(replay.x, replay.y, br, white);
-        draw::replay_icon(replay.x, replay.y, br, palette::INK);
-        draw::circle_btn(home_b.x, home_b.y, br, white);
-        draw::house_icon(home_b.x, home_b.y, br, palette::INK);
+        chrome::draw_corner_buttons(replay, home_b, br);
     }
 
     fn current(&self) -> char {
@@ -227,12 +223,6 @@ impl PhonicsScene {
         self.sync.queue_push(&self.state.serialize_json(), ctx.now);
     }
 
-    fn toggle_mute(&self, ctx: &Ctx) {
-        let muted = !ctx.audio.muted();
-        ctx.audio.set_muted(muted);
-        crate::store::persist_mute(&self.db, muted);
-    }
-
     // Test hooks (used by --playtest).
     pub(crate) fn is_done(&self) -> bool {
         self.phase == Phase::Done
@@ -276,18 +266,16 @@ impl Scene for PhonicsScene {
         }
         let p = plan(&ctx.frame);
         let pt = ctx.pointer;
-        if pt.long_fired && input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
-            return Nav::OpenParent;
+        match chrome::handle_topbar(&chrome::topbar(&ctx.frame), ctx, &self.db) {
+            Some(chrome::TopbarAction::OpenParent) => return Nav::OpenParent,
+            Some(chrome::TopbarAction::Home) => {
+                self.sync.flush();
+                return Nav::Home;
+            }
+            Some(chrome::TopbarAction::MuteToggled) => return Nav::Stay,
+            None => {}
         }
         if !pt.tapped() {
-            return Nav::Stay;
-        }
-        if input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
-            self.sync.flush();
-            return Nav::Home;
-        }
-        if input::hit_circle(pt.pos, p.mute.0.x, p.mute.0.y, p.mute.1) {
-            self.toggle_mute(ctx);
             return Nav::Stay;
         }
         match self.phase {
@@ -318,10 +306,7 @@ impl Scene for PhonicsScene {
         let p = plan(&ctx.frame);
 
         // Topbar chrome.
-        draw::circle_btn(p.home.0.x, p.home.0.y, p.home.1, palette::CARD);
-        draw::chevron_left(p.home.0.x, p.home.0.y, p.home.1 * 0.9, palette::INK);
-        draw::circle_btn(p.mute.0.x, p.mute.0.y, p.mute.1, palette::CARD);
-        draw::speaker(p.mute.0.x, p.mute.0.y, p.mute.1 * 0.9, palette::INK, ctx.audio.muted());
+        chrome::draw_topbar(&chrome::topbar(&ctx.frame), ctx);
 
         // Rainbow (filled = stars). When done, show the full arc.
         let filled = if self.phase == Phase::Done { GOAL } else { self.stars };
@@ -407,8 +392,6 @@ impl Scene for PhonicsScene {
 }
 
 struct PLayout {
-    home: (Vec2, f32),
-    mute: (Vec2, f32),
     card: Rect,
     letter_size: u16,
     rb_cx: f32,
@@ -427,10 +410,7 @@ fn done_layout(f: &crate::layout::Frame) -> (Vec2, f32, Vec2, Vec2, f32, f32) {
     let gy = f.h * (1.0 - ground);
     let fr = f.vmin(0.11).clamp(58.0, 140.0);
     let frog_c = vec2(f.w / 2.0, gy - fr * 0.78);
-    let br = f.icon_btn() / 2.0 * 1.2;
-    let m = 30.0 + f.safe.bottom.max(0.0);
-    let replay = vec2(f.safe.left + 30.0 + br, f.h - m - br);
-    let home_b = vec2(f.w - (f.safe.right + 30.0 + br), f.h - m - br);
+    let (replay, home_b, br) = chrome::corner_buttons(f);
     (frog_c, fr, replay, home_b, br, gy)
 }
 
@@ -583,7 +563,6 @@ fn idle_pose(time: f32) -> draw::FrogPose {
 fn plan(f: &crate::layout::Frame) -> PLayout {
     let cx = f.w / 2.0;
     let tb = f.topbar();
-    let ir = f.icon_btn() / 2.0;
     let phone = f.is_phone();
 
     // On short (phone-landscape) viewports, pack from the bottom up so the
@@ -623,8 +602,6 @@ fn plan(f: &crate::layout::Frame) -> PLayout {
     let rb_scale = rb_desired.min(rb_fit);
 
     PLayout {
-        home: (vec2(tb.x + ir, tb.y + ir), ir),
-        mute: (vec2(tb.x + tb.w - ir, tb.y + ir), ir),
         card,
         letter_size: (card_h * 0.6) as u16,
         rb_cx: cx,
