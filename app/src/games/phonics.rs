@@ -227,6 +227,12 @@ impl PhonicsScene {
     pub(crate) fn is_done(&self) -> bool {
         self.phase == Phase::Done
     }
+    pub(crate) fn is_miss(&self) -> bool {
+        self.phase == Phase::Miss
+    }
+    pub(crate) fn advance_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        plan(f).advance.0
+    }
     pub(crate) fn got_center(&self, f: &crate::layout::Frame) -> Vec2 {
         plan(f).got.0
     }

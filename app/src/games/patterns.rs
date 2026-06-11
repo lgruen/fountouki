@@ -447,6 +447,13 @@ impl PatternsScene {
     pub(crate) fn replay_center(&self, f: &crate::layout::Frame) -> Vec2 {
         finale_layout(f, self.car_period).replay
     }
+    /// Unit mode: center of the submit FAB.
+    pub(crate) fn fab_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        unit_fab(f).0
+    }
+    pub(crate) fn unit_selection(&self) -> Option<(usize, usize)> {
+        self.sel
+    }
 }
 
 fn unit_fab(f: &crate::layout::Frame) -> (Vec2, f32) {
@@ -816,9 +823,20 @@ fn finale_layout(f: &crate::layout::Frame, car_period: usize) -> FinaleLayout {
     // finale's longer 4–5-cell units ride ONCE, shown big — the whole unit is the
     // payoff, and AABCD/ABCBD already repeat within a single unit.
     let reps = if period <= 3 { (max_fit / period).clamp(1, 2) } else { 1 };
-    let n_cars = if period <= max_fit { period * reps } else { max_fit };
+    // A whole unit always rides: if it doesn't fit at the comfortable minimum,
+    // shrink the cars (down to a hard floor) before ever showing a partial — a
+    // broken pattern would teach the exact misconception the game fights. The
+    // partial fallback survives only for viewports too tiny to ship.
+    let hard_min = 32.0;
+    let n_cars = if period <= max_fit {
+        period * reps
+    } else if avail / period as f32 >= pitch_of(hard_min) {
+        period
+    } else {
+        max_fit
+    };
     let pitch0 = (avail / n_cars as f32).min(pitch_of(max_h));
-    let car_h = (pitch0 / 1.18 / 1.25).clamp(min_h, max_h);
+    let car_h = (pitch0 / 1.18 / 1.25).clamp(hard_min, max_h);
     let car_w = car_h * 1.25;
     let car_pitch = car_w * 1.18;
     let seat = car_h * 0.62;
@@ -935,6 +953,27 @@ mod tests {
             // box — the leftmost car never clips off the left edge.
             let left_edge = fl.leftmost_cx - fl.car_w / 2.0;
             assert!(left_edge >= c.x - 0.5, "{w}x{h}: leftmost car {left_edge} clips content left {}", c.x);
+        }
+    }
+
+    /// The train must always carry WHOLE pattern units — a partial unit on the
+    /// cars would render a broken pattern, the exact misconception the game
+    /// fights. Every period × every shipping form factor.
+    #[test]
+    fn finale_never_shows_a_partial_unit() {
+        for (w, h) in [(1194.0, 834.0), (834.0, 1194.0), (844.0, 390.0), (812.0, 375.0)] {
+            let f = frame(w, h);
+            for period in 2..=5usize {
+                let fl = finale_layout(&f, period);
+                assert!(
+                    fl.n_cars.is_multiple_of(period),
+                    "{w}x{h} period {period}: {} cars is a partial unit",
+                    fl.n_cars
+                );
+                let left_edge = fl.leftmost_cx - fl.car_w / 2.0;
+                let c = f.content();
+                assert!(left_edge >= c.x - 0.5, "{w}x{h} period {period}: consist clips left");
+            }
         }
     }
 }

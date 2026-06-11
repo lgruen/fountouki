@@ -322,6 +322,42 @@ async fn main() {
                 fails += 1;
             }
         }
+        // phonics: a miss reveals the exemplar (errorless hint), scores nothing,
+        // and the → arrow advances back to a fresh card. Then the mute speaker
+        // toggles + persists the shared mute without touching gameplay.
+        {
+            let db = Db::mem();
+            let mut sc = PhonicsScene::new(db.clone(), 11, now);
+            let ptr = tap(sc.miss_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let revealed = sc.is_miss() && sc.stars == 0;
+            let ptr = tap(sc.advance_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if revealed && !sc.is_miss() && !sc.is_done() {
+                println!("PASS phonics-miss-reveal");
+            } else {
+                println!("FAIL phonics-miss-reveal (revealed={}, miss={}, stars={})", revealed, sc.is_miss(), sc.stars);
+                fails += 1;
+            }
+            let tb = chrome::topbar(&frame);
+            let was = audio.muted();
+            let ptr = tap(tb.mute.0);
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let persisted = {
+                let kv = db.borrow_kv();
+                fountouki_core::settings::load_shared(&**kv).muted
+            };
+            if audio.muted() != was && persisted == audio.muted() {
+                println!("PASS chrome-mute-toggle");
+            } else {
+                println!("FAIL chrome-mute-toggle (muted {}->{}, persisted={})", was, audio.muted(), persisted);
+                fails += 1;
+            }
+            audio.set_muted(was); // restore for later scenarios
+        }
         // patterns: a wrong choice does NOT score (errorless).
         {
             let mut sc = PatternsScene::new(Db::mem(), 13, now);
@@ -336,6 +372,68 @@ async fn main() {
                 println!("PASS patterns-errorless");
             } else {
                 println!("FAIL patterns-errorless (wrong={}, correct={}, stars {}->{})", wrong, ci, s0, sc.stars);
+                fails += 1;
+            }
+        }
+        // patterns: a rapid second tap while the correct answer is animating out
+        // is ignored — no double star, no skipped round (the advance_in lock).
+        {
+            let mut sc = PatternsScene::new(Db::mem(), 17, now);
+            let ci = sc.correct_index();
+            let pos = sc.choice_center(&frame, ci);
+            for _ in 0..2 {
+                let ptr = tap(pos);
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if sc.stars == 1 {
+                println!("PASS patterns-double-tap");
+            } else {
+                println!("FAIL patterns-double-tap (stars={})", sc.stars);
+                fails += 1;
+            }
+        }
+        // patterns unit mode: selecting a run of exactly unit_len cells and
+        // submitting scores; a wrong-length run clears errorlessly (no star).
+        {
+            let db = Db::mem();
+            {
+                let mut kv = db.borrow_kv_mut();
+                let ps = fountouki_core::settings::PatternsSettings {
+                    theme_choice: "shapes".to_string(),
+                    mode: "unit".to_string(),
+                    ..Default::default()
+                };
+                fountouki_core::settings::save_patterns(&mut **kv, &ps);
+            }
+            let mut sc = PatternsScene::new(db, 7, now);
+            let ulen = sc.round().unit_len;
+            let nvis = sc.round().visible.len();
+            // Wrong length first (when possible): select one cell, submit.
+            let mut errorless_ok = true;
+            if ulen > 1 {
+                let ptr = tap(sc.cell_center(&frame, 0));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let ptr = tap(sc.fab_center(&frame));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                errorless_ok = sc.stars == 0 && sc.unit_selection().is_none();
+            }
+            // Then the real thing: a contiguous run of unit_len cells + submit.
+            for i in 0..ulen.min(nvis) {
+                let ptr = tap(sc.cell_center(&frame, i));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            let sel_ok = sc.unit_selection() == Some((0, ulen.min(nvis)));
+            let ptr = tap(sc.fab_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if errorless_ok && sel_ok && sc.stars == 1 {
+                println!("PASS patterns-unit-mode");
+            } else {
+                println!("FAIL patterns-unit-mode (errorless={}, sel={}, stars={})", errorless_ok, sel_ok, sc.stars);
                 fails += 1;
             }
         }
