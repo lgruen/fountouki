@@ -48,7 +48,8 @@ SMOOTH_WIN = 9  # boxcar window (px samples) to de-jag the skeleton
 ROUTES = {
     "a": [[(0.84, 0.88), (0.45, 1.0), (0.02, 0.55), (0.15, 0.1), (0.35, 0.02),
            (0.7, 0.15), (0.86, 0.55), (0.86, 0.86), (0.86, 0.3), (1.0, 0.3)]],
-    "b": [[(0.3, 1.0), (0.2, 0.05), (0.6, 0.0), (0.95, 0.25), (0.5, 0.55)]],
+    "b": [[(0.41, 1.0), (0.2, 0.05), (0.6, 0.0), (0.95, 0.25), (0.58, 0.5),
+           (0.98, 0.51)]],
     "c": [[(0.95, 0.85), (0.4, 1.0), (0.03, 0.5), (0.45, 0.02), (0.95, 0.2)]],
     "d": [[(0.72, 0.47), (0.4, 0.6), (0.03, 0.3), (0.35, 0.02), (0.78, 0.3),
            (0.82, 1.0), (0.8, 0.2), (1.0, 0.2)]],
@@ -69,8 +70,8 @@ ROUTES = {
         [(0.9, 0.97), (0.6, 0.3), (0.05, 0.02)],
         "dot",
     ],
-    "k": [[(0.3, 1.0), (0.05, 0.03), (0.3, 0.55), (0.55, 0.62), (0.45, 0.45),
-           (0.27, 0.4), (0.75, 0.2), (1.0, 0.1)]],
+    "k": [[(0.36, 1.0), (0.03, 0.02), (0.17, 0.33), (0.55, 0.62), (0.72, 0.45),
+           (0.29, 0.23), (0.14, 0.24), (0.95, 0.1)]],
     "l": [[(0.4, 1.0), (0.2, 0.1), (1.0, 0.2)]],
     "m": [[(0.02, 0.7), (0.15, 0.95), (0.12, 0.05), (0.35, 0.95), (0.5, 0.05),
            (0.75, 0.95), (0.85, 0.05), (1.0, 0.3)]],
@@ -254,47 +255,101 @@ def sharp_turns(path):
     return sorted(chosen)
 
 
+def wedge_detour(t, d, route_set, sk):
+    """At a V-turn, the retrace wedge often still has an unvisited skeleton
+    branch hanging below the junction (m/n stem bottoms). Follow it: BFS from
+    the turn pixel over skeleton pixels (escaping the routed pixels only near
+    `t`), and return the excursion to the farthest pixel lying within a cone
+    around the wedge direction `d` — or None when there is no such branch."""
+    from collections import deque
+
+    par = {t: None}
+    q = deque([t])
+    best = None
+    while q:
+        u = q.popleft()
+        du = (u[0] - t[0], u[1] - t[1])
+        dist = math.hypot(*du)
+        if dist > 90:
+            continue
+        if u not in route_set and dist > 2:
+            along = (du[0] * d[0] + du[1] * d[1]) / max(dist, 1e-9)
+            if along > 0.35 and (best is None or dist > best[1]):
+                best = (u, dist)
+        for v in neighbors(*u, sk):
+            if v in par:
+                continue
+            if v in route_set and math.hypot(v[0] - t[0], v[1] - t[1]) > 3:
+                continue
+            par[v] = u
+            q.append(v)
+    if best is None:
+        return None
+    seq = [best[0]]
+    while seq[-1] != t:
+        seq.append(par[seq[-1]])
+    seq.reverse()
+    return seq[1:]  # excursion beyond the turn pixel
+
+
 def process_stroke(path, mask, radius, sk, to_units):
-    """Split the routed path at sharp turns, extend every tip (route ends at
-    skeleton endpoints + V-turn apexes) to the visual ink boundary, then smooth
-    each segment with its ends pinned — so reversals stay sharp and reach the
-    bottom of their wedge instead of being rounded off early."""
+    """Split the routed path at sharp turns, send each turn down its retrace
+    wedge (the unvisited skeleton branch + a raycast to the ink boundary),
+    extend the route ends to the ink boundary, and smooth each piece with its
+    ends pinned — so reversals stay sharp and reach the bottom of their wedge
+    instead of being rounded off early."""
     k = TURN_LOOKAHEAD
     deg = degree_map(sk)
     turns = sharp_turns(path)
-
-    # Extension point per boundary (None where there's nothing to recover).
-    ext = {}
-    if deg[path[0]] == 1:
-        d = unit_vec((path[0][0] - path[min(8, len(path) - 1)][0],
-                      path[0][1] - path[min(8, len(path) - 1)][1]))
-        ext[0] = ray_extend(path[0], d, mask, radius)
+    route_set = set(path)
     last = len(path) - 1
-    if deg[path[last]] == 1:
-        d = unit_vec((path[last][0] - path[max(0, last - 8)][0],
-                      path[last][1] - path[max(0, last - 8)][1]))
-        ext[last] = ray_extend(path[last], d, mask, radius)
+
+    def end_ext(idx, back_idx):
+        if deg[path[idx]] != 1:
+            return None
+        d = unit_vec((path[idx][0] - path[back_idx][0], path[idx][1] - path[back_idx][1]))
+        return ray_extend(path[idx], d, mask, radius)
+
+    # Per-turn excursion: into-the-wedge points the pen visits and backtracks.
+    excursion = {}
     for i in turns:
         d_in = unit_vec((path[i][0] - path[i - k][0], path[i][1] - path[i - k][1]))
         d_out = unit_vec((path[i + k][0] - path[i][0], path[i + k][1] - path[i][1]))
         d = unit_vec((d_in[0] - d_out[0], d_in[1] - d_out[1]))
-        ext[i] = ray_extend(path[i], d, mask, radius)
+        ex = wedge_detour(path[i], d, route_set, sk)
+        if ex:
+            tip = ex[-1]
+            back = ex[max(0, len(ex) - 6)] if len(ex) > 1 else path[i]
+            td = unit_vec((tip[0] - back[0], tip[1] - back[1]))
+            ray = ray_extend(tip, td if td != (0.0, 0.0) else d, mask, radius)
+            excursion[i] = ex + [ray] if ray else ex
+        else:
+            ray = ray_extend(path[i], d, mask, radius)
+            if ray:
+                excursion[i] = [ray]
 
     bounds = [0] + turns + [last]
-    out = []
+    pieces = []
     for s, e in zip(bounds, bounds[1:]):
         seg = list(path[s:e + 1])
-        if s == 0 and ext.get(0):
-            seg = [ext[0]] + seg
-        elif s in ext and ext[s]:
-            seg = [ext[s]] + seg
-        if e in ext and ext[e]:
-            seg = seg + [ext[e]]
+        if s == 0:
+            r = end_ext(0, min(8, last))
+            if r:
+                seg = [r] + seg
+        if e == last:
+            r = end_ext(last, max(0, last - 8))
+            if r:
+                seg = seg + [r]
+        pieces.append(seg)
+        if e != last and e in excursion:
+            ex = excursion[e]
+            pieces.append([path[e]] + ex)
+            pieces.append(list(reversed(ex)) + [path[e]])
+
+    out = []
+    for seg in pieces:
         pts = smooth_resample(seg, to_units, RESAMPLE_UNITS)
-        if out:
-            out.extend(pts[1:])  # joint point already present
-        else:
-            out.extend(pts)
+        out.extend(pts[1:] if out else pts)
     return out
 
 
