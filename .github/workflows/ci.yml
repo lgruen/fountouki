@@ -17,7 +17,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev pkg-config xvfb
+            libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev pkg-config xvfb \
+            imagemagick
 
       - uses: dtolnay/rust-toolchain@stable
       - name: Add wasm target
@@ -41,11 +42,20 @@ jobs:
       # renderer that ships). Uploaded so layout regressions can be eyeballed.
       - name: Golden screenshots
         run: LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a bash tools/goldens.sh
+
+      # Visual regression gate: fresh renders vs the committed baselines in
+      # tests/golden-baseline/ (fuzz absorbs AA jitter). Intentional change?
+      # Refresh the baselines in the same PR — see tools/golden-diff.sh.
+      - name: Golden diff vs baselines
+        run: bash tools/golden-diff.sh
+
       - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: screenshots
-          path: screenshots/golden
+          path: |
+            screenshots/golden
+            screenshots/golden-diff
           retention-days: 14
 
       # Make sure the wasm build (the actual deploy target) still links.
