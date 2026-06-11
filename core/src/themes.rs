@@ -85,6 +85,8 @@ impl ThemeChoice {
     }
 
     /// Parse from the serialized string. `None` on unknown input.
+    /// (Paired with `as_str`; returns Option, not the std trait's Result.)
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<ThemeChoice> {
         Some(match s {
             "mix" => ThemeChoice::Mix,

@@ -104,7 +104,7 @@ fn render_note(buf: &mut [f32], note: &Note) {
     if i_start >= buf.len() {
         return;
     }
-    for i in i_start..=i_end {
+    for (i, sample) in buf.iter_mut().enumerate().take(i_end + 1).skip(i_start) {
         let t = i as f32 / sr;
         let env = envelope(t, note.start, note.dur, note.gain);
         if env == 0.0 {
@@ -112,7 +112,7 @@ fn render_note(buf: &mut [f32], note: &Note) {
         }
         // Phase in turns, wrapped to [0,1) via fract() of a non-negative value.
         let phi = (note.freq * t).fract();
-        buf[i] += env * osc(note.waveform, phi);
+        *sample += env * osc(note.waveform, phi);
     }
 }
 

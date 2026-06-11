@@ -6,6 +6,7 @@
 use macroquad::prelude::*;
 
 mod anim;
+mod chrome;
 mod confetti;
 mod draw;
 mod emoji;
@@ -111,8 +112,10 @@ async fn main() {
             "patterns" => {
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "shapes".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "shapes".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 let mut sc = PatternsScene::new(db.clone(), 7, now);
@@ -123,9 +126,11 @@ async fn main() {
             "patterns-unit" => {
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "shapes".to_string();
-                    ps.mode = "unit".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "shapes".to_string(),
+                        mode: "unit".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
@@ -139,11 +144,42 @@ async fn main() {
                 }
                 Box::new(sc)
             }
+            "patterns-levelup" => {
+                // A clean streak of 4 fires the level-up drive-by; settle ~1.2 s
+                // so the golden catches the mini train mid-crossing.
+                {
+                    let mut kv = db.borrow_kv_mut();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "shapes".to_string(),
+                        ..Default::default()
+                    };
+                    fountouki_core::settings::save_patterns(&mut **kv, &ps);
+                }
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = PatternsScene::new(db.clone(), 7, now);
+                let idle = Pointer::default();
+                for i in 0..4 {
+                    let ptr = tap(sc.choice_center(&frame, sc.correct_index()));
+                    let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                    if i < 3 {
+                        let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                        sc.update(&ctx);
+                    }
+                }
+                for _ in 0..12 {
+                    let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                Box::new(sc)
+            }
             "patterns-emoji" => {
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "emoji-animals".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "emoji-animals".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 Box::new(PatternsScene::new(db.clone(), 5, now))
@@ -154,9 +190,11 @@ async fn main() {
                 // pool so the count is always the full 4.
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "emoji-animals".to_string();
-                    ps.difficulty = "hard".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "emoji-animals".to_string(),
+                        difficulty: "hard".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 Box::new(PatternsScene::new(db.clone(), 5, now))
@@ -167,8 +205,10 @@ async fn main() {
                 // golden shows the train parked + celebrating at the flag.
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "shapes".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "shapes".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
@@ -216,9 +256,13 @@ async fn main() {
                 // Play 7 correct rounds to reach the rainbow-done garden scene.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = PhonicsScene::new(db.clone(), 7, now);
+                let idle = Pointer::default();
                 for _ in 0..7 {
                     let ptr = tap(sc.got_center(&frame));
                     let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                    // Settle past the post-star reward beat so the next ✓ lands.
+                    let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
                 Box::new(sc)
@@ -269,12 +313,22 @@ async fn main() {
         let now = 1_717_000_000_000i64;
         let mut fails = 0;
 
-        // phonics: 7 "got it" taps complete the rainbow.
+        // phonics: 7 "got it" taps complete the rainbow. A second ✓ tap during
+        // the post-star reward beat must be ignored (settle between taps).
         {
             let mut sc = PhonicsScene::new(Db::mem(), 7, now);
-            for _ in 0..7 {
+            let idle = Pointer::default();
+            for i in 0..7 {
                 let ptr = tap(sc.got_center(&frame));
                 let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if i == 0 {
+                    // Rapid re-tap inside the beat: must not double-grade.
+                    let ptr = tap(sc.got_center(&frame));
+                    let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
             if sc.stars == 7 && sc.is_done() {
@@ -311,6 +365,42 @@ async fn main() {
                 fails += 1;
             }
         }
+        // phonics: a miss reveals the exemplar (errorless hint), scores nothing,
+        // and the → arrow advances back to a fresh card. Then the mute speaker
+        // toggles + persists the shared mute without touching gameplay.
+        {
+            let db = Db::mem();
+            let mut sc = PhonicsScene::new(db.clone(), 11, now);
+            let ptr = tap(sc.miss_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let revealed = sc.is_miss() && sc.stars == 0;
+            let ptr = tap(sc.advance_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if revealed && !sc.is_miss() && !sc.is_done() {
+                println!("PASS phonics-miss-reveal");
+            } else {
+                println!("FAIL phonics-miss-reveal (revealed={}, miss={}, stars={})", revealed, sc.is_miss(), sc.stars);
+                fails += 1;
+            }
+            let tb = chrome::topbar(&frame);
+            let was = audio.muted();
+            let ptr = tap(tb.mute.0);
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let persisted = {
+                let kv = db.borrow_kv();
+                fountouki_core::settings::load_shared(&**kv).muted
+            };
+            if audio.muted() != was && persisted == audio.muted() {
+                println!("PASS chrome-mute-toggle");
+            } else {
+                println!("FAIL chrome-mute-toggle (muted {}->{}, persisted={})", was, audio.muted(), persisted);
+                fails += 1;
+            }
+            audio.set_muted(was); // restore for later scenarios
+        }
         // patterns: a wrong choice does NOT score (errorless).
         {
             let mut sc = PatternsScene::new(Db::mem(), 13, now);
@@ -328,6 +418,68 @@ async fn main() {
                 fails += 1;
             }
         }
+        // patterns: a rapid second tap while the correct answer is animating out
+        // is ignored — no double star, no skipped round (the advance_in lock).
+        {
+            let mut sc = PatternsScene::new(Db::mem(), 17, now);
+            let ci = sc.correct_index();
+            let pos = sc.choice_center(&frame, ci);
+            for _ in 0..2 {
+                let ptr = tap(pos);
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if sc.stars == 1 {
+                println!("PASS patterns-double-tap");
+            } else {
+                println!("FAIL patterns-double-tap (stars={})", sc.stars);
+                fails += 1;
+            }
+        }
+        // patterns unit mode: selecting a run of exactly unit_len cells and
+        // submitting scores; a wrong-length run clears errorlessly (no star).
+        {
+            let db = Db::mem();
+            {
+                let mut kv = db.borrow_kv_mut();
+                let ps = fountouki_core::settings::PatternsSettings {
+                    theme_choice: "shapes".to_string(),
+                    mode: "unit".to_string(),
+                    ..Default::default()
+                };
+                fountouki_core::settings::save_patterns(&mut **kv, &ps);
+            }
+            let mut sc = PatternsScene::new(db, 7, now);
+            let ulen = sc.round().unit_len;
+            let nvis = sc.round().visible.len();
+            // Wrong length first (when possible): select one cell, submit.
+            let mut errorless_ok = true;
+            if ulen > 1 {
+                let ptr = tap(sc.cell_center(&frame, 0));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let ptr = tap(sc.fab_center(&frame));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                errorless_ok = sc.stars == 0 && sc.unit_selection().is_none();
+            }
+            // Then the real thing: a contiguous run of unit_len cells + submit.
+            for i in 0..ulen.min(nvis) {
+                let ptr = tap(sc.cell_center(&frame, i));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            let sel_ok = sc.unit_selection() == Some((0, ulen.min(nvis)));
+            let ptr = tap(sc.fab_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if errorless_ok && sel_ok && sc.stars == 1 {
+                println!("PASS patterns-unit-mode");
+            } else {
+                println!("FAIL patterns-unit-mode (errorless={}, sel={}, stars={})", errorless_ok, sel_ok, sc.stars);
+                fails += 1;
+            }
+        }
         // patterns: a level only advances on a CLEAN streak of LEVEL_UP_STREAK
         // correct in a row. A wrong answer breaks the streak, so
         // mistake-then-correct must NOT bump the level (stars still climb
@@ -335,15 +487,16 @@ async fn main() {
         // correct answers, so a mistake mid-run still leveled up.
         {
             let mut sc = PatternsScene::new(Db::mem(), 21, now);
-            // Tap the correct choice, then settle past the advance animation so
-            // the next round is generated.
+            // Tap the correct choice, then settle past the advance animation
+            // (and, on a level-up, the full drive-by hold) so the next round is
+            // generated.
             let play_correct = |sc: &mut PatternsScene| {
                 let ci = sc.correct_index();
                 let ptr = tap(sc.choice_center(&frame, ci));
                 let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
                 let idle = Pointer::default();
-                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                let ctx = Ctx { dt: 4.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             };
             // Tap a wrong choice, then settle past the retry delay (errorless).
@@ -371,6 +524,32 @@ async fn main() {
                 println!("PASS patterns-level-streak");
             } else {
                 println!("FAIL patterns-level-streak (held={}, level {}->{}, stars={})", held, lvl, sc.level, sc.stars);
+                fails += 1;
+            }
+        }
+        // patterns: a clean streak of LEVEL_UP_STREAK fires the level-up
+        // drive-by (and holds the next round); it parks again afterwards.
+        {
+            let mut sc = PatternsScene::new(Db::mem(), 31, now);
+            let idle = Pointer::default();
+            for i in 0..4 {
+                let ptr = tap(sc.choice_center(&frame, sc.correct_index()));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if i < 3 {
+                    let ctx = Ctx { dt: 4.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+            }
+            let fired = sc.drive_active();
+            for _ in 0..5 {
+                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if fired && !sc.drive_active() && sc.level == 2 {
+                println!("PASS patterns-levelup-driveby");
+            } else {
+                println!("FAIL patterns-levelup-driveby (fired={}, parked={}, level={})", fired, !sc.drive_active(), sc.level);
                 fails += 1;
             }
         }

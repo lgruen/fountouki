@@ -11,6 +11,9 @@
 //! JSON key strings and defaults are load-bearing for save-compat / sync
 //! interop with existing TS clients — do not rename or re-default.
 
+// nanoserde's DeJson derive expands to code that trips this lint; the allow
+// must be module-wide because the generated impls sit outside the items.
+#![allow(clippy::question_mark)]
 use crate::rng::Mulberry32;
 use crate::storage::{ns_key, KeyValueStore};
 use nanoserde::{DeJson, SerJson};
@@ -24,7 +27,7 @@ use nanoserde::{DeJson, SerJson};
 /// `muted` is the single app-wide mute toggle. `sync_token` is the family-level
 /// sync namespace (None / empty = sync disabled). `sync_endpoint` overrides the
 /// default Worker URL (None / empty = use the default).
-#[derive(Debug, Clone, PartialEq, Eq, SerJson, DeJson)]
+#[derive(Debug, Clone, PartialEq, Eq, SerJson, DeJson, Default)]
 pub struct SharedSettings {
     #[nserde(rename = "muted")]
     pub muted: bool,
@@ -34,15 +37,6 @@ pub struct SharedSettings {
     pub sync_endpoint: Option<String>,
 }
 
-impl Default for SharedSettings {
-    fn default() -> Self {
-        Self {
-            muted: false,
-            sync_token: None,
-            sync_endpoint: None,
-        }
-    }
-}
 
 /// Fully-optional parse view of [`SharedSettings`] so a blob with any subset of
 /// keys deserializes cleanly; missing keys then fall back to the defaults

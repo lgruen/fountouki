@@ -6,7 +6,7 @@
 //! Unit mode (select the repeating piece) is tracked separately — this builds
 //! `next` mode first; unit mode falls back to next for now.
 use crate::{
-    draw, input,
+    chrome, draw, input,
     palette,
     scene::{Ctx, Nav, Scene},
     store::Db,
@@ -27,6 +27,8 @@ use macroquad::prelude::*;
 const LEVEL_UP_STREAK: u32 = 4;
 const ADVANCE_DELAY: f32 = 0.85;
 const RETRY_DELAY: f32 = 0.55;
+/// Level-up drive-by: how long the mini train takes to cross the screen.
+const DRIVE_DUR: f32 = 3.0;
 
 /// Which scene we're in: the round-by-round game, or the train celebration that
 /// crowns mastering the final level.
@@ -71,6 +73,11 @@ pub struct PatternsScene {
     engine_taps: u32,
     /// Accumulator for the steady confetti-rain trickle.
     rain_acc: f32,
+    // --- level-up drive-by (a mini Pattern Train crosses the bottom) ---
+    /// Seconds since a level-up fired the drive-by; `None` when parked offstage.
+    drive_t: Option<f32>,
+    /// The just-solved unit riding the drive-by cars (one item per car).
+    drive_items: Vec<Item>,
 }
 
 impl PatternsScene {
@@ -109,6 +116,8 @@ impl PatternsScene {
             react_kind: 0,
             engine_taps: 0,
             rain_acc: 0.0,
+            drive_t: None,
+            drive_items: Vec::new(),
         }
     }
 
@@ -161,6 +170,18 @@ impl PatternsScene {
                 self.streak = 0;
                 self.level += 1;
                 ctx.audio.level_up();
+                // Level-up spectacle: a mini Pattern Train carrying the unit the
+                // kid just mastered drives across the bottom — a taste of the
+                // finale that gets closer with every level. When it will actually
+                // show, hold the next round until it parks: the spectacle owns
+                // its moment and never competes with the new level's first trial.
+                self.drive_t = Some(0.0);
+                self.drive_items = unit_sequence(&self.round);
+                if drive_band(&ctx.frame, &p, self.mode).is_some() {
+                    self.result = Some(true);
+                    self.advance_in = Some(DRIVE_DUR);
+                    return;
+                }
             } else {
                 // Mastered the final level on a clean streak → All aboard!
                 self.enter_finale(ctx);
@@ -175,6 +196,7 @@ impl PatternsScene {
     /// train's cargo, fire the grand fanfare + an opening confetti burst.
     fn enter_finale(&mut self, ctx: &Ctx) {
         self.phase = Phase::Finale;
+        self.drive_t = None;
         self.finale_t = 0.0;
         self.react_t = 99.0;
         self.react_kind = 0;
@@ -187,25 +209,14 @@ impl PatternsScene {
     }
 
     /// Build the train's cargo: the kid's pattern repeated cleanly, ONE item per
-    /// car, read left→right. Built from `unit_items` tiled over the template —
-    /// never `round.visible` (whose partial tail would render a broken pattern).
+    /// car, read left→right. Built from the unit sequence — never
+    /// `round.visible` (whose partial tail would render a broken pattern).
     fn build_cars(&mut self) {
-        let unit = &self.round.unit_items;
-        let chars: Vec<char> = self.round.template.chars().collect();
-        self.car_period = chars.len().max(1);
+        let one = unit_sequence(&self.round);
+        self.car_period = one.len().max(1);
         // Two repetitions is the most the layout ever shows; it caps how many fit.
-        let mut cars = Vec::with_capacity(chars.len() * 2);
-        for _ in 0..2 {
-            for &ch in &chars {
-                let idx = (ch as u32).wrapping_sub('A' as u32) as usize;
-                if let Some(it) = unit.get(idx) {
-                    cars.push(it.clone());
-                }
-            }
-        }
-        if cars.is_empty() {
-            cars = unit.to_vec(); // defensive: never an empty train
-        }
+        let mut cars = one.clone();
+        cars.extend(one);
         self.cars = cars;
     }
 
@@ -216,7 +227,54 @@ impl PatternsScene {
         self.stars = 0;
         self.streak = 0;
         self.finale_t = 0.0;
+        self.drive_t = None;
         self.next_round();
+    }
+
+    /// Draw the level-up drive-by: a mini engine + the just-mastered unit on
+    /// cars, crossing the bottom band left→right. Purely decorative (no hit
+    /// target); skipped when the band would touch the choices/FAB.
+    fn draw_driveby(&self, ctx: &Ctx, p: &PLayout) {
+        let Some(t) = self.drive_t else { return };
+        let f = &ctx.frame;
+        let Some((by, r)) = drive_band(f, p, self.mode) else { return };
+        let wheel_r = r * 0.5;
+        let n = self.drive_items.len().max(1);
+        let car_h = r * 1.15;
+        let car_w = car_h * 1.25;
+        let pitch = car_w * 1.18;
+        let train_w = r * 4.6 + n as f32 * pitch;
+        let ex = -train_w + (f.w + 2.0 * train_w) * (t / DRIVE_DUR).clamp(0.0, 1.0);
+        let wheel_ang = -ex / wheel_r;
+        // Cars trail the engine; the unit still reads left→right.
+        let leftmost = ex - r * 2.05 - car_w * 0.5 - (n - 1) as f32 * pitch;
+        for (j, item) in self.drive_items.iter().enumerate() {
+            let cx = leftmost + j as f32 * pitch;
+            let body = Rect::new(cx - car_w / 2.0, by - wheel_r - car_h, car_w, car_h);
+            draw::train_car_chassis(body, by, wheel_r);
+            let seat = car_h * 0.62;
+            let seat_cy = body.y + body.h * 0.46;
+            draw_cell(cx, seat_cy, seat, palette::WHITE, palette::CELL_BORDER);
+            draw_item(item, cx, seat_cy, seat * 0.78, ctx);
+        }
+        let ep = draw::EnginePose { dy: 0.4 * (ctx.time * 6.0).sin(), ..Default::default() };
+        draw::train_engine(ex, by, r, ep, wheel_ang, 0.3, idle_frog(ctx.time));
+        // A short trail of steam puffs, drifting up and back.
+        let tip = draw::engine_funnel_tip(ex, by, r);
+        let cad = 0.35;
+        let life = 0.9;
+        let kmax = (t / cad).floor() as i32;
+        let kmin = (((t - life) / cad).ceil() as i32).max(0);
+        for k in kmin..=kmax {
+            let age = t - k as f32 * cad;
+            if !(0.0..=life).contains(&age) {
+                continue;
+            }
+            let a = age / life;
+            // Puffs anchor where the funnel was when they were born.
+            let born_ex = -train_w + (f.w + 2.0 * train_w) * ((k as f32 * cad) / DRIVE_DUR).clamp(0.0, 1.0);
+            draw::steam_puff(born_ex + r * 0.95, tip.y - 30.0 * age, r * 0.20 * (1.0 + a), 0.7 * (1.0 - a));
+        }
     }
 
     fn update_finale(&mut self, ctx: &Ctx) -> Nav {
@@ -364,11 +422,7 @@ impl PatternsScene {
         draw::checker_flag(fl.flag_x, by, fl.flag_top, fl.flag_w, fl.flag_h, ctx.time);
 
         // Replay / Home (phonics-identical placement for cross-finale predictability).
-        let white = Color::new(1.0, 1.0, 1.0, 0.94);
-        draw::circle_btn(fl.replay.x, fl.replay.y, fl.btn_r, white);
-        draw::replay_icon(fl.replay.x, fl.replay.y, fl.btn_r, palette::INK);
-        draw::circle_btn(fl.home.x, fl.home.y, fl.btn_r, white);
-        draw::house_icon(fl.home.x, fl.home.y, fl.btn_r, palette::INK);
+        chrome::draw_corner_buttons(fl.replay, fl.home, fl.btn_r);
     }
 
     /// Unit mode: tap cell `i` to start / extend / shrink the contiguous range.
@@ -451,10 +505,39 @@ impl PatternsScene {
     pub(crate) fn replay_center(&self, f: &crate::layout::Frame) -> Vec2 {
         finale_layout(f, self.car_period).replay
     }
+    /// Unit mode: center of the submit FAB.
+    pub(crate) fn fab_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        unit_fab(f).0
+    }
+    pub(crate) fn unit_selection(&self) -> Option<(usize, usize)> {
+        self.sel
+    }
+    pub(crate) fn drive_active(&self) -> bool {
+        self.drive_t.is_some()
+    }
 }
 
 fn unit_fab(f: &crate::layout::Frame) -> (Vec2, f32) {
     (vec2(f.w / 2.0, f.h * 0.78), (f.w * 0.06).clamp(60.0, 90.0))
+}
+
+/// The bottom band for the level-up drive-by: `(track_y, r_boiler)` when a mini
+/// train clears the choices (and the unit FAB) with margin; `None` on cramped
+/// viewports (short phone-landscape), which keep the fanfare + pips only.
+fn drive_band(f: &crate::layout::Frame, p: &PLayout, mode: GameMode) -> Option<(f32, f32)> {
+    let r = f.vmin(0.032).clamp(14.0, 26.0);
+    let track = f.h - f.safe.bottom.max(6.0) - r * 0.3;
+    let mut clutter_bottom = p.choices.iter().map(|c| c.y + c.h).fold(0.0_f32, f32::max);
+    if mode == GameMode::Unit {
+        let fab = unit_fab(f);
+        clutter_bottom = clutter_bottom.max(fab.0.y + fab.1);
+    }
+    // 3.1r = the engine's full height (funnel + frog head included).
+    if track - r * 3.1 > clutter_bottom + 8.0 {
+        Some((track, r))
+    } else {
+        None
+    }
 }
 
 fn gen(level: u32, choice: ThemeChoice, mode: GameMode, diff: Difficulty, rng: &mut Mulberry32) -> Round {
@@ -462,10 +545,34 @@ fn gen(level: u32, choice: ThemeChoice, mode: GameMode, diff: Difficulty, rng: &
     generate_round(level, theme, mode, diff, rng)
 }
 
+/// One whole unit of the round's pattern as items, read left→right: the
+/// template (e.g. "AAB") tiled over `unit_items` (which is indexed by DISTINCT
+/// letter, so an AAB unit is three items from two). Never empty.
+fn unit_sequence(round: &Round) -> Vec<Item> {
+    let unit = &round.unit_items;
+    let mut out: Vec<Item> = Vec::new();
+    for ch in round.template.chars() {
+        let idx = (ch as u32).wrapping_sub('A' as u32) as usize;
+        if let Some(it) = unit.get(idx) {
+            out.push(it.clone());
+        }
+    }
+    if out.is_empty() {
+        out = unit.to_vec(); // defensive: never an empty train
+    }
+    out
+}
+
 impl Scene for PatternsScene {
     fn update(&mut self, ctx: &Ctx) -> Nav {
         self.fb_time += ctx.dt;
         self.confetti.update(ctx.dt);
+        if let Some(t) = self.drive_t {
+            let t = t + ctx.dt;
+            // Linger past DRIVE_DUR so the last steam puffs fade out instead of
+            // vanishing the frame the (already offscreen) train parks.
+            self.drive_t = if t > DRIVE_DUR + 0.9 { None } else { Some(t) };
+        }
         if self.phase == Phase::Finale {
             self.finale_t += ctx.dt;
             self.react_t += ctx.dt;
@@ -486,19 +593,13 @@ impl Scene for PatternsScene {
 
         let pt = ctx.pointer;
         let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1, self.mode);
-        if pt.long_fired && input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
-            return Nav::OpenParent;
+        match chrome::handle_topbar(&chrome::topbar(&ctx.frame), ctx, &self.db) {
+            Some(chrome::TopbarAction::OpenParent) => return Nav::OpenParent,
+            Some(chrome::TopbarAction::Home) => return Nav::Home,
+            Some(chrome::TopbarAction::MuteToggled) => return Nav::Stay,
+            None => {}
         }
         if !pt.tapped() {
-            return Nav::Stay;
-        }
-        if input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
-            return Nav::Home;
-        }
-        if input::hit_circle(pt.pos, p.mute.0.x, p.mute.0.y, p.mute.1) {
-            let m = !ctx.audio.muted();
-            ctx.audio.set_muted(m);
-            crate::store::persist_mute(&self.db, m);
             return Nav::Stay;
         }
         match self.mode {
@@ -538,10 +639,7 @@ impl Scene for PatternsScene {
         let p = plan(&ctx.frame, self.round.choices.len(), self.round.visible.len() + 1, self.mode);
 
         // Topbar: home, stars + level pips, mute.
-        draw::circle_btn(p.home.0.x, p.home.0.y, p.home.1, palette::CARD);
-        draw::chevron_left(p.home.0.x, p.home.0.y, p.home.1 * 0.9, palette::INK);
-        draw::circle_btn(p.mute.0.x, p.mute.0.y, p.mute.1, palette::CARD);
-        draw::speaker(p.mute.0.x, p.mute.0.y, p.mute.1 * 0.9, palette::INK, ctx.audio.muted());
+        chrome::draw_topbar(&chrome::topbar(&ctx.frame), ctx);
         draw_hud(&p, self.stars, self.level);
 
         // Sequence bar.
@@ -604,6 +702,7 @@ impl Scene for PatternsScene {
             }
         }
 
+        self.draw_driveby(ctx, &p);
         self.confetti.draw();
     }
 }
@@ -683,8 +782,6 @@ fn draw_hud(p: &PLayout, stars: u32, level: u32) {
 // --- layout -----------------------------------------------------------------
 
 struct PLayout {
-    home: (Vec2, f32),
-    mute: (Vec2, f32),
     hud: (Vec2, f32),
     seq: Rect,
     cell: f32,
@@ -752,8 +849,6 @@ fn plan(f: &crate::layout::Frame, n_choices: usize, seq_cells: usize, mode: Game
     }
 
     PLayout {
-        home: (vec2(tb.x + ir, tb.y + ir), ir),
-        mute: (vec2(tb.x + tb.w - ir, tb.y + ir), ir),
         hud: (vec2(tb.x + 2.2 * ir, tb.y + ir), ir),
         seq,
         cell,
@@ -833,9 +928,20 @@ fn finale_layout(f: &crate::layout::Frame, car_period: usize) -> FinaleLayout {
     // finale's longer 4–5-cell units ride ONCE, shown big — the whole unit is the
     // payoff, and AABCD/ABCBD already repeat within a single unit.
     let reps = if period <= 3 { (max_fit / period).clamp(1, 2) } else { 1 };
-    let n_cars = if period <= max_fit { period * reps } else { max_fit };
+    // A whole unit always rides: if it doesn't fit at the comfortable minimum,
+    // shrink the cars (down to a hard floor) before ever showing a partial — a
+    // broken pattern would teach the exact misconception the game fights. The
+    // partial fallback survives only for viewports too tiny to ship.
+    let hard_min = 32.0;
+    let n_cars = if period <= max_fit {
+        period * reps
+    } else if avail / period as f32 >= pitch_of(hard_min) {
+        period
+    } else {
+        max_fit
+    };
     let pitch0 = (avail / n_cars as f32).min(pitch_of(max_h));
-    let car_h = (pitch0 / 1.18 / 1.25).clamp(min_h, max_h);
+    let car_h = (pitch0 / 1.18 / 1.25).clamp(hard_min, max_h);
     let car_w = car_h * 1.25;
     let car_pitch = car_w * 1.18;
     let seat = car_h * 0.62;
@@ -845,10 +951,7 @@ fn finale_layout(f: &crate::layout::Frame, car_period: usize) -> FinaleLayout {
     let sun_r = if f.is_phone() { f.vmin(0.08) } else { f.vmin(0.12) };
     let sun_c = vec2(content.x + content.w * 0.80, by - f.vmin(0.05));
 
-    let br = f.icon_btn() / 2.0 * 1.2;
-    let m = 30.0 + f.safe.bottom.max(0.0);
-    let replay = vec2(f.safe.left + 30.0 + br, f.h - m - br);
-    let home = vec2(f.w - (f.safe.right + 30.0 + br), f.h - m - br);
+    let (replay, home, br) = chrome::corner_buttons(f);
 
     FinaleLayout {
         ground_y: by,
@@ -955,6 +1058,27 @@ mod tests {
             // box — the leftmost car never clips off the left edge.
             let left_edge = fl.leftmost_cx - fl.car_w / 2.0;
             assert!(left_edge >= c.x - 0.5, "{w}x{h}: leftmost car {left_edge} clips content left {}", c.x);
+        }
+    }
+
+    /// The train must always carry WHOLE pattern units — a partial unit on the
+    /// cars would render a broken pattern, the exact misconception the game
+    /// fights. Every period × every shipping form factor.
+    #[test]
+    fn finale_never_shows_a_partial_unit() {
+        for (w, h) in [(1194.0, 834.0), (834.0, 1194.0), (844.0, 390.0), (812.0, 375.0)] {
+            let f = frame(w, h);
+            for period in 2..=5usize {
+                let fl = finale_layout(&f, period);
+                assert!(
+                    fl.n_cars.is_multiple_of(period),
+                    "{w}x{h} period {period}: {} cars is a partial unit",
+                    fl.n_cars
+                );
+                let left_edge = fl.leftmost_cx - fl.car_w / 2.0;
+                let c = f.content();
+                assert!(left_edge >= c.x - 0.5, "{w}x{h} period {period}: consist clips left");
+            }
         }
     }
 }

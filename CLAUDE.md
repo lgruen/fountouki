@@ -34,8 +34,8 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 - `cargo run -p fountouki` — interactive desktop.
 - `--capture <png> <scene> [w] [h]` — render a scene offscreen to a PNG.
   Scenes: `picker phonics phonics-miss phonics-miss-igloo phonics-done patterns
-  patterns-emoji patterns-unit patterns-hard patterns-done parent-patterns
-  parent-phonics`.
+  patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done
+  parent-patterns parent-phonics`.
 - `--playtest` — scripted taps drive the real scenes + assert invariants; exits
   non-zero on failure.
 
@@ -48,6 +48,10 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 - **Eyeball `screenshots/golden/` — iPad landscape first**, then portrait, then
   phone. The same renderer ships, so a golden reflects the device (no emulator
   gap), modulo GPU AA. (CI renders goldens under software GL via xvfb.)
+- CI also diffs the fresh goldens against the committed baselines in
+  `tests/golden-baseline/` (`tools/golden-diff.sh`). An intentional visual
+  change must refresh the baselines in the same PR; use CI-rendered pixels
+  (the `screenshots` artifact) if local GL output differs.
 - Fresh sandbox: install Rust (`rustup`), `rustup target add
   wasm32-unknown-unknown`. The `.cargo/config.toml` adds the wasm linker flags
   macroquad needs (`--import-undefined`).
@@ -78,6 +82,11 @@ minimal. The constraints below remove *noise around the target*, not the joy.
 
 ## Audience & pedagogy baseline
 - Preschoolers; big tap targets, minimal text, visual-first navigation.
+- **Co-played with a grown-up by design**: the adult guides and grades (phonics
+  ✓/✗ is parent-mediated), so spoken letter-sound audio is *not* a gap — the
+  parent's voice is the audio channel. Don't re-flag it.
+- In-play animation stays calm near the stimulus; **reward moments** (on a
+  correct answer / star / level-up) are where the joy goes.
 - Errorless (never sit in "I don't know"), monotonic progress (stars/rainbow
   never decrement), no time pressure, theme as wrapper not clutter, ~5-min
   sessions.

@@ -3,7 +3,7 @@
 //! reveals the canonical exemplar before advancing. Logic lives in
 //! `fountouki_core::srs`; this is the rendering + interaction shell.
 use crate::{
-    draw, input,
+    chrome, draw, input,
     palette,
     scene::{Ctx, Nav, Scene},
     store::Db,
@@ -40,6 +40,9 @@ pub struct PhonicsScene {
     streak: u32,
     phase: Phase,
     reveal: Option<deck::Exemplar>,
+    /// Reward beat: the next card appears only after the jump + sparkle had
+    /// their moment (taps on ✓/✗ are ignored while pending).
+    advance_in: Option<f32>,
     hop_time: f32,
     /// Time since the last frog tap (drives the reaction); large = idle.
     frog_t: f32,
@@ -77,6 +80,7 @@ impl PhonicsScene {
             streak: 0,
             phase: Phase::Card,
             reveal: None,
+            advance_in: None,
             hop_time: 99.0,
             frog_t: 99.0,
             frog_kind: 0,
@@ -91,6 +95,7 @@ impl PhonicsScene {
         self.stars = 0;
         self.streak = 0;
         self.phase = Phase::Card;
+        self.advance_in = None;
         self.frog_t = 99.0;
         self.frog_kind = 0;
         self.frog_taps = 0;
@@ -169,11 +174,7 @@ impl PhonicsScene {
             idle_pose(ctx.time)
         };
         draw::frog(frog_c.x, frog_c.y, fr, palette::RAINBOW[3], pose);
-        let white = Color::new(1.0, 1.0, 1.0, 0.94);
-        draw::circle_btn(replay.x, replay.y, br, white);
-        draw::replay_icon(replay.x, replay.y, br, palette::INK);
-        draw::circle_btn(home_b.x, home_b.y, br, white);
-        draw::house_icon(home_b.x, home_b.y, br, palette::INK);
+        chrome::draw_corner_buttons(replay, home_b, br);
     }
 
     fn current(&self) -> char {
@@ -207,12 +208,22 @@ impl PhonicsScene {
         self.streak += 1;
         ctx.audio.correct(self.streak);
         self.hop_time = 0.0;
+        // The companion frog celebrates every star — a different jump each time —
+        // and a sparkle pops from the rainbow stripe that just filled in.
+        self.frog_kind = (self.stars.saturating_sub(1) as usize) % REACTIONS.len();
+        self.frog_t = 0.0;
+        let stripe = self.stars.saturating_sub(1) as f32 / 6.0;
+        let sag = (65.0 - 40.0 * stripe) * p.rb_scale;
+        self.confetti.burst(vec2(p.rb_cx, p.rb_horizon - sag), 18, 30.0 * p.rb_scale);
         self.save();
         self.sync.queue_push(&self.state.serialize_json(), ctx.now);
         if self.stars >= GOAL {
+            // The garden finale is its own reward moment — flip immediately
+            // (the frog enters it mid-jump, celebrating the final star).
             self.phase = Phase::Done;
         } else {
-            self.advance(ctx.now);
+            // A short beat before the next card so the reward owns its moment.
+            self.advance_in = Some(0.5);
         }
     }
 
@@ -227,15 +238,15 @@ impl PhonicsScene {
         self.sync.queue_push(&self.state.serialize_json(), ctx.now);
     }
 
-    fn toggle_mute(&self, ctx: &Ctx) {
-        let muted = !ctx.audio.muted();
-        ctx.audio.set_muted(muted);
-        crate::store::persist_mute(&self.db, muted);
-    }
-
     // Test hooks (used by --playtest).
     pub(crate) fn is_done(&self) -> bool {
         self.phase == Phase::Done
+    }
+    pub(crate) fn is_miss(&self) -> bool {
+        self.phase == Phase::Miss
+    }
+    pub(crate) fn advance_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        plan(f).advance.0
     }
     pub(crate) fn got_center(&self, f: &crate::layout::Frame) -> Vec2 {
         plan(f).got.0
@@ -262,6 +273,15 @@ impl Scene for PhonicsScene {
         self.hop_time += ctx.dt;
         self.confetti.update(ctx.dt);
         self.frog_t += ctx.dt;
+        if let Some(t) = self.advance_in {
+            let t = t - ctx.dt;
+            if t <= 0.0 {
+                self.advance_in = None;
+                self.advance(ctx.now);
+            } else {
+                self.advance_in = Some(t);
+            }
+        }
         // Drive cross-device sync: send debounced pushes, and merge the remote
         // blob once the initial pull lands (non-yanking — just updates state).
         self.sync.drive(ctx.now);
@@ -276,26 +296,40 @@ impl Scene for PhonicsScene {
         }
         let p = plan(&ctx.frame);
         let pt = ctx.pointer;
-        if pt.long_fired && input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
-            return Nav::OpenParent;
+        match chrome::handle_topbar(&chrome::topbar(&ctx.frame), ctx, &self.db) {
+            Some(chrome::TopbarAction::OpenParent) => return Nav::OpenParent,
+            Some(chrome::TopbarAction::Home) => {
+                self.sync.flush();
+                return Nav::Home;
+            }
+            Some(chrome::TopbarAction::MuteToggled) => return Nav::Stay,
+            None => {}
         }
         if !pt.tapped() {
             return Nav::Stay;
         }
-        if input::hit_circle(pt.pos, p.home.0.x, p.home.0.y, p.home.1) {
-            self.sync.flush();
-            return Nav::Home;
-        }
-        if input::hit_circle(pt.pos, p.mute.0.x, p.mute.0.y, p.mute.1) {
-            self.toggle_mute(ctx);
+        // The companion frog responds to a tap (ribbit + a jump) — pure joy,
+        // no game effect, mirroring the done-scene frog. Ignored while a
+        // reaction is mid-flight, so rapid tapping can't become a louder
+        // attraction than the task itself (perseveration guard).
+        if input::hit_circle(pt.pos, p.frog.0.x, p.frog.0.y, p.frog.1 * 1.3) {
+            if self.frog_t >= REACTIONS[self.frog_kind].dur {
+                self.frog_taps += 1;
+                self.frog_kind = (self.frog_taps.saturating_sub(1) as usize) % REACTIONS.len();
+                self.frog_t = 0.0;
+                ctx.audio.frog();
+                self.confetti.burst(vec2(p.frog.0.x, p.frog.0.y - p.frog.1 * 0.95), 10, p.frog.1 * 0.5);
+            }
             return Nav::Stay;
         }
         match self.phase {
             Phase::Card => {
-                if input::hit_circle(pt.pos, p.got.0.x, p.got.0.y, p.got.1) {
-                    self.on_got(ctx);
-                } else if input::hit_circle(pt.pos, p.miss.0.x, p.miss.0.y, p.miss.1) {
-                    self.on_miss(ctx);
+                if self.advance_in.is_none() {
+                    if input::hit_circle(pt.pos, p.got.0.x, p.got.0.y, p.got.1) {
+                        self.on_got(ctx);
+                    } else if input::hit_circle(pt.pos, p.miss.0.x, p.miss.0.y, p.miss.1) {
+                        self.on_miss(ctx);
+                    }
                 }
             }
             Phase::Miss => {
@@ -318,14 +352,23 @@ impl Scene for PhonicsScene {
         let p = plan(&ctx.frame);
 
         // Topbar chrome.
-        draw::circle_btn(p.home.0.x, p.home.0.y, p.home.1, palette::CARD);
-        draw::chevron_left(p.home.0.x, p.home.0.y, p.home.1 * 0.9, palette::INK);
-        draw::circle_btn(p.mute.0.x, p.mute.0.y, p.mute.1, palette::CARD);
-        draw::speaker(p.mute.0.x, p.mute.0.y, p.mute.1 * 0.9, palette::INK, ctx.audio.muted());
+        chrome::draw_topbar(&chrome::topbar(&ctx.frame), ctx);
 
-        // Rainbow (filled = stars). When done, show the full arc.
+        // Rainbow progress meter: a pale ghost of all 7 bands (so the goal is
+        // visible from zero stars), filled over in color star by star.
         let filled = if self.phase == Phase::Done { GOAL } else { self.stars };
+        draw::rainbow_ghost(p.rb_cx, p.rb_horizon, p.rb_scale, p.rb_stroke, palette::BG);
         draw::rainbow(p.rb_cx, p.rb_horizon, p.rb_scale, p.rb_stroke, filled as usize);
+
+        // The companion frog at the rainbow's foot: calm idle between answers,
+        // a celebratory jump on each star (or when tapped).
+        let rx = &REACTIONS[self.frog_kind];
+        let pose = if self.frog_t < rx.dur {
+            react_pose(rx, self.frog_t, p.frog.1)
+        } else {
+            idle_pose(ctx.time)
+        };
+        draw::frog(p.frog.0.x, p.frog.0.y, p.frog.1, palette::RAINBOW[3], pose);
 
         // Card.
         let miss_tint = if self.phase == Phase::Miss {
@@ -407,8 +450,6 @@ impl Scene for PhonicsScene {
 }
 
 struct PLayout {
-    home: (Vec2, f32),
-    mute: (Vec2, f32),
     card: Rect,
     letter_size: u16,
     rb_cx: f32,
@@ -418,6 +459,9 @@ struct PLayout {
     miss: (Vec2, f32),
     got: (Vec2, f32),
     advance: (Vec2, f32),
+    /// The in-play companion frog: perched at the left foot of the rainbow
+    /// (center, radius). Calm idle; reacts on a correct answer or a tap.
+    frog: (Vec2, f32),
 }
 
 /// Done-scene geometry shared by update + draw.
@@ -427,10 +471,7 @@ fn done_layout(f: &crate::layout::Frame) -> (Vec2, f32, Vec2, Vec2, f32, f32) {
     let gy = f.h * (1.0 - ground);
     let fr = f.vmin(0.11).clamp(58.0, 140.0);
     let frog_c = vec2(f.w / 2.0, gy - fr * 0.78);
-    let br = f.icon_btn() / 2.0 * 1.2;
-    let m = 30.0 + f.safe.bottom.max(0.0);
-    let replay = vec2(f.safe.left + 30.0 + br, f.h - m - br);
-    let home_b = vec2(f.w - (f.safe.right + 30.0 + br), f.h - m - br);
+    let (replay, home_b, br) = chrome::corner_buttons(f);
     (frog_c, fr, replay, home_b, br, gy)
 }
 
@@ -497,7 +538,7 @@ fn build_garden(
         let x = xf * f.w + rng.range(-0.015, 0.015) * f.w;
         let y = (gy + depth * gh * rng.range(0.9, 1.1)).min(floor);
         let size = base * smul * rng.range(0.92, 1.10);
-        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Plant(kind), color, phase: rng.range(0.0, 6.28) });
+        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Plant(kind), color, phase: rng.range(0.0, std::f32::consts::TAU) });
     };
 
     // Foreground heroes: two clumps flanking the frog (back→front within each).
@@ -515,7 +556,7 @@ fn build_garden(
         let x = rng.range(0.03, 0.97) * f.w;
         let y = (gy + rng.range(0.0, 0.55) * gh).min(floor);
         let size = base * rng.range(0.40, 0.75);
-        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Grass, color: palette::WHITE, phase: rng.range(0.0, 6.28) });
+        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Grass, color: palette::WHITE, phase: rng.range(0.0, std::f32::consts::TAU) });
     }
 
     items.sort_by(|a, b| a.pos.y.total_cmp(&b.pos.y));
@@ -583,7 +624,6 @@ fn idle_pose(time: f32) -> draw::FrogPose {
 fn plan(f: &crate::layout::Frame) -> PLayout {
     let cx = f.w / 2.0;
     let tb = f.topbar();
-    let ir = f.icon_btn() / 2.0;
     let phone = f.is_phone();
 
     // On short (phone-landscape) viewports, pack from the bottom up so the
@@ -622,9 +662,16 @@ fn plan(f: &crate::layout::Frame) -> PLayout {
     let rb_fit = ((rb_horizon - tb.y - 4.0) / 70.0).max(0.2);
     let rb_scale = rb_desired.min(rb_fit);
 
+    // Companion frog at the left foot of the rainbow, feet on the horizon. The
+    // rainbow's outer band meets the horizon ~84.7*scale left of center (radius
+    // 65s/(1-cos75°) ≈ 87.7s, half-width = r·sin75°); the frog leans on that
+    // band's end (overlapping it by ~0.45·fr, drawn on top) — beside the card,
+    // never over it, clear of every tap target.
+    let fr = (card_h * 0.17).clamp(24.0, 54.0);
+    let frog_x = cx - 84.7 * rb_scale - fr * 0.55;
+    let frog = (vec2(frog_x, rb_horizon - 0.92 * fr), fr);
+
     PLayout {
-        home: (vec2(tb.x + ir, tb.y + ir), ir),
-        mute: (vec2(tb.x + tb.w - ir, tb.y + ir), ir),
         card,
         letter_size: (card_h * 0.6) as u16,
         rb_cx: cx,
@@ -634,6 +681,7 @@ fn plan(f: &crate::layout::Frame) -> PLayout {
         miss: (vec2(x0 + slot / 2.0, by), miss_r),
         got: (vec2(x0 + slot + gap + slot / 2.0, by), got_r),
         advance: (vec2(cx, by), got_r),
+        frog,
     }
 }
 
