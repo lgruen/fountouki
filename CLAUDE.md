@@ -42,7 +42,9 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 ## Workflow
 - Develop on a branch off `main`; open a PR at the end of a code-changing task.
   Never push to `main`.
-- Before pushing: `cargo test --workspace` (core unit tests), `cargo run -p
+- Before pushing: `cargo clippy --workspace --all-targets -- -D warnings` (also
+  enforced by a PreToolUse hook in `.claude/settings.json` on every `git
+  commit`/`git push`), `cargo test --workspace` (core unit tests), `cargo run -p
   fountouki -- --playtest` (gameplay), `bash tools/goldens.sh` (visuals), and
   `cargo build --release -p fountouki --target wasm32-unknown-unknown` (web).
 - **Eyeball `screenshots/golden/` — iPad landscape first**, then portrait, then
