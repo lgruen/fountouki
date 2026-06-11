@@ -43,9 +43,13 @@ details (see `CLAUDE.md`).
   stroke-order demo, green start / red end dots (numbered for f t x i j),
   corridor finger-tracing over the faded font glyph (errorless, monotonic),
   5-letter sessions, persisted next-letter progression, parent start-over.
-- Still future from the original sketch below: construction/house wrapper,
-  capitals + digits (pipeline supports them — add chart routes per glyph),
-  Leitner/SRS scheduling, guide fading across boxes.
+- **Construction wrapper shipped**: build-a-house progress meter (one part per
+  letter: walls → door → windows → roof → chimney, crane-cable install + hammer
+  clonk), pencil-drawn demo, rising pentatonic trace ticks, and a house-warming
+  finale (letter bunting, doorbell door, lightable windows, hard-hat frog).
+- Still future from the original sketch below: capitals + digits (pipeline
+  supports them — add chart routes per glyph), guide fading across boxes,
+  finished houses accreting into a street on the picker.
 - Touch / stylus tracing of letters + digits. Construction wrapper:
   each correct letter unlocks a pre-made house part (window, door,
   roof tile, pipe) via a tradie-installs animation. Session arc =

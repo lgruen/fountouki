@@ -99,6 +99,19 @@ pub const CAR_BODY: Color = CARD; // cars are uniform cream — the items carry 
 // The cab driver is the shared frog mascot (see draw::frog), tinted RAINBOW[3];
 // no separate critter palette.
 
+// Tracing finale + build-a-house (the tracing progress meter / set piece).
+pub const HOUSE_WALL: Color = hex(0xffe9b8); // warm butter walls
+pub const HOUSE_WALL_EDGE: Color = hex(0xd9a85e); // wall outline / trim
+pub const HOUSE_ROOF: Color = hex(0xe8705f); // cheerful terracotta
+pub const HOUSE_ROOF_EDGE: Color = hex(0xc2564a); // roof underside / fascia
+pub const HOUSE_DOOR: Color = hex(0x38b3e2); // friendly sky-blue door
+pub const HOUSE_DOOR_DARK: Color = hex(0x2b8db3); // door frame / shade
+pub const HOUSE_DOORWAY: Color = hex(0x4a3a30); // open-door interior
+pub const HOUSE_BRICK: Color = hex(0xc97b6a); // chimney brick
+pub const HOUSE_GLASS: Color = hex(0xcdefff); // unlit window glass
+pub const HOUSE_GLASS_LIT: Color = hex(0xffd76b); // warm lit window glass
+pub const HOUSE_GROUND: Color = hex(0xa8d9a0); // in-play grass mound
+
 // Form chrome (parent settings)
 pub const FIELD_BORDER: Color = hex(0xe6e1d3);
 pub const SCRIM: Color = Color::new(43.0 / 255.0, 44.0 / 255.0, 52.0 / 255.0, 0.72);
