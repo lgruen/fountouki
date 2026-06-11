@@ -497,7 +497,7 @@ fn build_garden(
         let x = xf * f.w + rng.range(-0.015, 0.015) * f.w;
         let y = (gy + depth * gh * rng.range(0.9, 1.1)).min(floor);
         let size = base * smul * rng.range(0.92, 1.10);
-        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Plant(kind), color, phase: rng.range(0.0, 6.28) });
+        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Plant(kind), color, phase: rng.range(0.0, std::f32::consts::TAU) });
     };
 
     // Foreground heroes: two clumps flanking the frog (back→front within each).
@@ -515,7 +515,7 @@ fn build_garden(
         let x = rng.range(0.03, 0.97) * f.w;
         let y = (gy + rng.range(0.0, 0.55) * gh).min(floor);
         let size = base * rng.range(0.40, 0.75);
-        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Grass, color: palette::WHITE, phase: rng.range(0.0, 6.28) });
+        items.push(GardenItem { pos: vec2(x, y), size, kind: GardenLayer::Grass, color: palette::WHITE, phase: rng.range(0.0, std::f32::consts::TAU) });
     }
 
     items.sort_by(|a, b| a.pos.y.total_cmp(&b.pos.y));

@@ -24,6 +24,10 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
 
+      # Lint gate: the tree must be clippy-clean (warnings are errors).
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       # Pure-logic core tests (~120) + any app unit tests.
       - name: Test workspace
         run: cargo test --workspace

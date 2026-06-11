@@ -111,8 +111,10 @@ async fn main() {
             "patterns" => {
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "shapes".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "shapes".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 let mut sc = PatternsScene::new(db.clone(), 7, now);
@@ -123,9 +125,11 @@ async fn main() {
             "patterns-unit" => {
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "shapes".to_string();
-                    ps.mode = "unit".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "shapes".to_string(),
+                        mode: "unit".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
@@ -142,8 +146,10 @@ async fn main() {
             "patterns-emoji" => {
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "emoji-animals".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "emoji-animals".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 Box::new(PatternsScene::new(db.clone(), 5, now))
@@ -154,9 +160,11 @@ async fn main() {
                 // pool so the count is always the full 4.
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "emoji-animals".to_string();
-                    ps.difficulty = "hard".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "emoji-animals".to_string(),
+                        difficulty: "hard".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 Box::new(PatternsScene::new(db.clone(), 5, now))
@@ -167,8 +175,10 @@ async fn main() {
                 // golden shows the train parked + celebrating at the flag.
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let mut ps = fountouki_core::settings::PatternsSettings::default();
-                    ps.theme_choice = "shapes".to_string();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "shapes".to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_patterns(&mut **kv, &ps);
                 }
                 let frame = Frame::new(w as f32, h as f32, Insets::default());

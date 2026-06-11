@@ -119,6 +119,10 @@ mod imp {
     pub fn set_fields(_screen: (f32, f32), _view: (f32, f32, f32, f32), _fields: &[Field]) {}
 }
 
+// `value` is only polled by the web build; native reads the physical keyboard.
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_imports))]
+pub use imp::{blur, focus, set_fields, value};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,7 +150,3 @@ mod tests {
         assert_eq!(json, "{\"sw\":10,\"sh\":20,\"view\":[0,0,10,20],\"fields\":[]}");
     }
 }
-
-// `value` is only polled by the web build; native reads the physical keyboard.
-#[cfg_attr(not(target_arch = "wasm32"), allow(unused_imports))]
-pub use imp::{blur, focus, set_fields, value};

@@ -63,6 +63,8 @@ impl Difficulty {
         }
     }
 
+    // Paired with `as_str`; returns Option (not the std trait's Result).
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Difficulty> {
         Some(match s {
             "auto" => Difficulty::Auto,
@@ -103,6 +105,8 @@ impl GameMode {
         }
     }
 
+    // Paired with `as_str`; returns Option (not the std trait's Result).
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<GameMode> {
         Some(match s {
             "next" => GameMode::Next,
@@ -273,8 +277,7 @@ pub fn generate_round(
             visible.push(unit_items[letter_index(ch)].clone());
         }
     }
-    for i in 0..partial_len {
-        let ch = template_chars[i];
+    for &ch in template_chars.iter().take(partial_len) {
         visible.push(unit_items[letter_index(ch)].clone());
     }
 
@@ -499,7 +502,7 @@ mod tests {
                     generate_round(level, ThemeChoice::EmojiAnimals, GameMode::Unit, Difficulty::Auto, &mut rng);
                 let expected_full = if r.period == 2 { 3 } else { 2 };
                 assert_eq!(r.full_reps, expected_full);
-                assert!(r.partial_len <= r.period - 1);
+                assert!(r.partial_len < r.period);
                 assert_eq!(r.visible.len(), r.full_reps * r.period + r.partial_len);
                 assert_eq!(r.slot_index, r.visible.len());
                 assert_eq!(r.unit_len, r.period);
