@@ -7,6 +7,21 @@ use crate::store::Db;
 use fountouki_core::settings;
 use fountouki_core::sync::{self, Debouncer};
 use quad_net::http_request::{Method, Request, RequestBuilder};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Session-only sync kill-switch (toggled in the parent menu). Deliberately
+/// NEVER persisted — restarting the app re-enables sync — so a parent can poke
+/// at a game without polluting the family's synced state and without having to
+/// delete (and later retype) the token. Applies to every game at once.
+static SYNC_PAUSED: AtomicBool = AtomicBool::new(false);
+
+pub fn sync_paused() -> bool {
+    SYNC_PAUSED.load(Ordering::Relaxed)
+}
+
+pub fn set_sync_paused(paused: bool) {
+    SYNC_PAUSED.store(paused, Ordering::Relaxed);
+}
 
 pub struct SyncClient {
     db: Db,
@@ -38,8 +53,14 @@ impl SyncClient {
     }
 
     /// (endpoint, token) if sync is configured, re-read fresh each call so
-    /// token/endpoint edits in the parent menu take effect mid-session.
+    /// token/endpoint edits in the parent menu take effect mid-session. The
+    /// session pause reads as "not configured": pulls stop, pushes are dropped
+    /// silently; unpausing re-pulls via `poll_pull`'s token-change check (the
+    /// blob is full-state, so the next grade pushes everything anyway).
     fn cfg(&self) -> Option<(String, String)> {
+        if sync_paused() {
+            return None;
+        }
         let s = {
             let kv = self.db.borrow_kv();
             settings::load_shared(&**kv)

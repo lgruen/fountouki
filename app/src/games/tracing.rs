@@ -3,6 +3,9 @@
 //! traces over the faded glyph (trace): a green dot marks the start, a red dot
 //! the end, and ink follows the finger along a generous corridor. Errorless —
 //! a wandering finger just stops laying ink; progress never goes backwards.
+//! After the reward beat the parent grades the trace ✓/✗ (grade) — scheduling
+//! only, the star already happened. Letters come from the shared Leitner SRS
+//! over the motor-skill order; state syncs cross-device like phonics.
 //! Stroke geometry + progress logic live in `fountouki_core::tracing`.
 use crate::{
     anim, chrome, draw, input,
@@ -11,8 +14,9 @@ use crate::{
     store::Db,
     text,
 };
-use fountouki_core::tracing as tr;
+use fountouki_core::{rng::Mulberry32, srs, tracing as tr};
 use macroquad::prelude::*;
+use nanoserde::SerJson;
 
 /// Finger corridor half-width + dot tap radius, in font units (UPEM = 1000).
 /// ~36 px on an iPad-sized letter: forgiving for small fingers, tight enough
@@ -29,14 +33,23 @@ const ADVANCE_BEAT: f32 = 1.1;
 enum Phase {
     Watch,
     Trace,
+    /// Letter finished + celebrated; the parent grades it ✓/✗ before the next
+    /// one. The grade only drives the Leitner schedule — the star is already
+    /// the kid's (monotonic, errorless).
+    Grade,
     Done,
 }
 
 pub struct TracingScene {
     db: Db,
-    state: tr::TracingState,
+    state: srs::LeitnerState,
+    rng: Mulberry32,
     queue: Vec<char>,
     qi: usize,
+    /// The letter just shown, so a rebuilt queue never repeats it back-to-back.
+    last: Option<char>,
+    /// Letters finished this session, in order (drives the done-scene cards).
+    traced: Vec<char>,
     pub stars: u32,
     phase: Phase,
     /// Current stroke being demoed/traced + arc-length progress along it.
@@ -48,20 +61,27 @@ pub struct TracingScene {
     finish_t: f32,
     frog_t: f32,
     confetti: crate::confetti::Confetti,
+    sync: crate::net::SyncClient,
 }
 
 impl TracingScene {
-    pub fn new(db: Db, seed: u32, _now: i64) -> TracingScene {
+    pub fn new(db: Db, seed: u32, now: i64) -> TracingScene {
         let state = {
             let kv = db.borrow_kv();
-            tr::load(&**kv)
+            tr::load(&**kv, now)
         };
-        let queue = tr::session_queue(&state);
+        let mut rng = Mulberry32::new(seed);
+        let mut queue = tr::build_queue(&state, now, &mut rng);
+        srs::avoid_repeat(&mut queue, None);
+        let sync = crate::net::SyncClient::new(db.clone(), "tracing");
         TracingScene {
             db,
             state,
+            rng,
             queue,
             qi: 0,
+            last: None,
+            traced: Vec::new(),
             stars: 0,
             phase: Phase::Watch,
             stroke_i: 0,
@@ -71,6 +91,7 @@ impl TracingScene {
             finish_t: 99.0,
             frog_t: 99.0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x7e11_e77a),
+            sync,
         }
     }
 
@@ -82,9 +103,16 @@ impl TracingScene {
         tr::glyph(self.current()).expect("traced letter has stroke data")
     }
 
-    fn restart_session(&mut self) {
-        self.queue = tr::session_queue(&self.state);
+    fn save(&self) {
+        let mut kv = self.db.borrow_kv_mut();
+        tr::save(&mut **kv, &self.state);
+    }
+
+    fn restart_session(&mut self, now: i64) {
+        self.queue = tr::build_queue(&self.state, now, &mut self.rng);
+        srs::avoid_repeat(&mut self.queue, self.last);
         self.qi = 0;
+        self.traced.clear();
         self.stars = 0;
         self.phase = Phase::Watch;
         self.stroke_i = 0;
@@ -105,29 +133,46 @@ impl TracingScene {
         self.stars += 1;
         ctx.audio.correct(self.stars);
         self.finish_t = 0.0;
+        self.traced.push(self.current());
         self.confetti
             .burst(vec2(p.card.x + p.card.w / 2.0, p.card.y + p.card.h * 0.3), 60, p.card.w / 3.0);
-        tr::letter_completed(&mut self.state);
-        {
-            let mut kv = self.db.borrow_kv_mut();
-            tr::save(&mut **kv, &self.state);
-        }
+        // The reward beat, then the parent's ✓/✗ before the next letter.
         self.advance_in = Some(ADVANCE_BEAT);
     }
 
+    fn on_grade(&mut self, ctx: &Ctx, got_it: bool) {
+        let c = self.current();
+        if got_it {
+            srs::grade_got_it(&mut self.state, c, ctx.now);
+        } else {
+            srs::grade_missed(&mut self.state, c, ctx.now);
+        }
+        ctx.audio.tap();
+        self.save();
+        self.sync.queue_push(&self.state.serialize_json(), ctx.now);
+        self.advance_letter(ctx);
+    }
+
     fn advance_letter(&mut self, ctx: &Ctx) {
+        self.last = Some(self.current());
         self.qi += 1;
-        if self.qi >= self.queue.len() {
+        if self.stars >= tr::SESSION_GOAL as u32 {
             self.phase = Phase::Done;
             self.frog_t = 99.0;
+            self.sync.flush();
             ctx.audio.finale();
-        } else {
-            self.phase = Phase::Watch;
-            self.demo_t = 0.0;
-            self.stroke_i = 0;
-            self.progress = 0.0;
-            self.finish_t = 99.0;
+            return;
         }
+        if self.qi >= self.queue.len() {
+            self.queue = tr::build_queue(&self.state, ctx.now, &mut self.rng);
+            srs::avoid_repeat(&mut self.queue, self.last);
+            self.qi = 0;
+        }
+        self.phase = Phase::Watch;
+        self.demo_t = 0.0;
+        self.stroke_i = 0;
+        self.progress = 0.0;
+        self.finish_t = 99.0;
     }
 
     /// Demo timeline: per stroke, draw time (length/speed, dots pop) + a pause.
@@ -192,8 +237,9 @@ impl TracingScene {
         let pt = ctx.pointer;
         if pt.tapped() {
             if input::hit_circle(pt.pos, replay.x, replay.y, br) {
-                self.restart_session();
+                self.restart_session(ctx.now);
             } else if input::hit_circle(pt.pos, home_b.x, home_b.y, br) {
+                self.sync.flush();
                 return Nav::Home;
             } else if input::hit_circle(pt.pos, frog_c.x, frog_c.y, fr * 1.3) && self.frog_t > 0.8 {
                 self.frog_t = 0.0;
@@ -211,29 +257,40 @@ impl TracingScene {
     pub(crate) fn in_watch(&self) -> bool {
         self.phase == Phase::Watch
     }
+    pub(crate) fn in_grade(&self) -> bool {
+        self.phase == Phase::Grade
+    }
     pub(crate) fn stroke_index(&self) -> usize {
         self.stroke_i
     }
-    /// The reward beat between a finished letter and the next one.
+    /// The reward beat between a finished letter and the parent's grade.
     pub(crate) fn awaiting_advance(&self) -> bool {
         self.advance_in.is_some()
     }
     pub(crate) fn current_letter(&self) -> char {
         self.current()
     }
+    pub(crate) fn letter_box(&self, c: char) -> u8 {
+        self.state.letters.get(&c.to_string()).map(|ls| ls.box_).unwrap_or(0)
+    }
     pub(crate) fn skip_watch(&mut self) {
         if self.phase == Phase::Watch {
             self.start_trace();
         }
     }
+    pub(crate) fn got_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        plan(f, self.current()).got.0
+    }
+    pub(crate) fn miss_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        plan(f, self.current()).miss.0
+    }
     pub(crate) fn debug_set_letter(&mut self, c: char) {
-        self.queue = tr::session_queue(&self.state);
-        self.queue[0] = c;
+        self.queue = vec![c];
         self.qi = 0;
     }
     pub(crate) fn debug_finish_session(&mut self) {
-        self.qi = self.queue.len();
-        self.stars = self.queue.len() as u32;
+        self.traced = tr::ORDER[..tr::SESSION_GOAL].to_vec();
+        self.stars = tr::SESSION_GOAL as u32;
         self.phase = Phase::Done;
     }
     /// Screen point at fraction `t` (0..1) along the current stroke — playtest
@@ -254,11 +311,20 @@ impl Scene for TracingScene {
         self.confetti.update(ctx.dt);
         self.finish_t += ctx.dt;
         self.frog_t += ctx.dt;
+        // Drive cross-device sync: send debounced pushes, and merge the remote
+        // blob once the initial pull lands (non-yanking — just updates state).
+        self.sync.drive(ctx.now);
+        if let Some(remote) = self.sync.poll_pull() {
+            if let Some(rstate) = srs::validate(&remote) {
+                self.state = srs::merge(&self.state, &rstate, ctx.now);
+                self.save();
+            }
+        }
         if let Some(t) = self.advance_in {
             let t = t - ctx.dt;
             if t <= 0.0 {
                 self.advance_in = None;
-                self.advance_letter(ctx);
+                self.phase = Phase::Grade;
             } else {
                 self.advance_in = Some(t);
             }
@@ -269,7 +335,10 @@ impl Scene for TracingScene {
         }
         match chrome::handle_topbar(&chrome::topbar(&ctx.frame), ctx, &self.db) {
             Some(chrome::TopbarAction::OpenParent) => return Nav::OpenParent,
-            Some(chrome::TopbarAction::Home) => return Nav::Home,
+            Some(chrome::TopbarAction::Home) => {
+                self.sync.flush();
+                return Nav::Home;
+            }
             Some(chrome::TopbarAction::MuteToggled) => return Nav::Stay,
             None => {}
         }
@@ -293,6 +362,17 @@ impl Scene for TracingScene {
                     self.update_trace(ctx);
                 }
             }
+            Phase::Grade => {
+                let p = plan(&ctx.frame, self.current());
+                let pt = ctx.pointer;
+                if pt.tapped() {
+                    if input::hit_circle(pt.pos, p.got.0.x, p.got.0.y, p.got.1) {
+                        self.on_grade(ctx, true);
+                    } else if input::hit_circle(pt.pos, p.miss.0.x, p.miss.0.y, p.miss.1) {
+                        self.on_grade(ctx, false);
+                    }
+                }
+            }
             Phase::Done => {}
         }
         Nav::Stay
@@ -309,7 +389,7 @@ impl Scene for TracingScene {
         chrome::draw_topbar(&chrome::topbar(&ctx.frame), ctx);
 
         // Session stars (monotonic), centered above the card.
-        let n = self.queue.len();
+        let n = tr::SESSION_GOAL;
         let sr = (p.card.w * 0.045).clamp(10.0, 16.0);
         let sgap = sr * 2.6;
         let sx0 = p.card.x + p.card.w / 2.0 - (n as f32 - 1.0) * sgap / 2.0;
@@ -345,8 +425,8 @@ impl Scene for TracingScene {
 
         match self.phase {
             Phase::Watch => self.draw_demo(&p),
-            Phase::Trace => {
-                if !finished {
+            Phase::Trace | Phase::Grade => {
+                if self.phase == Phase::Trace && !finished {
                     self.draw_trace(&p, ctx);
                 } else {
                     self.draw_ink_full(&p);
@@ -355,11 +435,18 @@ impl Scene for TracingScene {
             Phase::Done => {}
         }
 
-        // Watch-again button (only while tracing — the demo is already playing
-        // otherwise). Sits under the card like phonics' action row.
+        // Action row under the card: while tracing, the watch-again button;
+        // while grading, the parent's ✓/✗ (phonics' exact pair — scheduling
+        // only, the star is already earned).
         if self.phase == Phase::Trace && !finished {
             draw::circle_btn(p.watch.0.x, p.watch.0.y, p.watch.1, palette::CARD);
             draw::replay_icon(p.watch.0.x, p.watch.0.y, p.watch.1 * 0.9, palette::MUTED);
+        }
+        if self.phase == Phase::Grade {
+            draw::circle_btn(p.miss.0.x, p.miss.0.y, p.miss.1, palette::CARD);
+            draw::mark_cross(p.miss.0.x, p.miss.0.y, p.miss.1, palette::MUTED);
+            draw::circle_btn(p.got.0.x, p.got.0.y, p.got.1, palette::OK);
+            draw::mark_check(p.got.0.x, p.got.0.y, p.got.1, palette::OK_STRONG);
         }
 
         self.confetti.draw();
@@ -531,12 +618,12 @@ impl TracingScene {
         );
 
         // The letters this session wrote, popping in one by one on mini cards.
-        let n = self.queue.len() as f32;
+        let n = self.traced.len() as f32;
         let cw = (f.w * 0.11).clamp(70.0, 120.0);
         let gap = cw * 0.22;
         let x0 = f.w / 2.0 - (n * cw + (n - 1.0) * gap) / 2.0;
         let cy = f.h * 0.42;
-        for (i, ch) in self.queue.iter().enumerate() {
+        for (i, ch) in self.traced.iter().enumerate() {
             let t = ((ctx.time - 0.12 * i as f32) / 0.45).clamp(0.0, 1.0);
             if t <= 0.0 {
                 continue;
@@ -604,6 +691,9 @@ struct TLayout {
     start_r: f32,
     /// Watch-again button (center, radius).
     watch: (Vec2, f32),
+    /// Parent grade buttons (grade phase): ✗ left, ✓ right — phonics' pair.
+    miss: (Vec2, f32),
+    got: (Vec2, f32),
 }
 
 fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
@@ -644,6 +734,12 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
     let baseline = card.y + card_h / 2.0 + (tr::ASCENT + tr::DESCENT) / 2.0 * scale;
     let pen_x = cx - (bb.0 + bb.2) / 2.0 * scale;
 
+    // Grade row: ✗ (smaller) left of ✓, the same arrangement as phonics so
+    // the parent's hand already knows it.
+    let slot = btn_r * 2.0;
+    let ggap = if phone { 22.0 } else { 34.0 };
+    let gx0 = cx - (2.0 * slot + ggap) / 2.0;
+
     TLayout {
         card,
         font_px,
@@ -651,6 +747,8 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
         ink_w: (64.0 * scale).max(8.0),
         start_r: (90.0 * scale).clamp(12.0, 26.0),
         watch: (vec2(cx, by), btn_r),
+        miss: (vec2(gx0 + slot / 2.0, by), btn_r * 0.66),
+        got: (vec2(gx0 + slot + ggap + slot / 2.0, by), btn_r),
     }
 }
 

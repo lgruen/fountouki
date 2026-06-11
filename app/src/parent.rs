@@ -51,9 +51,8 @@ pub struct ParentPanel {
     ptn: PatternsSettings,
     ptn_dirty: bool,
     start_over: bool,
+    /// Read-only Leitner mastery summary (phonics + tracing).
     mastery: Option<Mastery>,
-    /// Tracing progression (next-letter index), shown read-only + resettable.
-    tracing: Option<fountouki_core::tracing::TracingState>,
     seed: u32,
     /// Pixels the body content is scrolled up (0 = top). Clamped to the
     /// content's overflow each frame; always 0 when everything fits.
@@ -80,14 +79,8 @@ impl ParentPanel {
             let kv = db.borrow_kv();
             settings::load_patterns(&**kv)
         };
-        let mastery = if game == "phonics" {
-            Some(compute_mastery(&db, now))
-        } else {
-            None
-        };
-        let tracing = if game == "tracing" {
-            let kv = db.borrow_kv();
-            Some(fountouki_core::tracing::load(&**kv))
+        let mastery = if game == "phonics" || game == "tracing" {
+            Some(compute_mastery(&db, game, now))
         } else {
             None
         };
@@ -101,7 +94,6 @@ impl ParentPanel {
             ptn_dirty: false,
             start_over: false,
             mastery,
-            tracing,
             seed,
             scroll: 0.0,
             drag_y: None,
@@ -222,6 +214,9 @@ impl ParentPanel {
         if in_body && hit(pt.pos, l.clear) {
             self.token.clear();
         }
+        if in_body && hit(pt.pos, l.sync_pause) {
+            crate::net::set_sync_paused(!crate::net::sync_paused());
+        }
         if self.game == "patterns" && in_body {
             if hit(pt.pos, l.theme) {
                 self.ptn.theme_choice = cycle_theme(&self.ptn.theme_choice);
@@ -246,10 +241,13 @@ impl ParentPanel {
             }
         }
         if self.game == "tracing" && in_body && hit(pt.pos, l.start_over) {
-            // Start over = restart the letter progression from the first letter.
+            // Start over = all letters back to box 0, stamped lastSeen=now so
+            // the reset wins the last-seen-wins sync merge.
             {
+                use fountouki_core::tracing as tr;
                 let mut kv = self.db.borrow_kv_mut();
-                fountouki_core::tracing::save(&mut **kv, &fountouki_core::tracing::empty_state());
+                let cur = tr::load(&**kv, ctx.now);
+                tr::save(&mut **kv, &tr::start_over(&cur, ctx.now));
             }
             self.start_over = true;
             self.apply();
@@ -282,16 +280,7 @@ impl ParentPanel {
         if let Some(m) = &self.mastery {
             draw_mastery(l.mastery, m);
         }
-        if let Some(st) = &self.tracing {
-            let order = fountouki_core::tracing::ORDER;
-            let next = order[(st.next as usize) % order.len()];
-            text::ui_left(
-                &format!("next letter: {next}   ({} of {} reached)", st.next + 1, order.len()),
-                l.mastery.x,
-                l.mastery.y + 11.0,
-                15,
-                palette::MUTED,
-            );
+        if self.game == "tracing" {
             button(l.start_over, "start over", palette::ACCENT, palette::WHITE);
         }
         // Sync section.
@@ -299,6 +288,13 @@ impl ParentPanel {
         field(l.token, &self.token, self.focus == Focus::Token, "(empty = no sync)");
         button(l.gen, "generate", palette::OK, palette::OK_STRONG);
         button(l.clear, "clear", palette::CARD, palette::MUTED);
+        // Session-only pause for quick testing without deleting the token —
+        // resets to "on" when the app restarts (deliberately not persisted).
+        if crate::net::sync_paused() {
+            button(l.sync_pause, "sync paused", palette::ACCENT, palette::WHITE);
+        } else {
+            button(l.sync_pause, "sync: on", palette::CARD, palette::MUTED);
+        }
         label(l.endpoint, "endpoint");
         field(l.endpoint, &self.endpoint, self.focus == Focus::Endpoint, settings_default_endpoint());
         draw::pop_clip();
@@ -361,13 +357,19 @@ fn none_if_empty(s: &str) -> Option<String> {
     }
 }
 
-fn compute_mastery(db: &Db, now: i64) -> Mastery {
-    let key = fountouki_core::storage::ns_key("phonics", "state");
-    let mut st = db
-        .get(&key)
-        .and_then(|raw| srs::validate(&raw))
-        .unwrap_or_else(srs::empty_state);
-    srs::ensure_letters(&mut st, now);
+fn compute_mastery(db: &Db, game: &str, now: i64) -> Mastery {
+    let st = if game == "tracing" {
+        let kv = db.borrow_kv();
+        fountouki_core::tracing::load(&**kv, now)
+    } else {
+        let key = fountouki_core::storage::ns_key("phonics", "state");
+        let mut st = db
+            .get(&key)
+            .and_then(|raw| srs::validate(&raw))
+            .unwrap_or_else(srs::empty_state);
+        srs::ensure_letters(&mut st, now);
+        st
+    };
     let (mut mastered, mut strong, mut learning, mut new) = (0, 0, 0, 0);
     let mut boxes: Vec<(char, u8)> = Vec::new();
     for c in 'a'..='z' {
@@ -421,6 +423,8 @@ struct Layout {
     gen: Rect,
     clear: Rect,
     endpoint: Rect,
+    /// Session-only sync pause toggle (third button on the generate/clear row).
+    sync_pause: Rect,
     done: Rect,
     /// Total body content height, and the overflow past the viewport.
     inner_h: f32,
@@ -469,7 +473,7 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
     } else if game == "phonics" {
         mastery_l = block(&mut ly, 78.0);
     } else if game == "tracing" {
-        mastery_l = block(&mut ly, 26.0); // next-letter progress line
+        mastery_l = block(&mut ly, 78.0); // Leitner mastery grid, like phonics
         start_l = block(&mut ly, BTN_H);
     }
     let token_l = labeled(&mut ly);
@@ -490,11 +494,12 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
 
     // local row → on-screen rect (left-aligned in the padded column).
     let lx = cx + PAD;
-    let half = (rw - 14.0) / 2.0;
+    let third = (rw - 2.0 * 14.0) / 3.0;
     let row = |loc: (f32, f32), w: f32| Rect::new(lx, view.y - s + loc.0, w, loc.1);
 
-    let gen = row(gen_l, half);
-    let clear = Rect::new(lx + half + 14.0, gen.y, half, BTN_H);
+    let gen = row(gen_l, third);
+    let clear = Rect::new(lx + third + 14.0, gen.y, third, BTN_H);
+    let sync_pause = Rect::new(lx + 2.0 * (third + 14.0), gen.y, third, BTN_H);
     let off = Rect::new(-1000.0, -1000.0, 0.0, 0.0);
     let (theme, diff, mode, hint, start_over) = if game == "patterns" {
         (row(theme_l, rw), row(diff_l, rw), row(mode_l, rw), row(hint_l, rw), row(start_l, rw))
@@ -520,6 +525,7 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
         gen,
         clear,
         endpoint: row(endpoint_l, rw),
+        sync_pause,
         done,
         inner_h,
         max_scroll,
@@ -634,6 +640,28 @@ mod tests {
         // Scroll is clamped: asking for more than max doesn't push past the end.
         let over = layout(&small, "patterns", l0.max_scroll + 999.0);
         assert!((over.endpoint.y - l.endpoint.y).abs() < 0.5, "scroll not clamped to max");
+    }
+
+    /// The session-only sync toggle shares the generate/clear row (adding a
+    /// row would overflow tablet cards): three equal buttons, no overlap,
+    /// inside the padded column.
+    #[test]
+    fn sync_pause_shares_the_generate_row() {
+        for game in ["patterns", "phonics", "tracing"] {
+            for (w, h) in SIZES {
+                let l = layout(&frame(w, h), game, 0.0);
+                assert_eq!(l.sync_pause.y, l.gen.y, "{game} {w}x{h}: not on the gen row");
+                assert!(l.gen.x + l.gen.w < l.clear.x, "{game} {w}x{h}: gen/clear overlap");
+                assert!(
+                    l.clear.x + l.clear.w < l.sync_pause.x,
+                    "{game} {w}x{h}: clear/sync overlap"
+                );
+                assert!(
+                    l.sync_pause.x + l.sync_pause.w <= l.card.x + l.card.w - 20.0,
+                    "{game} {w}x{h}: sync button spills past the card padding"
+                );
+            }
+        }
     }
 
     /// The web soft-keyboard path resanitizes the hidden input's whole value;
