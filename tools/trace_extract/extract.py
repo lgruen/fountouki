@@ -10,8 +10,10 @@ Pipeline per glyph:
   extend tips to the visual stroke ends -> smooth + resample -> font units.
 
 Stroke order/direction follows the Victorian Modern Cursive handwriting
-chart (green start dot, red end dot, numbered arrows). Waypoints below are
-normalized to the glyph bbox: x 0..1 left->right, y 0..1 bottom->top.
+chart (green start dot, red end dot, numbered arrows) — committed alongside
+as `vmc-stroke-order-chart.png`; it also covers digits + capitals for when
+those get routes. Waypoints below are normalized to the glyph bbox:
+x 0..1 left->right, y 0..1 bottom->top.
 
 Deps: pip install freetype-py numpy scikit-image scipy pillow
 Run:  python3 tools/trace_extract/extract.py
