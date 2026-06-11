@@ -36,7 +36,16 @@ details (see `CLAUDE.md`).
   any arithmetic. Pedagogy research needed before designing — early
   numeracy has a wide research base.
 
-## Construction writing (future)
+## Construction writing (tracing v1 shipped; wrapper + SRS future)
+- **Shipped as the `tracing` game (lowercase a–z)**: per-letter pen strokes
+  extracted from VicModernCursive (`tools/trace_extract/extract.py`,
+  skeleton + chart-routed; baked into `core/src/tracing_data.rs`), animated
+  stroke-order demo, green start / red end dots (numbered for f t x i j),
+  corridor finger-tracing over the faded font glyph (errorless, monotonic),
+  5-letter sessions, persisted next-letter progression, parent start-over.
+- Still future from the original sketch below: construction/house wrapper,
+  capitals + digits (pipeline supports them — add chart routes per glyph),
+  Leitner/SRS scheduling, guide fading across boxes.
 - Touch / stylus tracing of letters + digits. Construction wrapper:
   each correct letter unlocks a pre-made house part (window, door,
   roof tile, pipe) via a tradie-installs animation. Session arc =

@@ -11,3 +11,6 @@ screenshots/
 /target
 app/smoke.png
 app/out.png
+
+# Python (tools/trace_extract)
+__pycache__/

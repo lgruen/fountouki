@@ -25,6 +25,7 @@ mod text;
 use games::patterns::PatternsScene;
 use games::phonics::PhonicsScene;
 use games::picker::PickerScene;
+use games::tracing::TracingScene;
 use parent::{ParentPanel, PanelResult};
 use input::Pointer;
 use layout::{Frame, Insets};
@@ -56,11 +57,21 @@ fn tap(pos: Vec2) -> Pointer {
     p
 }
 
+/// Build a synthetic "finger held down here" pointer (tracing drags).
+fn drag(pos: Vec2) -> Pointer {
+    let mut p = Pointer::default();
+    p.pos = pos;
+    p.down = true;
+    p.press_pos = pos;
+    p
+}
+
 /// The game registry: route id → a fresh scene. Adding a game = one arm here
 /// plus an entry in `games::picker::GAMES`.
 fn build_game(id: &str, db: &Db, now: i64) -> Box<dyn Scene> {
     match id {
         "patterns" => Box::new(PatternsScene::new(db.clone(), now as u32 ^ 0x1234_5678, now)),
+        "tracing" => Box::new(TracingScene::new(db.clone(), now as u32 ^ 0x7e11_e77a, now)),
         _ => Box::new(PhonicsScene::new(db.clone(), now as u32 ^ 0x5bd1_e995, now)),
     }
 }
@@ -252,6 +263,48 @@ async fn main() {
                 Box::new(sc)
             }
             "picker" => Box::new(PickerScene::new(db.clone())),
+            "tracing" => {
+                // Mid-trace of the first letter: guides, faded glyph, laid ink,
+                // breadcrumbs, pen marker and the red end dot all visible.
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = TracingScene::new(db.clone(), 7, now);
+                sc.skip_watch();
+                for i in 0..=20 {
+                    let ptr = drag(sc.stroke_point_px(&frame, 0.45 * i as f32 / 20.0));
+                    let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                Box::new(sc)
+            }
+            "tracing-watch" => {
+                // The animated stroke-order demo, caught mid-stroke.
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = TracingScene::new(db.clone(), 7, now);
+                let idle = Pointer::default();
+                for _ in 0..12 {
+                    let ctx = Ctx { dt: 0.075, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                Box::new(sc)
+            }
+            "tracing-two-stroke" => {
+                // 'x' with stroke 1 traced: shows the numbered "2" start dot.
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = TracingScene::new(db.clone(), 7, now);
+                sc.debug_set_letter('x');
+                sc.skip_watch();
+                for i in 0..=40 {
+                    let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
+                    let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                Box::new(sc)
+            }
+            "tracing-done" => {
+                let mut sc = TracingScene::new(db.clone(), 7, now);
+                sc.debug_finish_session();
+                Box::new(sc)
+            }
             "phonics-done" => {
                 // Play 7 correct rounds to reach the rainbow-done garden scene.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
@@ -276,6 +329,7 @@ async fn main() {
         let mut panel_opt: Option<ParentPanel> = match which {
             "parent-patterns" => Some(ParentPanel::open(db.clone(), "patterns", now, 99)),
             "parent-phonics" => Some(ParentPanel::open(db.clone(), "phonics", now, 99)),
+            "parent-tracing" => Some(ParentPanel::open(db.clone(), "tracing", now, 99)),
             _ => None,
         };
 
@@ -601,6 +655,97 @@ async fn main() {
                 println!("PASS patterns-replay");
             } else {
                 println!("FAIL patterns-replay (finale={}, level={}, stars={})", sc.in_finale(), sc.level, sc.stars);
+                fails += 1;
+            }
+        }
+        // tracing: drag along every stroke of every session letter; the session
+        // completes, stars climb monotonically, and progression persists.
+        {
+            let db = Db::mem();
+            let mut sc = TracingScene::new(db.clone(), 7, now);
+            let idle = Pointer::default();
+            // The demo can be skipped with a tap (impatient-kid path).
+            let watched = sc.in_watch();
+            let ptr = tap(vec2(frame.w / 2.0, frame.h / 2.0));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let skipped = watched && !sc.in_watch();
+
+            // Errorless: a finger far off the path lays no ink.
+            let far = sc.stroke_point_px(&frame, 0.5) + vec2(200.0, 200.0);
+            let ptr = drag(far);
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let errorless = sc.stroke_index() == 0 && sc.stars == 0;
+
+            // Trace all SESSION_GOAL letters stroke by stroke, like a finger.
+            let goal = fountouki_core::tracing::SESSION_GOAL as u32;
+            'session: for _ in 0..goal {
+                sc.skip_watch();
+                let mut guard = 0;
+                while !sc.awaiting_advance() && !sc.is_done() && guard < 12 {
+                    for i in 0..=30 {
+                        let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 30.0));
+                        let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                        sc.update(&ctx);
+                    }
+                    guard += 1;
+                }
+                // Settle through the reward beat to the next letter / done.
+                let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if sc.is_done() {
+                    break 'session;
+                }
+            }
+            let persisted = {
+                let kv = db.borrow_kv();
+                fountouki_core::tracing::load(&**kv).next
+            };
+            if skipped && errorless && sc.is_done() && sc.stars == goal && persisted == goal {
+                println!("PASS tracing-session");
+            } else {
+                println!(
+                    "FAIL tracing-session (skipped={skipped}, errorless={errorless}, done={}, stars={}, persisted={persisted})",
+                    sc.is_done(),
+                    sc.stars
+                );
+                fails += 1;
+            }
+            // Replay resets the session (stars back to 0, tracing resumes).
+            let (replay, _home, br) = chrome::corner_buttons(&frame);
+            let _ = br;
+            let ptr = tap(replay);
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if !sc.is_done() && sc.stars == 0 && sc.in_watch() {
+                println!("PASS tracing-replay");
+            } else {
+                println!("FAIL tracing-replay (done={}, stars={}, watch={})", sc.is_done(), sc.stars, sc.in_watch());
+                fails += 1;
+            }
+        }
+        // tracing: the dot letters — i's body then its dot (a tap, not a drag).
+        {
+            let mut sc = TracingScene::new(Db::mem(), 7, now);
+            sc.debug_set_letter('i');
+            sc.skip_watch();
+            // Trace the body; once it completes, the remaining drags land on the
+            // dot (a tap target) and finish the letter.
+            for i in 0..=30 {
+                let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 30.0));
+                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if !sc.awaiting_advance() {
+                let ptr = drag(sc.stroke_point_px(&frame, 0.0));
+                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if sc.stars == 1 && sc.current_letter() == 'i' {
+                println!("PASS tracing-dot-letter");
+            } else {
+                println!("FAIL tracing-dot-letter (stars={}, letter={})", sc.stars, sc.current_letter());
                 fails += 1;
             }
         }

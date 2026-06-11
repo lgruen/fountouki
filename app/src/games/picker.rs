@@ -10,7 +10,8 @@ use macroquad::prelude::*;
 
 /// (route id, label). Order = display order. Adding a game = add an entry +
 /// a match arm in `draw_icon` and `main::build_game`.
-pub const GAMES: &[(&str, &str)] = &[("patterns", "patterns"), ("phonics", "phonics")];
+pub const GAMES: &[(&str, &str)] =
+    &[("patterns", "patterns"), ("phonics", "phonics"), ("tracing", "tracing")];
 
 pub struct PickerScene {
     db: crate::store::Db,
@@ -103,6 +104,37 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
             let fr = r.w * 0.12;
             let fy = cy + r.w * 0.20;
             draw::frog(cx, fy, fr, palette::RAINBOW[3], draw::FrogPose::default());
+        }
+        "tracing" => {
+            // a big cursive 'a' wearing the chart's start (green) and end (red)
+            // dots — the mechanic in one glance.
+            use fountouki_core::tracing as tr;
+            if let Some(g) = tr::glyph('a') {
+                let font_px = (r.w * 0.62) as u16;
+                let scale = font_px as f32 / tr::UPEM;
+                let bb = tr::ink_bbox(g);
+                let pen = vec2(
+                    cx - (bb.0 + bb.2) / 2.0 * scale,
+                    cy + (bb.1 + bb.3) / 2.0 * scale + r.h * 0.04,
+                );
+                draw_text_ex(
+                    "a",
+                    pen.x,
+                    pen.y,
+                    TextParams {
+                        font: Some(&ctx.fonts.cursive),
+                        font_size: font_px,
+                        color: palette::INK,
+                        ..Default::default()
+                    },
+                );
+                let to_px = |p: (f32, f32)| vec2(pen.x + p.0 * scale, pen.y - p.1 * scale);
+                let start = to_px(g.strokes[0][0]);
+                let end = to_px(*g.strokes[0].last().unwrap());
+                let dr = r.w * 0.05;
+                draw::disc(end.x, end.y, dr * 0.8, palette::RAINBOW[0]);
+                draw::disc(start.x, start.y, dr, palette::OK_STRONG);
+            }
         }
         _ => {}
     }

@@ -17,11 +17,13 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 ## Project shape
 - Cargo workspace. **`core/`** = pure logic + data + protocol, NO macroquad
   (`fountouki-core`): srs, patterns, themes, deck, audio synth, settings, sync,
-  storage, route, rng. Fast to compile, unit-tested (`cargo test -p fountouki-core`).
+  storage, route, rng, tracing (stroke data baked by
+  `tools/trace_extract/extract.py`). Fast to compile, unit-tested
+  (`cargo test -p fountouki-core`).
 - **`app/`** = the macroquad binary `fountouki`: rendering, scenes, input,
   audio playback, the engine. Depends on `core`.
   - `palette` `text` `draw` `anim` `input` `layout` `scene` `sound` `confetti`
-    `store` `parent` `emoji`; `games/{picker,phonics,patterns}.rs`.
+    `store` `parent` `emoji`; `games/{picker,phonics,patterns,tracing}.rs`.
   - `layout.rs` computes every region from viewport size + safe-area insets +
     form factor — this is the consistency cure; keep layout ours.
   - Fonts (VicModernCursive) + Twemoji emoji sprites are `include_bytes!`-baked.
@@ -35,7 +37,8 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 - `--capture <png> <scene> [w] [h]` — render a scene offscreen to a PNG.
   Scenes: `picker phonics phonics-miss phonics-miss-igloo phonics-done patterns
   patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done
-  parent-patterns parent-phonics`.
+  tracing tracing-watch tracing-two-stroke tracing-done parent-patterns
+  parent-phonics parent-tracing`.
 - `--playtest` — scripted taps drive the real scenes + assert invariants; exits
   non-zero on failure.
 
@@ -106,7 +109,8 @@ minimal. The constraints below remove *noise around the target*, not the joy.
 - Long-press the in-game ← (500 ms) opens the parent settings overlay
   (`app/src/parent.rs`): universal sync token/endpoint + a per-game section
   (patterns theme/difficulty/mode/hint cyclers + start-over; phonics read-only
-  mastery grid). No visible chrome / no topbar gear.
+  mastery grid; tracing next-letter progress + start-over). No visible chrome /
+  no topbar gear.
 
 ## Settings + storage + sync
 - Mute is shared (one toggle). Per-game settings under

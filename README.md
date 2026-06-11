@@ -38,6 +38,11 @@ ios/ android/  optional native build scaffolds + READMEs.
   wired into the app yet.)
 - `storage` — `KeyValueStore` trait + `ns_key` (`fountouki.<area>.<name>.v1`) +
   legacy migration. `route` — `parse_hash`/`hash_for`. `rng` — `Mulberry32`.
+- `tracing` — letter-tracing stroke data + progress logic: per-letter pen
+  centerlines baked from VicModernCursive by `tools/trace_extract/extract.py`
+  (chart-accurate stroke order; macroquad can't read glyph outlines at
+  runtime), corridor-follow `advance_progress`, teaching `ORDER`, persisted
+  next-letter state.
 
 ### `app/` modules (rendering)
 - Engine: `palette` `text` (cursive + UI font) `draw` (vector primitives,
@@ -47,7 +52,7 @@ ios/ android/  optional native build scaffolds + READMEs.
   + `Nav`) `sound` (synth→WAV→macroquad) `confetti` `store` (`Db`) `emoji`
   (thread-local Twemoji sprite set).
 - `parent.rs` — the long-press parent settings overlay.
-- `games/{picker,phonics,patterns}.rs` — the scenes.
+- `games/{picker,phonics,patterns,tracing}.rs` — the scenes.
 - `main.rs` — window, the router/app loop, `build_game`, and the `--capture` /
   `--playtest` entry points.
 
@@ -64,7 +69,8 @@ cargo build --release -p fountouki --target wasm32-unknown-unknown   # web build
   (`--import-undefined`/`--export-table`).
 - `--capture <png> <scene> [w] [h]` renders a scene offscreen to a PNG. Scene
   ids: `picker phonics phonics-miss phonics-done patterns patterns-emoji
-  patterns-unit parent-patterns parent-phonics`.
+  patterns-unit tracing tracing-watch tracing-two-stroke tracing-done
+  parent-patterns parent-phonics parent-tracing`.
 
 ## Testing & visual verification
 - **Logic**: `cargo test --workspace` (core). **Gameplay**: `--playtest` drives
