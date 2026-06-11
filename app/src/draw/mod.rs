@@ -17,7 +17,7 @@ mod prim;
 mod scenery;
 mod train;
 
-pub use frog::{frog, frog_hard_hat, FrogPose};
+pub use frog::{frog, frog_hard_hat, frog_party_hat, FrogPose};
 pub use house::{
     house, house_door_rect, house_height, house_part_anchor, house_window_centers, pencil,
     HousePose, HOUSE_PARTS,

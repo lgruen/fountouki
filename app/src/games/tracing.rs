@@ -86,6 +86,9 @@ pub struct TracingScene {
     lit_t: [f32; 2],
     /// Door taps this finale (playtest hook).
     door_taps: u32,
+    /// The party guests: seconds since each friend frog was tapped (99 = idle).
+    friend_t: [f32; 2],
+    friend_taps: u32,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
 }
@@ -123,6 +126,8 @@ impl TracingScene {
             lit_on: [false; 2],
             lit_t: [0.0; 2],
             door_taps: 0,
+            friend_t: [99.0; 2],
+            friend_taps: 0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x7e11_e77a),
             sync,
         }
@@ -158,6 +163,8 @@ impl TracingScene {
         self.lit_on = [false; 2];
         self.lit_t = [0.0; 2];
         self.door_taps = 0;
+        self.friend_t = [99.0; 2];
+        self.friend_taps = 0;
     }
 
     fn start_trace(&mut self) {
@@ -321,6 +328,16 @@ impl TracingScene {
                 self.frog_t = 0.0;
                 ctx.audio.frog();
                 self.confetti.burst(vec2(dl.frog_c.x, dl.frog_c.y - dl.frog_r), 14, dl.frog_r * 0.5);
+            } else if let Some(i) = (0..2).find(|&i| {
+                let (fc, fr) = dl.friends[i];
+                input::hit_circle(pt.pos, fc.x, fc.y, fr * 1.4) && self.friend_t[i] > 0.8
+            }) {
+                // A party guest ribbits + hops too.
+                self.friend_t[i] = 0.0;
+                self.friend_taps += 1;
+                ctx.audio.frog();
+                let (fc, fr) = dl.friends[i];
+                self.confetti.burst(vec2(fc.x, fc.y - fr), 10, fr * 0.5);
             }
         }
         Nav::Stay
@@ -387,6 +404,12 @@ impl TracingScene {
     pub(crate) fn window_lit(&self, i: usize) -> bool {
         self.lit_on[i.min(1)]
     }
+    pub(crate) fn friend_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        done_layout(f).friends[i.min(1)].0
+    }
+    pub(crate) fn friend_taps(&self) -> u32 {
+        self.friend_taps
+    }
     /// Screen point at fraction `t` (0..1) along the current stroke — playtest
     /// feeds these as drag positions, exactly like a finger would.
     pub(crate) fn stroke_point_px(&self, f: &crate::layout::Frame, t: f32) -> Vec2 {
@@ -412,6 +435,7 @@ impl Scene for TracingScene {
             if self.lit_on[i] {
                 self.lit_t[i] += ctx.dt;
             }
+            self.friend_t[i] += ctx.dt;
         }
         // The house part lands: a hammer clonk + a confetti kick at the part.
         // Driven by finish_t so it fires whether the beat or the grade row is
@@ -812,18 +836,51 @@ impl TracingScene {
         // A welcome path from the door (over the grass mound).
         draw::fill_ellipse(dl.house_c.x, dl.house_c.y + hs * 0.085, hs * 0.20, hs * 0.045, 0.0, palette::hexa(0xfff3d6, 0.9));
 
-        // A couple of garden plants flanking the house (tablet only — a phone's
+        // A couple of garden plants at the edges (tablet only — a phone's
         // foreground is too short).
         if !f.is_phone() {
-            draw::plant(dl.house_c.x - dl.house_s * 0.78, dl.ground_y + (f.h - dl.ground_y) * 0.42, f.vmin(0.045));
-            draw::plant(dl.frog_c.x + dl.frog_r * 2.1, dl.ground_y + (f.h - dl.ground_y) * 0.55, f.vmin(0.052));
+            draw::plant(f.w * 0.07, dl.ground_y + (f.h - dl.ground_y) * 0.42, f.vmin(0.045));
+            draw::plant(f.w * 0.92, dl.ground_y + (f.h - dl.ground_y) * 0.35, f.vmin(0.052));
         }
 
         // The letters this session wrote, strung up as bunting flags — the
         // trophies ARE the letters (no words needed).
         self.draw_letter_flags(ctx, &dl);
 
-        // The builder frog celebrates out front (hard hat on); tap = jump.
+        // The party guests: two friend frogs in cone hats, back-left and in
+        // the front yard. They hop on a lazy ambient cadence and ribbit-jump
+        // when tapped (the front one pokes its tongue out).
+        for (i, &((fc, fr), (body, hat), phase)) in [
+            (dl.friends[0], (palette::RAINBOW[6], palette::GOLD), 2.0f32),
+            (dl.friends[1], (palette::RAINBOW[1], palette::RAINBOW[4]), 4.2),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let pose = if self.friend_t[i] < 0.7 {
+                let fly = (self.friend_t[i] / 0.7 * std::f32::consts::PI).sin();
+                draw::FrogPose {
+                    dy: -fly * fr * 1.1,
+                    sy: 1.0 + fly * 0.18,
+                    sx: 1.0 - fly * 0.09,
+                    tongue: if i == 1 { fly } else { 0.0 },
+                    ..Default::default()
+                }
+            } else {
+                let amb = (ctx.time + phase).rem_euclid(5.6);
+                if amb < 0.7 {
+                    let fly = (amb / 0.7 * std::f32::consts::PI).sin();
+                    draw::FrogPose { dy: -fly * fr * 0.55, sy: 1.0 + fly * 0.12, sx: 1.0 - fly * 0.06, ..Default::default() }
+                } else {
+                    let breathe = (ctx.time * 1.85 + phase).sin();
+                    draw::FrogPose { sx: 1.0 - 0.025 * breathe, sy: 1.0 + 0.03 * breathe, ..Default::default() }
+                }
+            };
+            draw::frog(fc.x, fc.y, fr, body, pose);
+            draw::frog_party_hat(fc.x, fc.y, fr, pose, hat);
+        }
+
+        // The builder frog hosts out front (hard hat on); tap = jump.
         let fpose = if self.frog_t < 0.8 {
             let pr = (self.frog_t / 0.8).clamp(0.0, 1.0);
             let fly = ((pr - 0.1).max(0.0) / 0.8 * std::f32::consts::PI).sin();
@@ -899,6 +956,9 @@ struct DoneLayout {
     house_s: f32,
     frog_c: Vec2,
     frog_r: f32,
+    /// Party guests (center, radius): one behind-left of the house, one in
+    /// the front yard.
+    friends: [(Vec2, f32); 2],
     flag_s: f32,
     /// Bunting swag: x0, x1, top y, center sag.
     bunt: (f32, f32, f32, f32),
@@ -915,15 +975,22 @@ fn done_layout(f: &crate::layout::Frame) -> DoneLayout {
     let s = s_want.clamp(140.0, 380.0).min(s_cap);
     let cx = f.w * 0.46;
     let fr = (s * 0.22).clamp(34.0, 95.0);
-    // The frog stands at the house's front-right corner (drawn after the
-    // house, so it reads as "out front").
+    // The host stands at the house's front-right corner (drawn after the
+    // house, so it reads as "out front"); the guests flank the party.
     let frog_base = ground_y + (f.h - ground_y) * 0.55;
+    let band = |frac: f32| ground_y + (f.h - ground_y) * frac;
+    let fr0 = fr * 0.72;
+    let fr1 = fr * 0.62;
     DoneLayout {
         ground_y,
         house_c: vec2(cx, base_y),
         house_s: s,
         frog_c: vec2(cx + s * 0.66, frog_base - 0.92 * fr),
         frog_r: fr,
+        friends: [
+            (vec2(cx - s * 0.72, band(0.40) - 0.92 * fr0), fr0),
+            (vec2(cx + s * 0.30, band(0.78) - 0.92 * fr1), fr1),
+        ],
         flag_s,
         bunt,
     }
@@ -1097,6 +1164,10 @@ mod tests {
             assert!(house_top > flags_bottom, "{w}x{h}: house {house_top} into flags {flags_bottom}");
             assert!(dl.frog_c.x + dl.frog_r < w, "{w}x{h}: frog off-screen");
             assert!(dl.frog_c.y + dl.frog_r * 1.1 < h, "{w}x{h}: frog under bottom edge");
+            for (i, &(fc, fr)) in dl.friends.iter().enumerate() {
+                assert!(fc.x - fr > 0.0 && fc.x + fr < w, "{w}x{h}: friend {i} off-screen x");
+                assert!(fc.y + fr * 1.1 < h, "{w}x{h}: friend {i} under bottom edge");
+            }
         }
     }
 

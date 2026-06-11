@@ -789,14 +789,19 @@ async fn main() {
             let ptr = tap(sc.window_center(&frame, 1));
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
+            // A party-guest frog reacts to its tap too.
+            let ptr = tap(sc.friend_center(&frame, 0));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let friend_ok = sc.friend_taps() == 1;
             let idle2 = Pointer::default();
             let ctx = Ctx { dt: 2.0, time: 0.0, now, pointer: &idle2, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
-            if door_ok && sc.is_done() && sc.window_lit(1) && !sc.window_lit(0) {
+            if door_ok && friend_ok && sc.is_done() && sc.window_lit(1) && !sc.window_lit(0) {
                 println!("PASS tracing-housewarming");
             } else {
                 println!(
-                    "FAIL tracing-housewarming (door_ok={door_ok}, done={}, lit1={}, lit0={})",
+                    "FAIL tracing-housewarming (door_ok={door_ok}, friend_ok={friend_ok}, done={}, lit1={}, lit0={})",
                     sc.is_done(),
                     sc.window_lit(1),
                     sc.window_lit(0)

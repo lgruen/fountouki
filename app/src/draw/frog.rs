@@ -126,6 +126,22 @@ pub fn frog(cx: f32, cy: f32, r: f32, color: Color, pose: FrogPose) {
     }
 }
 
+/// A party cone hat perched on the frog's eye bulges, pompom on top — for the
+/// house-warming guests. Draw AFTER [`frog`] with the same anchor + pose.
+pub fn frog_party_hat(cx: f32, cy: f32, r: f32, pose: FrogPose, color: Color) {
+    let rs = (pose.sx * pose.sy).sqrt();
+    let tf = |lx: f32, ly: f32| frog_point(cx, cy, r, pose, lx, ly);
+    let l = tf(-0.30 * r, -1.02 * r);
+    let rr = tf(0.30 * r, -1.02 * r);
+    let apex = tf(0.0, -1.58 * r);
+    draw_triangle(l, rr, apex, color);
+    // A jaunty stripe + the pompom.
+    let s0 = tf(-0.19 * r, -1.22 * r);
+    let s1 = tf(0.19 * r, -1.22 * r);
+    stroke_path(&[s0, s1], (0.07 * r * rs).max(2.0), palette::WHITE);
+    disc(apex.x, apex.y, 0.11 * r * rs, mix(color, palette::WHITE, 0.55));
+}
+
 /// A builder's hard hat perched on the frog's eye bulges — draw AFTER [`frog`]
 /// with the same anchor + pose so it rides every hop, squash and tilt.
 pub fn frog_hard_hat(cx: f32, cy: f32, r: f32, pose: FrogPose) {
