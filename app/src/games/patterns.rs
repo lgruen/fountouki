@@ -172,9 +172,16 @@ impl PatternsScene {
                 ctx.audio.level_up();
                 // Level-up spectacle: a mini Pattern Train carrying the unit the
                 // kid just mastered drives across the bottom — a taste of the
-                // finale that gets closer with every level.
+                // finale that gets closer with every level. When it will actually
+                // show, hold the next round until it parks: the spectacle owns
+                // its moment and never competes with the new level's first trial.
                 self.drive_t = Some(0.0);
-                self.drive_items = self.round.unit_items.clone();
+                self.drive_items = unit_sequence(&self.round);
+                if drive_band(&ctx.frame, &p, self.mode).is_some() {
+                    self.result = Some(true);
+                    self.advance_in = Some(DRIVE_DUR);
+                    return;
+                }
             } else {
                 // Mastered the final level on a clean streak → All aboard!
                 self.enter_finale(ctx);
@@ -202,25 +209,14 @@ impl PatternsScene {
     }
 
     /// Build the train's cargo: the kid's pattern repeated cleanly, ONE item per
-    /// car, read left→right. Built from `unit_items` tiled over the template —
-    /// never `round.visible` (whose partial tail would render a broken pattern).
+    /// car, read left→right. Built from the unit sequence — never
+    /// `round.visible` (whose partial tail would render a broken pattern).
     fn build_cars(&mut self) {
-        let unit = &self.round.unit_items;
-        let chars: Vec<char> = self.round.template.chars().collect();
-        self.car_period = chars.len().max(1);
+        let one = unit_sequence(&self.round);
+        self.car_period = one.len().max(1);
         // Two repetitions is the most the layout ever shows; it caps how many fit.
-        let mut cars = Vec::with_capacity(chars.len() * 2);
-        for _ in 0..2 {
-            for &ch in &chars {
-                let idx = (ch as u32).wrapping_sub('A' as u32) as usize;
-                if let Some(it) = unit.get(idx) {
-                    cars.push(it.clone());
-                }
-            }
-        }
-        if cars.is_empty() {
-            cars = unit.to_vec(); // defensive: never an empty train
-        }
+        let mut cars = one.clone();
+        cars.extend(one);
         self.cars = cars;
     }
 
@@ -549,13 +545,33 @@ fn gen(level: u32, choice: ThemeChoice, mode: GameMode, diff: Difficulty, rng: &
     generate_round(level, theme, mode, diff, rng)
 }
 
+/// One whole unit of the round's pattern as items, read left→right: the
+/// template (e.g. "AAB") tiled over `unit_items` (which is indexed by DISTINCT
+/// letter, so an AAB unit is three items from two). Never empty.
+fn unit_sequence(round: &Round) -> Vec<Item> {
+    let unit = &round.unit_items;
+    let mut out: Vec<Item> = Vec::new();
+    for ch in round.template.chars() {
+        let idx = (ch as u32).wrapping_sub('A' as u32) as usize;
+        if let Some(it) = unit.get(idx) {
+            out.push(it.clone());
+        }
+    }
+    if out.is_empty() {
+        out = unit.to_vec(); // defensive: never an empty train
+    }
+    out
+}
+
 impl Scene for PatternsScene {
     fn update(&mut self, ctx: &Ctx) -> Nav {
         self.fb_time += ctx.dt;
         self.confetti.update(ctx.dt);
         if let Some(t) = self.drive_t {
             let t = t + ctx.dt;
-            self.drive_t = if t > DRIVE_DUR { None } else { Some(t) };
+            // Linger past DRIVE_DUR so the last steam puffs fade out instead of
+            // vanishing the frame the (already offscreen) train parks.
+            self.drive_t = if t > DRIVE_DUR + 0.9 { None } else { Some(t) };
         }
         if self.phase == Phase::Finale {
             self.finale_t += ctx.dt;

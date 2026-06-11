@@ -256,9 +256,13 @@ async fn main() {
                 // Play 7 correct rounds to reach the rainbow-done garden scene.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = PhonicsScene::new(db.clone(), 7, now);
+                let idle = Pointer::default();
                 for _ in 0..7 {
                     let ptr = tap(sc.got_center(&frame));
                     let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                    // Settle past the post-star reward beat so the next ✓ lands.
+                    let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
                 Box::new(sc)
@@ -309,12 +313,22 @@ async fn main() {
         let now = 1_717_000_000_000i64;
         let mut fails = 0;
 
-        // phonics: 7 "got it" taps complete the rainbow.
+        // phonics: 7 "got it" taps complete the rainbow. A second ✓ tap during
+        // the post-star reward beat must be ignored (settle between taps).
         {
             let mut sc = PhonicsScene::new(Db::mem(), 7, now);
-            for _ in 0..7 {
+            let idle = Pointer::default();
+            for i in 0..7 {
                 let ptr = tap(sc.got_center(&frame));
                 let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if i == 0 {
+                    // Rapid re-tap inside the beat: must not double-grade.
+                    let ptr = tap(sc.got_center(&frame));
+                    let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
             if sc.stars == 7 && sc.is_done() {
@@ -473,15 +487,16 @@ async fn main() {
         // correct answers, so a mistake mid-run still leveled up.
         {
             let mut sc = PatternsScene::new(Db::mem(), 21, now);
-            // Tap the correct choice, then settle past the advance animation so
-            // the next round is generated.
+            // Tap the correct choice, then settle past the advance animation
+            // (and, on a level-up, the full drive-by hold) so the next round is
+            // generated.
             let play_correct = |sc: &mut PatternsScene| {
                 let ci = sc.correct_index();
                 let ptr = tap(sc.choice_center(&frame, ci));
                 let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
                 let idle = Pointer::default();
-                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                let ctx = Ctx { dt: 4.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             };
             // Tap a wrong choice, then settle past the retry delay (errorless).
@@ -511,17 +526,30 @@ async fn main() {
                 println!("FAIL patterns-level-streak (held={}, level {}->{}, stars={})", held, lvl, sc.level, sc.stars);
                 fails += 1;
             }
-            // The level-up fired the drive-by; it parks again after DRIVE_DUR.
-            let active = sc.drive_active();
+        }
+        // patterns: a clean streak of LEVEL_UP_STREAK fires the level-up
+        // drive-by (and holds the next round); it parks again afterwards.
+        {
+            let mut sc = PatternsScene::new(Db::mem(), 31, now);
             let idle = Pointer::default();
-            for _ in 0..4 {
+            for i in 0..4 {
+                let ptr = tap(sc.choice_center(&frame, sc.correct_index()));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if i < 3 {
+                    let ctx = Ctx { dt: 4.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+            }
+            let fired = sc.drive_active();
+            for _ in 0..5 {
                 let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
-            if active && !sc.drive_active() {
+            if fired && !sc.drive_active() && sc.level == 2 {
                 println!("PASS patterns-levelup-driveby");
             } else {
-                println!("FAIL patterns-levelup-driveby (fired={}, parked={})", active, !sc.drive_active());
+                println!("FAIL patterns-levelup-driveby (fired={}, parked={}, level={})", fired, !sc.drive_active(), sc.level);
                 fails += 1;
             }
         }
