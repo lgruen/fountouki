@@ -14,7 +14,9 @@ python3 tools/trace_extract/extract.py
 Outputs:
 - `core/src/tracing_data.rs` — the baked data (commit it).
 - `/tmp/trace_debug.png` — a contact sheet of every routed glyph. **Eyeball
-  this after any change** (see "Verifying" below).
+  this after any change** (see "Verifying" below). A snapshot of the current
+  extraction is committed as `debug-sheet-lowercase.png`; refresh it when the
+  routes change.
 - Per-glyph `cover=` numbers on stdout (fraction of skeleton pixels the route
   passes through; < ~0.95 usually means part of a letter was skipped).
 
