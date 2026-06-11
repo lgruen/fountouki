@@ -52,6 +52,8 @@ pub struct ParentPanel {
     ptn_dirty: bool,
     start_over: bool,
     mastery: Option<Mastery>,
+    /// Tracing progression (next-letter index), shown read-only + resettable.
+    tracing: Option<fountouki_core::tracing::TracingState>,
     seed: u32,
     /// Pixels the body content is scrolled up (0 = top). Clamped to the
     /// content's overflow each frame; always 0 when everything fits.
@@ -83,6 +85,12 @@ impl ParentPanel {
         } else {
             None
         };
+        let tracing = if game == "tracing" {
+            let kv = db.borrow_kv();
+            Some(fountouki_core::tracing::load(&**kv))
+        } else {
+            None
+        };
         ParentPanel {
             db,
             game: game.to_string(),
@@ -93,6 +101,7 @@ impl ParentPanel {
             ptn_dirty: false,
             start_over: false,
             mastery,
+            tracing,
             seed,
             scroll: 0.0,
             drag_y: None,
@@ -236,6 +245,16 @@ impl ParentPanel {
                 return PanelResult::Close { rebuild: true };
             }
         }
+        if self.game == "tracing" && in_body && hit(pt.pos, l.start_over) {
+            // Start over = restart the letter progression from the first letter.
+            {
+                let mut kv = self.db.borrow_kv_mut();
+                fountouki_core::tracing::save(&mut **kv, &fountouki_core::tracing::empty_state());
+            }
+            self.start_over = true;
+            self.apply();
+            return PanelResult::Close { rebuild: true };
+        }
         if hit(pt.pos, l.done) {
             self.apply();
             return PanelResult::Close { rebuild: self.ptn_dirty };
@@ -262,6 +281,18 @@ impl ParentPanel {
         }
         if let Some(m) = &self.mastery {
             draw_mastery(l.mastery, m);
+        }
+        if let Some(st) = &self.tracing {
+            let order = fountouki_core::tracing::ORDER;
+            let next = order[(st.next as usize) % order.len()];
+            text::ui_left(
+                &format!("next letter: {next}   ({} of {} reached)", st.next + 1, order.len()),
+                l.mastery.x,
+                l.mastery.y + 11.0,
+                15,
+                palette::MUTED,
+            );
+            button(l.start_over, "start over", palette::ACCENT, palette::WHITE);
         }
         // Sync section.
         label(l.token, "sync token");
@@ -437,6 +468,9 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
         start_l = block(&mut ly, BTN_H);
     } else if game == "phonics" {
         mastery_l = block(&mut ly, 78.0);
+    } else if game == "tracing" {
+        mastery_l = block(&mut ly, 26.0); // next-letter progress line
+        start_l = block(&mut ly, BTN_H);
     }
     let token_l = labeled(&mut ly);
     let gen_l = block(&mut ly, BTN_H);
@@ -464,6 +498,8 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
     let off = Rect::new(-1000.0, -1000.0, 0.0, 0.0);
     let (theme, diff, mode, hint, start_over) = if game == "patterns" {
         (row(theme_l, rw), row(diff_l, rw), row(mode_l, rw), row(hint_l, rw), row(start_l, rw))
+    } else if game == "tracing" {
+        (off, off, off, off, row(start_l, rw))
     } else {
         (off, off, off, off, off)
     };
