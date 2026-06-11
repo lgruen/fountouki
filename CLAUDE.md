@@ -107,7 +107,9 @@ minimal. The constraints below remove *noise around the target*, not the joy.
 
 ## Parent menu (long-press ←)
 - Long-press the in-game ← (500 ms) opens the parent settings overlay
-  (`app/src/parent.rs`): universal sync token/endpoint + a per-game section
+  (`app/src/parent.rs`): universal sync token/endpoint + a session-only sync
+  pause (never persisted; for testing without retyping the token) + a per-game
+  section
   (patterns theme/difficulty/mode/hint cyclers + start-over; phonics + tracing
   read-only mastery grids; tracing start-over). No visible chrome / no topbar
   gear.
