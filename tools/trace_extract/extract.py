@@ -47,11 +47,11 @@ SMOOTH_WIN = 9  # boxcar window (px samples) to de-jag the skeleton
 # the string "dot" for the dot of i/j (nearest small component).
 ROUTES = {
     "a": [[(0.84, 0.88), (0.45, 1.0), (0.02, 0.55), (0.15, 0.1), (0.35, 0.02),
-           (0.7, 0.15), (0.86, 0.55), (0.86, 0.86), (0.86, 0.3), (1.0, 0.3)]],
+           (0.5, 0.35), (0.86, 0.86), (0.86, 0.3), (1.0, 0.3)]],
     "b": [[(0.41, 1.0), (0.2, 0.05), (0.6, 0.0), (0.95, 0.25), (0.58, 0.5),
            (0.98, 0.51)]],
     "c": [[(0.95, 0.85), (0.4, 1.0), (0.03, 0.5), (0.45, 0.02), (0.95, 0.2)]],
-    "d": [[(0.72, 0.47), (0.4, 0.6), (0.03, 0.3), (0.35, 0.02), (0.78, 0.3),
+    "d": [[(0.72, 0.47), (0.4, 0.6), (0.03, 0.3), (0.35, 0.02), (0.7, 0.42),
            (0.82, 1.0), (0.8, 0.2), (1.0, 0.2)]],
     "e": [[(0.1, 0.45), (0.6, 0.55), (0.45, 1.0), (0.05, 0.6), (0.35, 0.02),
            (0.95, 0.25)]],
@@ -61,7 +61,7 @@ ROUTES = {
     ],
     "g": [[(0.84, 0.9), (0.45, 1.0), (0.03, 0.75), (0.45, 0.5), (0.85, 0.8),
            (0.85, 0.88), (0.75, 0.3), (0.45, 0.02), (0.05, 0.1)]],
-    "h": [[(0.15, 1.0), (0.05, 0.02), (0.5, 0.6), (0.8, 0.05), (1.0, 0.15)]],
+    "h": [[(0.15, 1.0), (0.05, 0.02), (0.5, 0.5), (0.8, 0.05), (1.0, 0.15)]],
     "i": [
         [(0.4, 0.97), (0.25, 0.1), (0.95, 0.25)],
         "dot",
@@ -91,7 +91,7 @@ ROUTES = {
         [(0.5, 1.0), (0.3, 0.4), (0.55, 0.02), (0.9, 0.15)],
         [(0.05, 0.55), (0.95, 0.65)],
     ],
-    "u": [[(0.1, 0.95), (0.05, 0.3), (0.4, 0.02), (0.75, 0.4), (0.85, 0.95),
+    "u": [[(0.1, 0.95), (0.05, 0.3), (0.4, 0.02), (0.78, 0.6), (0.85, 0.95),
            (0.8, 0.3), (1.0, 0.35)]],
     "v": [[(0.05, 0.95), (0.35, 0.05), (0.85, 0.9), (1.0, 0.95)]],
     "w": [[(0.03, 0.95), (0.2, 0.05), (0.45, 0.9), (0.65, 0.05), (0.9, 0.9),
@@ -107,6 +107,15 @@ ROUTES = {
 }
 
 LETTERS = "abcdefghijklmnopqrstuvwxyz"
+
+# Pen reversals on a degree-2 skeleton pixel with no wedge branch beyond it
+# are usually waypoint snap overshoot (the d/u spikes; an 'a' that detoured
+# down the stem). These letters legitimately reverse on continuing ink —
+# touching already-drawn strokes (b/k), retracing a stem whose skeleton runs
+# a little past the turn (h/k/p/r, z's bottom wedge), or turning around on a
+# pixel adjacent to a junction (u's top). Any other count gets a loud `!!`
+# from main(); update this only after eyeballing the debug sheet.
+EXPECTED_REVERSALS = {"b": 1, "h": 1, "k": 2, "p": 1, "r": 1, "u": 1, "z": 1}
 
 
 def render(face, ch):
@@ -297,7 +306,9 @@ def process_stroke(path, mask, radius, sk, to_units):
     wedge (the unvisited skeleton branch + a raycast to the ink boundary),
     extend the route ends to the ink boundary, and smooth each piece with its
     ends pinned — so reversals stay sharp and reach the bottom of their wedge
-    instead of being rounded off early."""
+    instead of being rounded off early. Also returns the count of mid-line
+    reversals (~180 deg turns on a degree-2 pixel with no wedge beyond), for
+    the EXPECTED_REVERSALS overshoot check."""
     k = TURN_LOOKAHEAD
     deg = degree_map(sk)
     turns = sharp_turns(path)
@@ -312,11 +323,15 @@ def process_stroke(path, mask, radius, sk, to_units):
 
     # Per-turn excursion: into-the-wedge points the pen visits and backtracks.
     excursion = {}
+    midline_reversals = 0
     for i in turns:
         d_in = unit_vec((path[i][0] - path[i - k][0], path[i][1] - path[i - k][1]))
         d_out = unit_vec((path[i + k][0] - path[i][0], path[i + k][1] - path[i][1]))
         d = unit_vec((d_in[0] - d_out[0], d_in[1] - d_out[1]))
         ex = wedge_detour(path[i], d, route_set, sk)
+        if (ex is None and deg[path[i]] == 2
+                and d_in[0] * d_out[0] + d_in[1] * d_out[1] < -0.86):
+            midline_reversals += 1
         if ex:
             tip = ex[-1]
             back = ex[max(0, len(ex) - 6)] if len(ex) > 1 else path[i]
@@ -350,7 +365,7 @@ def process_stroke(path, mask, radius, sk, to_units):
     for seg in pieces:
         pts = smooth_resample(seg, to_units, RESAMPLE_UNITS)
         out.extend(pts[1:] if out else pts)
-    return out
+    return out, midline_reversals
 
 
 def smooth_resample(path, to_units, spacing):
@@ -414,6 +429,7 @@ def main():
         extremes[ch] = (to_units((rows_a.max(), 0))[1], to_units((rows_a.min(), 0))[1])
 
         strokes = []
+        reversals = 0
         for spec in ROUTES[ch]:
             if spec == "dot":
                 ci = dots[0]
@@ -425,7 +441,13 @@ def main():
                 print(f"!! {ch}: no path between {fail[0]} and {fail[1]}")
                 strokes.append([])
                 continue
-            strokes.append(process_stroke(path, body, radius, sk, to_units))
+            pts, rev = process_stroke(path, body, radius, sk, to_units)
+            strokes.append(pts)
+            reversals += rev
+        if reversals != EXPECTED_REVERSALS.get(ch, 0):
+            print(f"!! {ch}: {reversals} mid-line reversals "
+                  f"(expected {EXPECTED_REVERSALS.get(ch, 0)}) — "
+                  f"waypoint snap overshoot? nudge the route (see README)")
 
         # coverage: skeleton pixels near the routed strokes
         route_px = []
