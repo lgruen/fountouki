@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // \"\"'); case \"$cmd\" in *\"git commit\"*|*\"git push\"*) ;; *) exit 0 ;; esac; out=$(cargo clippy --workspace --all-targets -- -D warnings 2>&1) || { echo 'Blocked: cargo clippy --workspace --all-targets -- -D warnings must pass before commit/push.' >&2; echo \"$out\" | grep -E '^(error|warning)' | head -20 >&2; exit 2; }",
+            "timeout": 600,
+            "statusMessage": "clippy gate (pre-commit)"
+          }
+        ]
+      }
+    ]
+  }
+}
