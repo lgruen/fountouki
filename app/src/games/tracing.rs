@@ -3,9 +3,10 @@
 //! traces over the faded glyph (trace): a stroke arms only when the finger
 //! touches the green start dot, the laid ink is the finger's *actual* path
 //! (so a wobbly trace looks wobbly — the parent can judge it at grade time),
-//! and the stroke completes only once the finger reaches the red end dot.
-//! Errorless — a wandering finger just stops laying ink; progress never goes
-//! backwards.
+//! and the stroke completes only when the finger LIFTS at the red end dot —
+//! never mid-drag, so the full letter gets drawn. Errorless — a wandering
+//! finger just stops laying ink, a mid-stroke lift just pauses; progress
+//! never goes backwards.
 //! After the reward beat the parent grades the trace ✓/✗ (grade): ✓ installs
 //! the next house part (the progress meter advances only on a correct grade,
 //! like phonics' rainbow) and promotes the letter; ✗ only reschedules it.
@@ -84,6 +85,9 @@ pub struct TracingScene {
     laid: Vec<Vec<(f32, f32)>>,
     /// The last `laid` polyline is still being extended.
     laid_open: bool,
+    /// Where the finger was last seen down (font units) — a stroke completes
+    /// on the lift, judged at this position.
+    last_touch: Option<(f32, f32)>,
     demo_t: f32,
     advance_in: Option<f32>,
     /// Time since the current letter finished (drives the completed-glyph pop
@@ -137,6 +141,7 @@ impl TracingScene {
             armed: false,
             laid: Vec::new(),
             laid_open: false,
+            last_touch: None,
             demo_t: 0.0,
             advance_in: None,
             finish_t: 99.0,
@@ -198,6 +203,7 @@ impl TracingScene {
         self.armed = false;
         self.laid.clear();
         self.laid_open = false;
+        self.last_touch = None;
         self.tick_acc = 0.0;
         self.tick_step = 0;
     }
@@ -278,85 +284,96 @@ impl TracingScene {
 
     fn update_trace(&mut self, ctx: &Ctx) {
         let pt = ctx.pointer;
-        if !pt.down {
-            self.laid_open = false;
-            return;
-        }
         let g = self.glyph();
         if self.stroke_i >= g.strokes.len() {
             return;
         }
         let p = plan(&ctx.frame, self.current());
-        let finger = p.map.px_to_units(pt.pos);
         let stroke = g.strokes[self.stroke_i];
         // Corridor half-width: TOL font units, but never under ~26 px — on a
         // small phone the letter shrinks, a 4yo's finger doesn't. The start /
-        // end gates are tighter than the corridor (with their own px floors):
-        // a stroke begins only at the green dot and finishes only at the red.
+        // end gates are tighter than the corridor (with their own px floors).
         let tol = TOL.max(26.0 / p.map.scale);
         let start_r = tr::START_RADIUS.max(30.0 / p.map.scale);
         let end_r = tr::END_RADIUS.max(24.0 / p.map.scale);
-        let done = if tr::is_dot(stroke) {
+        if !pt.down {
+            self.laid_open = false;
+            // A stroke completes only when the finger LIFTS at the red end
+            // dot — never mid-drag (a pen doesn't stop the hand; the kid
+            // draws the whole letter, the parent judges it). Lifting anywhere
+            // else just pauses: progress keeps, the kid resumes (errorless).
+            if let Some(f) = self.last_touch.take() {
+                if !tr::is_dot(stroke) && tr::stroke_done(stroke, self.progress, f, end_r) {
+                    self.finish_stroke(ctx, &p, stroke);
+                }
+            }
+            return;
+        }
+        let finger = p.map.px_to_units(pt.pos);
+        self.last_touch = Some(finger);
+        if tr::is_dot(stroke) {
             // The dot of i / j: tap it (a small wiggle of the finger is fine).
-            let hit = units_dist(finger, stroke[0]) <= start_r * 1.3;
-            if hit {
+            if units_dist(finger, stroke[0]) <= start_r * 1.3 {
                 // Ink the dot where the finger actually landed.
                 self.laid.push(vec![finger]);
-                self.laid_open = false;
+                self.last_touch = None;
+                self.finish_stroke(ctx, &p, stroke);
             }
-            hit
+            return;
+        }
+        if self.progress <= 0.0 && !self.armed {
+            // Not started yet: the finger must touch the green dot first.
+            if units_dist(finger, stroke[0]) > start_r {
+                self.laid_open = false;
+                return;
+            }
+            self.armed = true;
+        }
+        let before = self.progress;
+        self.progress = tr::advance_progress(stroke, self.progress, finger, tol);
+        // Lay ink along the finger's real path while it stays in the
+        // corridor; lifting or wandering breaks the polyline (errorless —
+        // it just stops inking, nothing is undone).
+        if units_dist(finger, tr::point_at(stroke, self.progress)) <= tol {
+            if !self.laid_open {
+                self.laid.push(Vec::new());
+                self.laid_open = true;
+            }
+            let seg = self.laid.last_mut().unwrap();
+            if seg.last().is_none_or(|&l| units_dist(l, finger) >= 4.0) {
+                seg.push(finger);
+            }
         } else {
-            if self.progress <= 0.0 && !self.armed {
-                // Not started yet: the finger must touch the green dot first.
-                if units_dist(finger, stroke[0]) > start_r {
-                    self.laid_open = false;
-                    return;
-                }
-                self.armed = true;
-            }
-            let before = self.progress;
-            self.progress = tr::advance_progress(stroke, self.progress, finger, tol);
-            // Lay ink along the finger's real path while it stays in the
-            // corridor; lifting or wandering breaks the polyline (errorless —
-            // it just stops inking, nothing is undone).
-            if units_dist(finger, tr::point_at(stroke, self.progress)) <= tol {
-                if !self.laid_open {
-                    self.laid.push(Vec::new());
-                    self.laid_open = true;
-                }
-                let seg = self.laid.last_mut().unwrap();
-                if seg.last().is_none_or(|&l| units_dist(l, finger) >= 4.0) {
-                    seg.push(finger);
-                }
-            } else {
-                self.laid_open = false;
-            }
-            // Laid ink rewards as it grows: a tiny sparkle + a tick that climbs
-            // a pentatonic ladder, so the stroke literally sings upward.
-            self.tick_acc += (self.progress - before).max(0.0);
-            if self.tick_acc >= TICK_EVERY {
-                self.tick_acc %= TICK_EVERY;
-                ctx.audio.trace_tick(self.tick_step);
-                self.tick_step += 1;
-                let tip = p.map.to_px(tr::point_at(stroke, self.progress));
-                self.confetti.burst(tip, 2, p.start_r * 0.4);
-            }
-            tr::stroke_done(stroke, self.progress, finger, end_r)
-        };
-        if done {
-            let end = p.map.to_px(*stroke.last().unwrap());
-            self.confetti.burst(end, 12, p.start_r);
-            self.stroke_i += 1;
-            self.progress = 0.0;
-            self.armed = false;
             self.laid_open = false;
-            self.tick_acc = 0.0;
-            self.tick_step = 0;
-            if self.stroke_i >= g.strokes.len() {
-                self.on_letter_done(ctx);
-            } else {
-                ctx.audio.tap();
-            }
+        }
+        // Laid ink rewards as it grows: a tiny sparkle + a tick that climbs
+        // a pentatonic ladder, so the stroke literally sings upward.
+        self.tick_acc += (self.progress - before).max(0.0);
+        if self.tick_acc >= TICK_EVERY {
+            self.tick_acc %= TICK_EVERY;
+            ctx.audio.trace_tick(self.tick_step);
+            self.tick_step += 1;
+            let tip = p.map.to_px(tr::point_at(stroke, self.progress));
+            self.confetti.burst(tip, 2, p.start_r * 0.4);
+        }
+    }
+
+    /// A stroke is in: confetti at its end, reset the per-stroke state, and
+    /// either arm the next stroke or celebrate the finished letter.
+    fn finish_stroke(&mut self, ctx: &Ctx, p: &TLayout, stroke: &[(f32, f32)]) {
+        let end = p.map.to_px(*stroke.last().unwrap());
+        self.confetti.burst(end, 12, p.start_r);
+        self.stroke_i += 1;
+        self.progress = 0.0;
+        self.armed = false;
+        self.laid_open = false;
+        self.last_touch = None;
+        self.tick_acc = 0.0;
+        self.tick_step = 0;
+        if self.stroke_i >= self.glyph().strokes.len() {
+            self.on_letter_done(ctx);
+        } else {
+            ctx.audio.tap();
         }
     }
 

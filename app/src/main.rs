@@ -300,6 +300,10 @@ async fn main() {
                     let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
+                // Lift at the end dot — strokes complete on the release.
+                let idle = Pointer::default();
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
                 Box::new(sc)
             }
             "tracing-grade" => {
@@ -313,8 +317,11 @@ async fn main() {
                     let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
-                // Settle through the reward beat into the grade phase.
+                // Lift to complete the letter, then settle through the reward
+                // beat into the grade phase.
                 let idle = Pointer::default();
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
                 let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
                 Box::new(sc)
@@ -331,9 +338,12 @@ async fn main() {
                     let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
-                // Settle through the reward beat into the grade row, tap ✓,
-                // then catch the walls mid-descent on the cable.
+                // Lift to complete the letter, settle through the reward beat
+                // into the grade row, tap ✓, then catch the walls mid-descent
+                // on the cable.
                 let idle = Pointer::default();
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
                 let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
                 let ptr = tap(sc.got_center(&frame));
@@ -752,6 +762,9 @@ async fn main() {
                         let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                         sc.update(&ctx);
                     }
+                    // Lift at the end dot — the stroke completes on release.
+                    let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
                     guard += 1;
                 }
                 // Settle through the reward beat into the parent grade.
@@ -832,13 +845,16 @@ async fn main() {
             let mut sc = TracingScene::new(Db::mem(), 7, now);
             sc.debug_set_letter('i');
             sc.skip_watch();
-            // Trace the body; once it completes, the remaining drags land on the
-            // dot (a tap target) and finish the letter.
+            // Trace the body and lift to complete it; then the dot (a tap
+            // target, not a drag) finishes the letter.
             for i in 0..=30 {
                 let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 30.0));
                 let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
+            let idle = Pointer::default();
+            let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
             if !sc.awaiting_advance() {
                 let ptr = drag(sc.stroke_point_px(&frame, 0.0));
                 let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
@@ -855,9 +871,10 @@ async fn main() {
                 fails += 1;
             }
         }
-        // tracing: the start gate — a finger dropped ON the path mid-stroke
+        // tracing: the stroke gates — a finger dropped ON the path mid-stroke
         // (inside the corridor, but never at the green start dot) lays no
-        // progress; starting at the dot and dragging to the red end dot does.
+        // progress; dragging dot-to-dot doesn't finish while the finger is
+        // still down (no mid-drag snap); the LIFT at the red end dot does.
         {
             let mut sc = TracingScene::new(Db::mem(), 7, now);
             sc.debug_set_letter('c');
@@ -873,11 +890,16 @@ async fn main() {
                 let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
-            if gated && sc.awaiting_advance() {
-                println!("PASS tracing-start-gate");
+            // Finger held down at the end dot: the stroke must still be live.
+            let held = !sc.awaiting_advance() && sc.stroke_index() == 0;
+            let idle = Pointer::default();
+            let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if gated && held && sc.awaiting_advance() {
+                println!("PASS tracing-stroke-gates");
             } else {
                 println!(
-                    "FAIL tracing-start-gate (gated={gated}, finished={})",
+                    "FAIL tracing-stroke-gates (gated={gated}, held={held}, finished={})",
                     sc.awaiting_advance()
                 );
                 fails += 1;
@@ -896,6 +918,9 @@ async fn main() {
                 let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
+            // Lift to complete, then settle through the reward beat.
+            let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
             let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let graded = sc.in_grade();
