@@ -320,8 +320,8 @@ async fn main() {
                 Box::new(sc)
             }
             "tracing-reward" => {
-                // The between-letter reward beat: finished glyph at full ink +
-                // the next house part riding the crane cable down.
+                // The post-✓ install: the next letter's demo starting while
+                // the freshly earned house part rides the crane cable down.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = TracingScene::new(db.clone(), 7, now);
                 sc.debug_set_letter('c');
@@ -331,10 +331,16 @@ async fn main() {
                     let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
-                // Settle into the install: walls mid-descent on the cable.
+                // Settle through the reward beat into the grade row, tap ✓,
+                // then catch the walls mid-descent on the cable.
                 let idle = Pointer::default();
-                for _ in 0..6 {
-                    let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let ptr = tap(sc.got_center(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                for _ in 0..5 {
+                    let ctx = Ctx { dt: 0.15, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
                 Box::new(sc)
@@ -838,16 +844,20 @@ async fn main() {
                 let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
-            if sc.stars == 1 && sc.current_letter() == 'i' {
+            if sc.awaiting_advance() && sc.current_letter() == 'i' {
                 println!("PASS tracing-dot-letter");
             } else {
-                println!("FAIL tracing-dot-letter (stars={}, letter={})", sc.stars, sc.current_letter());
+                println!(
+                    "FAIL tracing-dot-letter (finished={}, letter={})",
+                    sc.awaiting_advance(),
+                    sc.current_letter()
+                );
                 fails += 1;
             }
         }
-        // tracing: the parent's ✗ keeps the kid's star (monotonic) but holds
-        // the letter's Leitner box down, and the session moves on to a
-        // different letter.
+        // tracing: the parent's ✗ holds the letter's Leitner box down and the
+        // house does NOT gain a part (only ✓ builds, like phonics' rainbow);
+        // the session moves on to a different letter.
         {
             let mut sc = TracingScene::new(Db::mem(), 7, now);
             let idle = Pointer::default();
@@ -865,7 +875,7 @@ async fn main() {
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let moved_on = !sc.is_done() && sc.in_watch() && sc.current_letter() != 'c';
-            if graded && sc.stars == 1 && sc.letter_box('c') == 0 && moved_on {
+            if graded && sc.stars == 0 && sc.letter_box('c') == 0 && moved_on {
                 println!("PASS tracing-grade-miss");
             } else {
                 println!(
