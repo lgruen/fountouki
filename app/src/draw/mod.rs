@@ -7,7 +7,10 @@
 //! - [`scenery`]: rainbow, sky, igloo and the phonics garden plants.
 //! - [`frog`]: the rigged frog mascot + its pose type (and its hard hat).
 //! - [`train`]: the Pattern Train engine, cars, flag and bunting.
-//! - [`house`]: the tracing build-a-house, crane install + the demo pencil.
+//! - [`house`]: the tracing build-a-house (real construction order) + the
+//!   demo pencil.
+//! - [`site`]: the construction site around it — tower crane, excavator,
+//!   mixer truck, and the per-stage install timing + sound cues.
 //!
 //! Everything is re-exported flat so call sites stay `draw::frog(..)` etc.
 mod frog;
@@ -15,6 +18,7 @@ mod glyphs;
 mod house;
 mod prim;
 mod scenery;
+mod site;
 mod train;
 
 pub use frog::{frog, frog_hard_hat, frog_party_hat, FrogPose};
@@ -22,6 +26,7 @@ pub use house::{
     house, house_door_rect, house_height, house_part_anchor, house_window_centers, pencil,
     HousePose, HOUSE_PARTS,
 };
+pub use site::{install_cues, install_dur, site_extents, site_height, BuildCue};
 pub use glyphs::{
     chevron_left, circle_btn, house_icon, mark_arrow, mark_check, mark_cross, replay_icon, speaker,
 };

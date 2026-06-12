@@ -100,10 +100,13 @@ pub const CAR_BODY: Color = CARD; // cars are uniform cream — the items carry 
 // no separate critter palette.
 
 // Tracing finale + build-a-house (the tracing progress meter / set piece).
-pub const HOUSE_WALL: Color = hex(0xffe9b8); // warm butter walls
+pub const HOUSE_WALL: Color = hex(0xf3c98a); // sandy face brick
 pub const HOUSE_WALL_EDGE: Color = hex(0xd9a85e); // wall outline / trim
-pub const HOUSE_ROOF: Color = hex(0xe8705f); // cheerful terracotta
+pub const HOUSE_MORTAR: Color = hex(0xfdeecb); // mortar joints between bricks
+pub const HOUSE_INSIDE: Color = hex(0x5a4538); // unfitted door/window openings
+pub const HOUSE_ROOF: Color = hex(0xe8705f); // cheerful terracotta tiles
 pub const HOUSE_ROOF_EDGE: Color = hex(0xc2564a); // roof underside / fascia
+pub const HOUSE_RAFTER: Color = hex(0xb98756); // bare roof truss timber
 pub const HOUSE_DOOR: Color = hex(0x38b3e2); // friendly sky-blue door
 pub const HOUSE_DOOR_DARK: Color = hex(0x2b8db3); // door frame / shade
 pub const HOUSE_DOORWAY: Color = hex(0x4a3a30); // open-door interior
@@ -111,6 +114,16 @@ pub const HOUSE_BRICK: Color = hex(0xc97b6a); // chimney brick
 pub const HOUSE_GLASS: Color = hex(0xcdefff); // unlit window glass
 pub const HOUSE_GLASS_LIT: Color = hex(0xffd76b); // warm lit window glass
 pub const HOUSE_GROUND: Color = hex(0xa8d9a0); // in-play grass mound
+
+// Construction site (tracing in-play): crane + machines + groundwork.
+pub const CRANE: Color = hex(0xf6b73c); // classic tower-crane yellow
+pub const CRANE_DARK: Color = hex(0xc8881f); // crane lattice shade / outlines
+pub const CONCRETE: Color = hex(0xb9b3a6); // cured slab / counterweight
+pub const CONCRETE_WET: Color = hex(0xa49d8f); // fresh pour (light against the trench)
+pub const DIRT: Color = hex(0xa5704b); // spoil heap
+pub const DIRT_DARK: Color = hex(0x6b4830); // open trench
+pub const MACHINE_TRACK: Color = hex(0x4c4c55); // excavator tracks / tyres
+pub const MIXER_DRUM: Color = hex(0xfff3e0); // mixer drum (with accent spiral)
 
 // Form chrome (parent settings)
 pub const FIELD_BORDER: Color = hex(0xe6e1d3);

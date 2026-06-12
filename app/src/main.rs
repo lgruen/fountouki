@@ -328,7 +328,7 @@ async fn main() {
             }
             "tracing-reward" => {
                 // The post-✓ install: the next letter's demo starting while
-                // the freshly earned house part rides the crane cable down.
+                // the excavator digs the freshly earned foundation trench.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = TracingScene::new(db.clone(), 7, now);
                 sc.debug_set_letter('c');
@@ -339,8 +339,8 @@ async fn main() {
                     sc.update(&ctx);
                 }
                 // Lift to complete the letter, settle through the reward beat
-                // into the grade row, tap ✓, then catch the walls mid-descent
-                // on the cable.
+                // into the grade row, tap ✓, then catch the excavator mid-dig
+                // on the foundation stage.
                 let idle = Pointer::default();
                 let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
@@ -349,8 +349,27 @@ async fn main() {
                 let ptr = tap(sc.got_center(&frame));
                 let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
-                for _ in 0..5 {
+                for _ in 0..8 {
                     let ctx = Ctx { dt: 0.15, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                Box::new(sc)
+            }
+            "tracing-build" => {
+                // Mid-session: walls up on the slab, the tower crane carrying
+                // the roof truss down toward them (lift slings + trolley out).
+                // BUILD_STARS / BUILD_T env overrides let a dev inspect any
+                // stage mid-animation; goldens use the defaults.
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = TracingScene::new(db.clone(), 7, now);
+                sc.debug_set_letter('d');
+                let stars: u32 = std::env::var("BUILD_STARS").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+                let tt: f32 = std::env::var("BUILD_T").ok().and_then(|v| v.parse().ok()).unwrap_or(1.36);
+                sc.debug_set_build(stars, 0.0);
+                let idle = Pointer::default();
+                let steps = (tt / 0.17).ceil() as usize;
+                for _ in 0..steps {
+                    let ctx = Ctx { dt: tt / steps as f32, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
                 Box::new(sc)
@@ -778,6 +797,14 @@ async fn main() {
                     break 'session;
                 }
             }
+            // The final ✓ must NOT hard-cut to the finale: the door's install
+            // (the topping-out beat) plays on-site first…
+            let topping = sc.stars == goal && !sc.is_done();
+            for _ in 0..4 {
+                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            // …and the house-warming follows once the door lands.
             let persisted = {
                 let kv = db.borrow_kv();
                 let st = fountouki_core::tracing::load(&**kv, now);
@@ -786,6 +813,7 @@ async fn main() {
             if skipped
                 && errorless
                 && graded_each_time
+                && topping
                 && sc.is_done()
                 && sc.stars == goal
                 && persisted == goal
@@ -793,7 +821,7 @@ async fn main() {
                 println!("PASS tracing-session");
             } else {
                 println!(
-                    "FAIL tracing-session (skipped={skipped}, errorless={errorless}, graded={graded_each_time}, done={}, stars={}, persisted={persisted})",
+                    "FAIL tracing-session (skipped={skipped}, errorless={errorless}, graded={graded_each_time}, topping={topping}, done={}, stars={}, persisted={persisted})",
                     sc.is_done(),
                     sc.stars
                 );
