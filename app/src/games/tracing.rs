@@ -1,8 +1,11 @@
 //! Tracing: finger-trace VicModernCursive letters with the chart's stroke
 //! order. Each letter plays an animated pen demo first (watch), then the kid
-//! traces over the faded glyph (trace): a green dot marks the start, a red dot
-//! the end, and ink follows the finger along a generous corridor. Errorless —
-//! a wandering finger just stops laying ink; progress never goes backwards.
+//! traces over the faded glyph (trace): a stroke arms only when the finger
+//! touches the green start dot, the laid ink is the finger's *actual* path
+//! (so a wobbly trace looks wobbly — the parent can judge it at grade time),
+//! and the stroke completes only once the finger reaches the red end dot.
+//! Errorless — a wandering finger just stops laying ink; progress never goes
+//! backwards.
 //! After the reward beat the parent grades the trace ✓/✗ (grade): ✓ installs
 //! the next house part (the progress meter advances only on a correct grade,
 //! like phonics' rainbow) and promotes the letter; ✗ only reschedules it.
@@ -71,6 +74,16 @@ pub struct TracingScene {
     /// Current stroke being demoed/traced + arc-length progress along it.
     stroke_i: usize,
     progress: f32,
+    /// The current stroke has been started at its green dot (the gate that
+    /// keeps a mid-path touch from laying ink).
+    armed: bool,
+    /// The finger's actual laid ink for this letter, in font units: one
+    /// polyline per engaged drag (broken when the finger lifts or leaves the
+    /// corridor). This — not the canonical path — is what's drawn, so the
+    /// parent can judge divergence at grade time.
+    laid: Vec<Vec<(f32, f32)>>,
+    /// The last `laid` polyline is still being extended.
+    laid_open: bool,
     demo_t: f32,
     advance_in: Option<f32>,
     /// Time since the current letter finished (drives the completed-glyph pop
@@ -121,6 +134,9 @@ impl TracingScene {
             phase: Phase::Watch,
             stroke_i: 0,
             progress: 0.0,
+            armed: false,
+            laid: Vec::new(),
+            laid_open: false,
             demo_t: 0.0,
             advance_in: None,
             finish_t: 99.0,
@@ -179,6 +195,9 @@ impl TracingScene {
         self.phase = Phase::Trace;
         self.stroke_i = 0;
         self.progress = 0.0;
+        self.armed = false;
+        self.laid.clear();
+        self.laid_open = false;
         self.tick_acc = 0.0;
         self.tick_step = 0;
     }
@@ -260,6 +279,7 @@ impl TracingScene {
     fn update_trace(&mut self, ctx: &Ctx) {
         let pt = ctx.pointer;
         if !pt.down {
+            self.laid_open = false;
             return;
         }
         let g = self.glyph();
@@ -270,15 +290,47 @@ impl TracingScene {
         let finger = p.map.px_to_units(pt.pos);
         let stroke = g.strokes[self.stroke_i];
         // Corridor half-width: TOL font units, but never under ~26 px — on a
-        // small phone the letter shrinks, a 4yo's finger doesn't.
+        // small phone the letter shrinks, a 4yo's finger doesn't. The start /
+        // end gates are tighter than the corridor (with their own px floors):
+        // a stroke begins only at the green dot and finishes only at the red.
         let tol = TOL.max(26.0 / p.map.scale);
+        let start_r = tr::START_RADIUS.max(30.0 / p.map.scale);
+        let end_r = tr::END_RADIUS.max(24.0 / p.map.scale);
         let done = if tr::is_dot(stroke) {
             // The dot of i / j: tap it (a small wiggle of the finger is fine).
-            let d = vec2(finger.0 - stroke[0].0, finger.1 - stroke[0].1);
-            d.length() <= tol * 1.3
+            let hit = units_dist(finger, stroke[0]) <= start_r * 1.3;
+            if hit {
+                // Ink the dot where the finger actually landed.
+                self.laid.push(vec![finger]);
+                self.laid_open = false;
+            }
+            hit
         } else {
+            if self.progress <= 0.0 && !self.armed {
+                // Not started yet: the finger must touch the green dot first.
+                if units_dist(finger, stroke[0]) > start_r {
+                    self.laid_open = false;
+                    return;
+                }
+                self.armed = true;
+            }
             let before = self.progress;
             self.progress = tr::advance_progress(stroke, self.progress, finger, tol);
+            // Lay ink along the finger's real path while it stays in the
+            // corridor; lifting or wandering breaks the polyline (errorless —
+            // it just stops inking, nothing is undone).
+            if units_dist(finger, tr::point_at(stroke, self.progress)) <= tol {
+                if !self.laid_open {
+                    self.laid.push(Vec::new());
+                    self.laid_open = true;
+                }
+                let seg = self.laid.last_mut().unwrap();
+                if seg.last().is_none_or(|&l| units_dist(l, finger) >= 4.0) {
+                    seg.push(finger);
+                }
+            } else {
+                self.laid_open = false;
+            }
             // Laid ink rewards as it grows: a tiny sparkle + a tick that climbs
             // a pentatonic ladder, so the stroke literally sings upward.
             self.tick_acc += (self.progress - before).max(0.0);
@@ -289,13 +341,15 @@ impl TracingScene {
                 let tip = p.map.to_px(tr::point_at(stroke, self.progress));
                 self.confetti.burst(tip, 2, p.start_r * 0.4);
             }
-            tr::stroke_done(stroke, self.progress)
+            tr::stroke_done(stroke, self.progress, finger, end_r)
         };
         if done {
             let end = p.map.to_px(*stroke.last().unwrap());
             self.confetti.burst(end, 12, p.start_r);
             self.stroke_i += 1;
             self.progress = 0.0;
+            self.armed = false;
+            self.laid_open = false;
             self.tick_acc = 0.0;
             self.tick_step = 0;
             if self.stroke_i >= g.strokes.len() {
@@ -368,6 +422,9 @@ impl TracingScene {
     }
     pub(crate) fn stroke_index(&self) -> usize {
         self.stroke_i
+    }
+    pub(crate) fn stroke_progress(&self) -> f32 {
+        self.progress
     }
     /// The reward beat between a finished letter and the parent's grade.
     pub(crate) fn awaiting_advance(&self) -> bool {
@@ -573,11 +630,14 @@ impl Scene for TracingScene {
                 if self.phase == Phase::Trace && !finished {
                     self.draw_trace(&p, ctx);
                 } else {
-                    // The finished letter pops: full ink with a brief width
-                    // swell + a golden shimmer sweeping along the stroke path.
+                    // The finished letter pops: the kid's actual ink with a
+                    // brief width swell + a golden shimmer sweeping along the
+                    // stroke path. The same real ink stays up through the
+                    // grade phase, over the faded glyph — that contrast is
+                    // what the parent judges ✓/✗ on.
                     let pop = (self.finish_t / 0.45).clamp(0.0, 1.0);
                     let swell = 1.0 + 0.16 * (std::f32::consts::PI * pop).sin();
-                    self.draw_ink_full_w(&p, swell);
+                    self.draw_laid_ink(&p, swell);
                     self.draw_finish_sweep(&p);
                 }
             }
@@ -619,11 +679,24 @@ impl TracingScene {
         }
     }
 
-    fn draw_stroke_ink(&self, p: &TLayout, stroke: &[(f32, f32)], upto: f32) {
-        self.draw_stroke_ink_w(p, stroke, upto, p.ink_w);
+    /// The finger's actual laid ink — every engaged drag segment of this
+    /// letter (single points, like the dot of i, draw as discs).
+    fn draw_laid_ink(&self, p: &TLayout, w_mult: f32) {
+        let w = p.ink_w * w_mult;
+        for seg in &self.laid {
+            if seg.len() == 1 {
+                let c = p.map.to_px(seg[0]);
+                draw::disc(c.x, c.y, w * 0.62, palette::INK);
+            } else {
+                let pts: Vec<Vec2> = seg.iter().map(|&u| p.map.to_px(u)).collect();
+                draw::stroke_path(&pts, w, palette::INK);
+            }
+        }
     }
 
-    fn draw_stroke_ink_w(&self, p: &TLayout, stroke: &[(f32, f32)], upto: f32, ink_w: f32) {
+    /// Ink along the canonical stroke path (the demo pen's ink).
+    fn draw_stroke_ink(&self, p: &TLayout, stroke: &[(f32, f32)], upto: f32) {
+        let ink_w = p.ink_w;
         if tr::is_dot(stroke) {
             let c = p.map.to_px(stroke[0]);
             draw::disc(c.x, c.y, ink_w * 0.62, palette::INK);
@@ -650,12 +723,8 @@ impl TracingScene {
     }
 
     fn draw_ink_full(&self, p: &TLayout) {
-        self.draw_ink_full_w(p, 1.0);
-    }
-
-    fn draw_ink_full_w(&self, p: &TLayout, w_mult: f32) {
         for st in self.glyph().strokes {
-            self.draw_stroke_ink_w(p, st, f32::MAX, p.ink_w * w_mult);
+            self.draw_stroke_ink(p, st, f32::MAX);
         }
     }
 
@@ -764,9 +833,10 @@ impl TracingScene {
 
     fn draw_trace(&self, p: &TLayout, ctx: &Ctx) {
         let g = self.glyph();
-        for i in 0..self.stroke_i.min(g.strokes.len()) {
-            self.draw_stroke_ink(p, g.strokes[i], f32::MAX);
-        }
+        // The ink is the finger's real path (completed strokes included) — a
+        // wobble inside the corridor stays visible instead of snapping to the
+        // perfect glyph, so the trace can actually be judged.
+        self.draw_laid_ink(p, 1.0);
         if self.stroke_i >= g.strokes.len() {
             return;
         }
@@ -782,7 +852,6 @@ impl TracingScene {
                 draw::disc(c.x, c.y, p.ink_w * 0.16, palette::hexa(0x2b2c34, 0.3));
                 s += 70.0;
             }
-            self.draw_stroke_ink(p, stroke, self.progress);
             // Pen position marker once underway: where to keep the finger.
             if self.progress > 0.0 {
                 let tip = p.map.to_px(tr::point_at(stroke, self.progress));
@@ -945,6 +1014,11 @@ impl TracingScene {
             );
         }
     }
+}
+
+/// Euclidean distance between two font-unit points.
+fn units_dist(a: (f32, f32), b: (f32, f32)) -> f32 {
+    vec2(a.0 - b.0, a.1 - b.1).length()
 }
 
 /// Door swing for `door_t` seconds after a tap: springs open, holds, eases

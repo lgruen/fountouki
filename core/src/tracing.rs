@@ -115,12 +115,24 @@ pub fn advance_progress(pts: &[(f32, f32)], cur: f32, finger: (f32, f32), tol: f
     best_s
 }
 
-/// A stroke counts as finished within this many font units of its end (a
-/// 4yo's flick rarely lands on the exact tip).
-pub const END_SLACK: f32 = 90.0;
+/// The finger must land within this of a stroke's first point (the green dot)
+/// to start it — touching the corridor mid-path doesn't arm the stroke.
+/// Slightly larger than the drawn dot (90 units) for small fingers.
+pub const START_RADIUS: f32 = 110.0;
 
-pub fn stroke_done(pts: &[(f32, f32)], cur: f32) -> bool {
-    cur >= stroke_len(pts) - END_SLACK
+/// A stroke counts as finished within this many font units of arc length from
+/// its end (a 4yo's flick rarely lands on the exact tip)...
+pub const END_SLACK: f32 = 60.0;
+/// ...but only while the finger itself is near the red end dot — arc progress
+/// alone fired too early (the wide corridor let the pen run ahead of a finger
+/// that never reached the end).
+pub const END_RADIUS: f32 = 90.0;
+
+/// Finished = nearly the whole arc traced AND the finger within `end_r` of
+/// the stroke's last point (`end_r` ≥ `END_RADIUS`; callers may widen it so
+/// it never shrinks below a fingertip on small screens).
+pub fn stroke_done(pts: &[(f32, f32)], cur: f32, finger: (f32, f32), end_r: f32) -> bool {
+    cur >= stroke_len(pts) - END_SLACK && dist(finger, *pts.last().unwrap()) <= end_r
 }
 
 fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
@@ -303,6 +315,19 @@ mod tests {
     }
 
     #[test]
+    fn stroke_done_needs_the_finger_at_the_end() {
+        let total = stroke_len(&LINE); // 200
+        // Full progress + finger on the tip: done.
+        assert!(stroke_done(&LINE, total, (200.0, 0.0), END_RADIUS));
+        // Full arc progress but the finger never reached the end: not done.
+        assert!(!stroke_done(&LINE, total, (60.0, 0.0), END_RADIUS));
+        // Finger at the end but progress stopped short of the slack: not done.
+        assert!(!stroke_done(&LINE, total - END_SLACK - 10.0, (200.0, 0.0), END_RADIUS));
+        // Inside both gates (a flick that stops just short): done.
+        assert!(stroke_done(&LINE, total - END_SLACK + 1.0, (160.0, 30.0), END_RADIUS));
+    }
+
+    #[test]
     fn real_glyph_traces_to_completion() {
         // Walk a finger down the first stroke of every letter at a coarse step;
         // it must reach stroke_done with a generous-but-finite tolerance.
@@ -310,12 +335,13 @@ mod tests {
             let pts = g.strokes[0];
             let total = stroke_len(pts);
             let mut cur = 0.0;
+            let mut target = pts[0];
             let steps = (total / 60.0).ceil() as usize + 2;
             for i in 0..=steps {
-                let target = point_at(pts, total * i as f32 / steps as f32);
+                target = point_at(pts, total * i as f32 / steps as f32);
                 cur = advance_progress(pts, cur, target, 130.0);
             }
-            assert!(stroke_done(pts, cur), "{}: stuck at {cur}/{total}", g.ch);
+            assert!(stroke_done(pts, cur, target, END_RADIUS), "{}: stuck at {cur}/{total}", g.ch);
         }
     }
 
