@@ -155,8 +155,10 @@ pub const ORDER: [char; 26] = [
     'v', 'w', 'x', 'z', // diagonals
 ];
 
-/// Letters traced per session (~5 minutes at a preschool pace).
-pub const SESSION_GOAL: usize = 5;
+/// Letters traced per session (~5 minutes at a preschool pace). Matches the
+/// build-a-house stage count: one ✓-graded letter per construction step
+/// (foundation → walls → roof → chimney → windows → door).
+pub const SESSION_GOAL: usize = 6;
 
 /// Which letters the SRS allows right now (drip-in frontier over `ORDER`).
 /// Fresh learner → `c, a, d`.

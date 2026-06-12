@@ -37,8 +37,8 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 - `--capture <png> <scene> [w] [h]` — render a scene offscreen to a PNG.
   Scenes: `picker phonics phonics-miss phonics-miss-igloo phonics-done patterns
   patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done
-  tracing tracing-watch tracing-two-stroke tracing-reward tracing-grade
-  tracing-done parent-patterns parent-phonics parent-tracing`.
+  tracing tracing-watch tracing-two-stroke tracing-reward tracing-build
+  tracing-grade tracing-done parent-patterns parent-phonics parent-tracing`.
 - `--playtest` — scripted taps drive the real scenes + assert invariants; exits
   non-zero on failure.
 

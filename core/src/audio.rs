@@ -277,6 +277,35 @@ pub fn trace_tick(step: u32) -> Vec<f32> {
     mix(&notes)
 }
 
+/// `digger()` — a low diesel "chugga-chugga" + a bucket-scrape clank for the
+/// excavator's dig scoops in the tracing game's foundation stage. All low
+/// triangles so it rumbles rather than rings.
+pub fn digger() -> Vec<f32> {
+    use Waveform::Triangle;
+    let mut notes = Vec::with_capacity(6);
+    // Four uneven engine pulses, wandering around 70–90 Hz.
+    for (i, &(freq, dur)) in [(72.0, 0.12), (88.0, 0.11), (68.0, 0.13), (92.0, 0.15)].iter().enumerate() {
+        notes.push(Note { freq, start: i as f32 * 0.11, dur, gain: 0.16, waveform: Triangle });
+    }
+    // The bucket bites: a brighter metallic scrape over the last pulses.
+    notes.push(Note { freq: 210.0, start: 0.30, dur: 0.10, gain: 0.07, waveform: Triangle });
+    notes.push(Note { freq: 260.0, start: 0.38, dur: 0.08, gain: 0.06, waveform: Triangle });
+    mix(&notes)
+}
+
+/// `truck_beep()` — the reversing mixer truck's "beep — beep": two clear mid
+/// sine tones with a quiet engine idle underneath.
+pub fn truck_beep() -> Vec<f32> {
+    use Waveform::{Sine, Triangle};
+    let notes = [
+        Note { freq: 932.33, start: 0.00, dur: 0.14, gain: 0.11, waveform: Sine }, // Bb5
+        Note { freq: 932.33, start: 0.26, dur: 0.14, gain: 0.11, waveform: Sine },
+        // Idle rumble under the beeps.
+        Note { freq: 80.0, start: 0.00, dur: 0.40, gain: 0.07, waveform: Triangle },
+    ];
+    mix(&notes)
+}
+
 /// `doorbell()` — a friendly two-note "ding-dong" (E6→C6) for the finished
 /// house's front door in the tracing finale.
 pub fn doorbell() -> Vec<f32> {
@@ -339,6 +368,8 @@ mod tests {
         assert_clean(&train_whistle());
         assert_clean(&finale());
         assert_clean(&hammer());
+        assert_clean(&digger());
+        assert_clean(&truck_beep());
         assert_clean(&doorbell());
         assert_clean(&twinkle());
         for step in 0..=TRACE_TICK_STEPS {
@@ -357,6 +388,8 @@ mod tests {
             train_whistle(),
             finale(),
             hammer(),
+            digger(),
+            truck_beep(),
             doorbell(),
             twinkle(),
             trace_tick(0),

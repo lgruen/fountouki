@@ -35,13 +35,12 @@ const DEMO_DOT_POP: f32 = 0.45;
 /// Reward beat after a finished letter before the parent's grade row appears.
 const ADVANCE_BEAT: f32 = 1.1;
 /// House-part install timeline, relative to the parent's ✓ grade
-/// (`install_t`): the crane lowers the part in starting at `INSTALL_START`,
-/// the part is tapped home (hammer clonk) at `HAMMER_AT`, parked by
-/// `INSTALL_START + INSTALL_DUR`. It overlaps the next letter's demo —
+/// (`install_t`): the build stage starts at `INSTALL_START` and runs
+/// `draw::install_dur(stage)` seconds — stage-specific, since the foundation's
+/// dig + pour tells a longer story than a single crane lift. Sound cues come
+/// from `draw::install_cues(stage)`. It overlaps the next letter's demo —
 /// `install_t` keeps counting across the transition.
-const INSTALL_START: f32 = 0.3;
-const INSTALL_DUR: f32 = 0.9;
-const HAMMER_AT: f32 = INSTALL_START + INSTALL_DUR * 0.72;
+const INSTALL_START: f32 = 0.35;
 /// Golden shimmer sweep along the just-finished letter's ink.
 const SWEEP_DUR: f32 = 0.55;
 /// Laid ink (font units) between sparkle ticks while tracing.
@@ -468,6 +467,12 @@ impl TracingScene {
         self.queue = vec![c];
         self.qi = 0;
     }
+    /// Pin the build mid-session for captures: `stars` parts earned, with the
+    /// newest one's install clock at `install_t` seconds.
+    pub(crate) fn debug_set_build(&mut self, stars: u32, install_t: f32) {
+        self.stars = stars;
+        self.install_t = install_t;
+    }
     pub(crate) fn debug_finish_session(&mut self) {
         self.traced = tr::ORDER[..tr::SESSION_GOAL].to_vec();
         self.stars = tr::SESSION_GOAL as u32;
@@ -525,14 +530,30 @@ impl Scene for TracingScene {
             }
             self.friend_t[i] += ctx.dt;
         }
-        // The house part lands: a hammer clonk + a confetti kick at the part.
-        // Driven by install_t so it fires while the next letter's demo plays.
-        if self.phase != Phase::Done && install_prev < HAMMER_AT && self.install_t >= HAMMER_AT {
-            ctx.audio.hammer();
-            let p = plan(&ctx.frame, self.current());
-            let part = (self.stars as usize).saturating_sub(1).min(draw::HOUSE_PARTS - 1);
-            let a = draw::house_part_anchor(p.house.0.x, p.house.0.y, p.house.1, part);
-            self.confetti.burst(a, 10, p.house.1 * 0.25);
+        // The build stage's sound cues (digger scoops, truck beeps, brick
+        // taps, the lands-home thunk + confetti…) fire as install_t crosses
+        // them — while the next letter's demo plays.
+        if self.phase != Phase::Done && self.stars > 0 {
+            let stage = (self.stars as usize - 1).min(draw::HOUSE_PARTS - 1);
+            let dur = draw::install_dur(stage);
+            for &(frac, cue) in draw::install_cues(stage) {
+                let at = INSTALL_START + frac * dur;
+                if install_prev < at && self.install_t >= at {
+                    match cue {
+                        draw::BuildCue::Thunk => {
+                            ctx.audio.hammer();
+                            let p = plan(&ctx.frame, self.current());
+                            let a = draw::house_part_anchor(p.house.0.x, p.house.0.y, p.house.1, stage);
+                            self.confetti.burst(a, 10, p.house.1 * 0.25);
+                        }
+                        draw::BuildCue::Tap => ctx.audio.tap(),
+                        draw::BuildCue::Digger => ctx.audio.digger(),
+                        draw::BuildCue::TruckBeep => ctx.audio.truck_beep(),
+                        draw::BuildCue::Twinkle => ctx.audio.twinkle(),
+                        draw::BuildCue::Doorbell => ctx.audio.doorbell(),
+                    }
+                }
+            }
         }
         // Drive cross-device sync: send debounced pushes, and merge the remote
         // blob once the initial pull lands (non-yanking — just updates state).
@@ -775,19 +796,20 @@ impl TracingScene {
     }
 
     /// The build state shown beside the card: installed parts = stars (one per
-    /// ✓-graded letter), with the newest part animating in on the `install_t`
+    /// ✓-graded letter), with the newest stage animating in on the `install_t`
     /// timeline that starts at the parent's ✓.
     fn house_pose(&self, time: f32) -> draw::HousePose {
-        let install_end = INSTALL_START + INSTALL_DUR;
+        let stage = (self.stars as usize).saturating_sub(1).min(draw::HOUSE_PARTS - 1);
+        let install_end = INSTALL_START + draw::install_dur(stage);
         let (parts, installing) = if self.stars == 0 || self.install_t >= install_end {
             (self.stars as usize, None)
         } else if self.install_t < INSTALL_START {
             (self.stars as usize - 1, None)
         } else {
-            (self.stars as usize - 1, Some((self.install_t - INSTALL_START) / INSTALL_DUR))
+            (self.stars as usize - 1, Some((self.install_t - INSTALL_START) / draw::install_dur(stage)))
         };
         let smoke_t = if parts >= draw::HOUSE_PARTS { self.install_t - install_end } else { -1.0 };
-        draw::HousePose { parts, installing, smoke_t, time, ..Default::default() }
+        draw::HousePose { parts, installing, site: true, smoke_t, time, ..Default::default() }
     }
 
     /// Start dot (green, numbered when the letter has several strokes) and end
@@ -927,6 +949,8 @@ impl TracingScene {
         let pose = draw::HousePose {
             parts: draw::HOUSE_PARTS,
             installing: None,
+            // The site is cleared for the house-warming: crane gone, job done.
+            site: false,
             door_open,
             lit,
             smoke_t: (self.done_t - 0.45).max(-1.0),
@@ -1181,12 +1205,21 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
     let ggap = if phone { 22.0 } else { 34.0 };
     let gx0 = cx - (2.0 * slot + ggap) / 2.0;
 
-    // The build-a-house meter lives in the right margin beside the card,
-    // grounded on the card's bottom edge — same spot every session.
+    // The build-a-house meter (with its construction site) lives in the right
+    // margin beside the card, grounded on the card's bottom edge — same spot
+    // every session. The crane's tower head must clear the topbar, so the
+    // available headroom also caps the scale.
     let margin = f.w - (card.x + card.w);
-    let house_s = (margin * 0.62).min(card_h * 0.66).clamp(60.0, 150.0);
-    let house_cx = card.x + card.w + margin / 2.0;
     let house_base = card.y + card_h - 2.0;
+    let headroom = house_base - (tb.y + tb.h) - 6.0;
+    let house_s = (margin * 0.62)
+        .min(card_h * 0.66)
+        .min(headroom / draw::site_height(1.0))
+        .clamp(60.0, 150.0);
+    // Center the whole site silhouette in the margin — the crane stands left
+    // of the house, so the footprint shifts right of the margin's middle.
+    let (site_l, site_r) = draw::site_extents();
+    let house_cx = card.x + card.w + margin / 2.0 - (site_l + site_r) / 2.0 * house_s;
 
     TLayout {
         card,
@@ -1266,21 +1299,30 @@ mod tests {
         assert!((back.0 - u.0).abs() < 0.01 && (back.1 - u.1).abs() < 0.01);
     }
 
-    /// The in-play house must fit its margin on the whole golden matrix:
-    /// fully right of the card, inside the screen, chimney below the topbar.
+    /// The in-play construction site must fit its margin on the whole golden
+    /// matrix: fully right of the card (counter-jib included), inside the
+    /// screen, the crane's tower head below the topbar.
     #[test]
-    fn house_fits_beside_the_card() {
+    fn site_fits_beside_the_card() {
+        let (sl, sr) = crate::draw::site_extents();
         for (w, h) in [(1194.0, 834.0), (834.0, 1194.0), (844.0, 390.0)] {
             let f = frame(w, h);
             let p = plan(&f, 'm');
             let (c, s) = (p.house.0, p.house.1);
-            assert!(c.x - s * 0.5 > p.card.x + p.card.w, "{w}x{h}: house overlaps card");
-            assert!(c.x + s * 0.5 < w, "{w}x{h}: house off-screen right");
-            let top = c.y - crate::draw::house_height(s);
+            assert!(c.x + sl * s > p.card.x + p.card.w, "{w}x{h}: site overlaps card");
+            assert!(c.x + sr * s < w, "{w}x{h}: site off-screen right");
+            let top = c.y - crate::draw::site_height(s);
             let tb = f.topbar();
-            assert!(top > tb.y + tb.h, "{w}x{h}: chimney {top} under topbar");
+            assert!(top > tb.y + tb.h, "{w}x{h}: crane head {top} under topbar");
             assert!(c.y <= p.card.y + p.card.h, "{w}x{h}: house floats below card");
         }
+    }
+
+    /// One ✓-graded letter per construction stage: a finished session must
+    /// finish exactly one house.
+    #[test]
+    fn house_parts_match_session_goal() {
+        assert_eq!(crate::draw::HOUSE_PARTS, fountouki_core::tracing::SESSION_GOAL);
     }
 
     /// Finale layout: the house clears the letter bunting and the frog stays

@@ -14,6 +14,8 @@ pub struct Audio {
     train_whistle: Option<Sound>,
     finale: Option<Sound>,
     hammer: Option<Sound>,
+    digger: Option<Sound>,
+    truck_beep: Option<Sound>,
     doorbell: Option<Sound>,
     twinkle: Option<Sound>,
     trace_ticks: Vec<Sound>, // index = pentatonic step
@@ -33,6 +35,8 @@ impl Audio {
             train_whistle: None,
             finale: None,
             hammer: None,
+            digger: None,
+            truck_beep: None,
             doorbell: None,
             twinkle: None,
             trace_ticks: Vec::new(),
@@ -60,6 +64,8 @@ impl Audio {
             train_whistle: Some(load_pcm(&synth::train_whistle()).await),
             finale: Some(load_pcm(&synth::finale()).await),
             hammer: Some(load_pcm(&synth::hammer()).await),
+            digger: Some(load_pcm(&synth::digger()).await),
+            truck_beep: Some(load_pcm(&synth::truck_beep()).await),
             doorbell: Some(load_pcm(&synth::doorbell()).await),
             twinkle: Some(load_pcm(&synth::twinkle()).await),
             trace_ticks,
@@ -112,6 +118,12 @@ impl Audio {
     }
     pub fn hammer(&self) {
         self.play(&self.hammer);
+    }
+    pub fn digger(&self) {
+        self.play(&self.digger);
+    }
+    pub fn truck_beep(&self) {
+        self.play(&self.truck_beep);
     }
     pub fn doorbell(&self) {
         self.play(&self.doorbell);
