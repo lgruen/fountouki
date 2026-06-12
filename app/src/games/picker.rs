@@ -106,15 +106,15 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
             draw::frog(cx, fy, fr, palette::RAINBOW[3], draw::FrogPose::default());
         }
         "tracing" => {
-            // a big cursive 'a' wearing the chart's start (green) and end (red)
-            // dots — the mechanic in one glance.
+            // The mechanic (a cursive 'a' wearing the chart's start/end dots)
+            // beside the reward (the build-a-house site, crane mid-build).
             use fountouki_core::tracing as tr;
             if let Some(g) = tr::glyph('a') {
-                let font_px = (r.w * 0.62) as u16;
+                let font_px = (r.w * 0.52) as u16;
                 let scale = font_px as f32 / tr::UPEM;
                 let bb = tr::ink_bbox(g);
                 let pen = vec2(
-                    cx - (bb.0 + bb.2) / 2.0 * scale,
+                    r.x + r.w * 0.27 - (bb.0 + bb.2) / 2.0 * scale,
                     cy + (bb.1 + bb.3) / 2.0 * scale + r.h * 0.04,
                 );
                 draw_text_ex(
@@ -131,10 +131,12 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
                 let to_px = |p: (f32, f32)| vec2(pen.x + p.0 * scale, pen.y - p.1 * scale);
                 let start = to_px(g.strokes[0][0]);
                 let end = to_px(*g.strokes[0].last().unwrap());
-                let dr = r.w * 0.05;
+                let dr = r.w * 0.042;
                 draw::disc(end.x, end.y, dr * 0.8, palette::RAINBOW[0]);
                 draw::disc(start.x, start.y, dr, palette::OK_STRONG);
             }
+            let pose = draw::HousePose { parts: 4, site: true, ..Default::default() };
+            draw::house(r.x + r.w * 0.71, r.y + r.h * 0.70, r.w * 0.235, &pose);
         }
         _ => {}
     }
