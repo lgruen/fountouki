@@ -123,14 +123,16 @@ pub const START_RADIUS: f32 = 110.0;
 /// A stroke counts as finished within this many font units of arc length from
 /// its end (a 4yo's flick rarely lands on the exact tip)...
 pub const END_SLACK: f32 = 60.0;
-/// ...but only while the finger itself is near the red end dot — arc progress
+/// ...but only if the finger itself ended near the red end dot — arc progress
 /// alone fired too early (the wide corridor let the pen run ahead of a finger
 /// that never reached the end).
 pub const END_RADIUS: f32 = 90.0;
 
 /// Finished = nearly the whole arc traced AND the finger within `end_r` of
 /// the stroke's last point (`end_r` ≥ `END_RADIUS`; callers may widen it so
-/// it never shrinks below a fingertip on small screens).
+/// it never shrinks below a fingertip on small screens). The app evaluates
+/// this on the finger's LIFT, never mid-drag — auto-snapping to done while
+/// the hand is still drawing cut letters short.
 pub fn stroke_done(pts: &[(f32, f32)], cur: f32, finger: (f32, f32), end_r: f32) -> bool {
     cur >= stroke_len(pts) - END_SLACK && dist(finger, *pts.last().unwrap()) <= end_r
 }
