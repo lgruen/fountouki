@@ -1159,7 +1159,7 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
     let card = Rect::new(cx - card_w / 2.0, card_y, card_w, card_h);
 
     // Scale: the full ascender→descender band fits the card height (the same
-    // baseline + guide lines for every letter), and a wide glyph (m, w)
+    // letter proportions across the alphabet), and a wide glyph (m, w)
     // additionally caps on the card width.
     let bb = tr::ink_bbox(tr::glyph(ch).expect("glyph data"));
     let band = tr::ASCENT - tr::DESCENT;
@@ -1168,9 +1168,11 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
     let font_px = ((scale_h.min(scale_w)) * tr::UPEM) as u16;
     let scale = font_px as f32 / tr::UPEM;
 
-    // Baseline so the asc→desc band is vertically centered in the card; pen x
-    // centers this letter's ink.
-    let baseline = card.y + card_h / 2.0 + (tr::ASCENT + tr::DESCENT) / 2.0 * scale;
+    // Pen so this letter's ink is centered in the card both ways (an ascender
+    // letter otherwise crams against the top edge while its unused descender
+    // zone leaves the bottom third empty); the baseline + x-height guides
+    // shift with the letter.
+    let baseline = card.y + card_h / 2.0 + (bb.1 + bb.3) / 2.0 * scale;
     let pen_x = cx - (bb.0 + bb.2) / 2.0 * scale;
 
     // Grade row: ✗ (smaller) left of ✓, the same arrangement as phonics so
@@ -1228,6 +1230,30 @@ mod tests {
                         p.card
                     );
                 }
+            }
+        }
+    }
+
+    /// Each letter's ink is centered in the card — ascender letters (l) must
+    /// not cram against the top edge, descender letters (g) not the bottom.
+    #[test]
+    fn glyph_ink_is_centered_in_the_card() {
+        for (w, h) in [(1194.0, 834.0), (834.0, 1194.0), (844.0, 390.0)] {
+            for g in fountouki_core::tracing::GLYPHS.iter() {
+                let p = plan(&frame(w, h), g.ch);
+                let bb = fountouki_core::tracing::ink_bbox(g);
+                let top = p.map.to_px((bb.0, bb.3));
+                let bot = p.map.to_px((bb.2, bb.1));
+                let cx = p.card.x + p.card.w / 2.0;
+                let cy = p.card.y + p.card.h / 2.0;
+                assert!(
+                    ((top.x + bot.x) / 2.0 - cx).abs() < 1.0
+                        && ((top.y + bot.y) / 2.0 - cy).abs() < 1.0,
+                    "{w}x{h} '{}': ink center ({}, {}) vs card center ({cx}, {cy})",
+                    g.ch,
+                    (top.x + bot.x) / 2.0,
+                    (top.y + bot.y) / 2.0,
+                );
             }
         }
     }
