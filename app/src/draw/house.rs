@@ -75,6 +75,10 @@ const CHIM_TOP: f32 = -1.06;
 /// ground line.
 const SLAB_W: f32 = 0.88;
 const SLAB_D: f32 = 0.05;
+/// Mixer-truck park / approach x. Its tail reaches 0.18 further left — the
+/// card side, so the whole transit must stay inside the site extents.
+const MIXER_PARK: f32 = -0.58;
+const MIXER_IN: f32 = -0.66;
 
 /// Door hit rect (finale tap target), slightly inflated for small fingers.
 pub fn house_door_rect(cx: f32, base_y: f32, s: f32) -> Rect {
@@ -238,8 +242,10 @@ fn draw_foundation(cx: f32, base_y: f32, s: f32, trench: f32, slab: f32, wet: f3
     draw_rectangle(wl, base_y - 0.004 * s, SLAB_W * s * trench, d, palette::DIRT_DARK);
     let slab = slab.clamp(0.0, 1.0);
     if slab > 0.0 {
+        // The pour stands a little proud of the trench so the fresh concrete
+        // reads as a light band against both the dirt and the grass.
         let c = mix(palette::CONCRETE, palette::CONCRETE_WET, wet.clamp(0.0, 1.0));
-        draw_rectangle(wl + 0.006 * s, base_y - 0.002 * s, (SLAB_W - 0.012) * s * slab, d * 0.9, c);
+        draw_rectangle(wl + 0.006 * s, base_y - 0.012 * s, (SLAB_W - 0.012) * s * slab, d + 0.008 * s, c);
     }
     if slab >= 1.0 && wet < 0.6 {
         // The set slab stands a little proud: the footing line under the walls.
@@ -268,7 +274,7 @@ fn install_foundation(cx: f32, base_y: f32, s: f32, t: f32) {
     };
     if ea > 0.0 {
         let bucket = if (0.14..0.52).contains(&t) {
-            let bx = anim::lerp(-0.40, 0.16, dig_p);
+            let bx = anim::lerp(-0.40, 0.35, dig_p);
             // Two scoops: the bucket bites the ground at each cycle boundary
             // and lifts high between them.
             let lift01 = ((dig_p * 2.0).fract() * PI).sin();
@@ -283,12 +289,12 @@ fn install_foundation(cx: f32, base_y: f32, s: f32, t: f32) {
     // The approach stays a short scoot — its tail must never cross the card.
     if t >= 0.56 {
         let (mx, ma) = if t < 0.70 {
-            (anim::lerp(-0.66, -0.58, anim::ease_out_cubic((t - 0.56) / 0.14)), ((t - 0.56) / 0.07).min(1.0))
+            (anim::lerp(MIXER_IN, MIXER_PARK, anim::ease_out_cubic((t - 0.56) / 0.14)), ((t - 0.56) / 0.07).min(1.0))
         } else if t < 0.92 {
-            (-0.58, 1.0)
+            (MIXER_PARK, 1.0)
         } else {
             let p = ((t - 0.92) / 0.08).clamp(0.0, 1.0);
-            (anim::lerp(-0.58, -0.66, p), 1.0 - p)
+            (anim::lerp(MIXER_PARK, MIXER_IN, p), 1.0 - p)
         };
         let chute = (0.70..0.92).contains(&t).then_some(vec2(-0.38, 0.005));
         site::mixer_truck(cx, base_y, s, mx, t * 1.3, chute, ma);
@@ -364,11 +370,16 @@ fn draw_course(cx: f32, base_y: f32, s: f32, row: usize, dy: f32, alpha: f32) {
     let g = MORTAR * s;
     let band_mid = y1 - ch * 0.5;
     // An opening cuts this course when it covers the course's centerline.
-    let cuts: Vec<(f32, f32)> = wall_openings(cx, base_y, s)
-        .iter()
-        .filter(|o| o.y < band_mid && o.y + o.h > band_mid)
-        .map(|o| (o.x, o.x + o.w))
-        .collect();
+    // Fixed-size scratch (≤3 cuts → ≤4 segments per brick): this runs every
+    // frame for the rest of the session, so no per-brick heap allocation.
+    let mut cuts = [(0.0f32, 0.0f32); 3];
+    let mut ncuts = 0;
+    for o in wall_openings(cx, base_y, s) {
+        if o.y < band_mid && o.y + o.h > band_mid {
+            cuts[ncuts] = (o.x, o.x + o.w);
+            ncuts += 1;
+        }
+    }
     let mut bx = wl + if row % 2 == 1 { -bl * 0.5 } else { 0.0 };
     let mut col = 0usize;
     while bx < wr - 1.0 {
@@ -377,24 +388,30 @@ fn draw_course(cx: f32, base_y: f32, s: f32, row: usize, dy: f32, alpha: f32) {
         let k = 0.94 + 0.10 * (((row * 31 + col * 17) % 7) as f32 / 6.0);
         let c = shade(palette::HOUSE_WALL, k);
         let c = Color::new(c.r, c.g, c.b, alpha);
-        let mut segs = vec![(x0, x1)];
-        for &(ox0, ox1) in &cuts {
-            let mut next = Vec::new();
-            for (a, b) in segs {
+        let mut segs = [(x0, x1), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)];
+        let mut nseg = 1;
+        for &(ox0, ox1) in &cuts[..ncuts] {
+            let mut out = [(0.0f32, 0.0f32); 4];
+            let mut nout = 0;
+            for &(a, b) in &segs[..nseg] {
                 if ox1 <= a || ox0 >= b {
-                    next.push((a, b));
+                    out[nout] = (a, b);
+                    nout += 1;
                     continue;
                 }
                 if ox0 > a {
-                    next.push((a, ox0));
+                    out[nout] = (a, ox0);
+                    nout += 1;
                 }
                 if ox1 < b {
-                    next.push((ox1, b));
+                    out[nout] = (ox1, b);
+                    nout += 1;
                 }
             }
-            segs = next;
+            segs = out;
+            nseg = nout;
         }
-        for (a, b) in segs {
+        for &(a, b) in &segs[..nseg] {
             if b - a >= 0.018 * s {
                 draw_rectangle(a, by, b - a, bh, c);
             }
@@ -407,7 +424,8 @@ fn draw_course(cx: f32, base_y: f32, s: f32, row: usize, dy: f32, alpha: f32) {
 /// The wall install: courses rise bottom-up like time-lapse bricklaying, with
 /// a dust kick when the last course tops out.
 fn install_walls(cx: f32, base_y: f32, s: f32, t: f32) {
-    let courses = ((t - 0.06) / 0.74 * COURSES as f32).clamp(0.0, COURSES as f32);
+    // The top course lands right on the Thunk cue (0.88, see site::S1).
+    let courses = ((t - 0.06) / 0.82 * COURSES as f32).clamp(0.0, COURSES as f32);
     draw_brick_wall(cx, base_y, s, courses);
     if t >= 0.88 {
         let d = ((t - 0.88) / 0.12).clamp(0.0, 1.0);
@@ -713,6 +731,15 @@ mod tests {
             assert!(tx.abs() <= 0.46, "part {part}: target {tx} beyond the jib");
             assert!(ay < 0.0 && ay > site::JIB_Y, "part {part}: attach {ay} out of range");
         }
+    }
+
+    /// The mixer truck's whole approach (tail included) stays inside the
+    /// site's left extent — that side faces the tracing card, not a screen
+    /// edge, so the transit must never overdraw it.
+    #[test]
+    fn mixer_transit_inside_the_site() {
+        let (l, _) = super::super::site::site_extents();
+        assert!(MIXER_IN - 0.18 >= l, "mixer tail {} past extent {l}", MIXER_IN - 0.18);
     }
 
     /// The wall openings (door + windows) sit inside the wall slab, and the

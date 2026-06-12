@@ -55,6 +55,10 @@ enum Phase {
     /// house only gains its part on ✓ — the grade drives both the Leitner
     /// schedule and the progress meter, like phonics.
     Grade,
+    /// The session's last ✓ landed: the card empties and the crane hangs the
+    /// door — the build's final beat plays out (doorbell and all) before the
+    /// house-warming, instead of hard-cutting past it.
+    Topping,
     Done,
 }
 
@@ -241,12 +245,9 @@ impl TracingScene {
         self.last = Some(self.current());
         self.qi += 1;
         if self.stars >= tr::SESSION_GOAL as u32 {
-            self.phase = Phase::Done;
-            // The frog enters the house-warming mid-hop, celebrating.
-            self.frog_t = 0.0;
-            self.done_t = 0.0;
-            self.sync.flush();
-            ctx.audio.finale();
+            // The last stage (the door!) installs on-site first; the
+            // house-warming follows once it lands (see Phase::Topping).
+            self.phase = Phase::Topping;
             return;
         }
         if self.qi >= self.queue.len() {
@@ -617,6 +618,18 @@ impl Scene for TracingScene {
                     }
                 }
             }
+            Phase::Topping => {
+                // The door lands (install + a settle beat) → house-warming.
+                let dur = draw::install_dur(draw::HOUSE_PARTS - 1);
+                if self.install_t >= INSTALL_START + dur + 0.6 {
+                    self.phase = Phase::Done;
+                    // The frog enters the house-warming mid-hop, celebrating.
+                    self.frog_t = 0.0;
+                    self.done_t = 0.0;
+                    self.sync.flush();
+                    ctx.audio.finale();
+                }
+            }
             Phase::Done => {}
         }
         Nav::Stay
@@ -642,25 +655,28 @@ impl Scene for TracingScene {
         self.draw_guides(&p);
 
         // The letter, rendered by the real font — faded while it's a guide,
-        // popping to full ink for the just-finished beat.
+        // popping to full ink for the just-finished beat. The topping-out
+        // beat leaves the card empty: all eyes on the door going in.
         let finished = self.finish_t < ADVANCE_BEAT;
-        let glyph_col = if finished {
-            palette::INK
-        } else {
-            palette::hexa(0x2b2c34, 0.22)
-        };
-        let glyph = self.current().to_string();
-        draw_text_ex(
-            &glyph,
-            p.map.pen.x,
-            p.map.pen.y,
-            TextParams {
-                font: Some(&ctx.fonts.cursive),
-                font_size: p.font_px,
-                color: glyph_col,
-                ..Default::default()
-            },
-        );
+        if self.phase != Phase::Topping {
+            let glyph_col = if finished {
+                palette::INK
+            } else {
+                palette::hexa(0x2b2c34, 0.22)
+            };
+            let glyph = self.current().to_string();
+            draw_text_ex(
+                &glyph,
+                p.map.pen.x,
+                p.map.pen.y,
+                TextParams {
+                    font: Some(&ctx.fonts.cursive),
+                    font_size: p.font_px,
+                    color: glyph_col,
+                    ..Default::default()
+                },
+            );
+        }
 
         match self.phase {
             Phase::Watch => self.draw_demo(&p),
@@ -679,7 +695,7 @@ impl Scene for TracingScene {
                     self.draw_finish_sweep(&p);
                 }
             }
-            Phase::Done => {}
+            Phase::Topping | Phase::Done => {}
         }
 
         // Action row under the card: while tracing, the watch-again button;
@@ -804,7 +820,10 @@ impl TracingScene {
         let (parts, installing) = if self.stars == 0 || self.install_t >= install_end {
             (self.stars as usize, None)
         } else if self.install_t < INSTALL_START {
-            (self.stars as usize - 1, None)
+            // Pre-roll: hold the install at t=0 (crane stages show the part
+            // hooked at the park — anticipation) so the blueprint ghost
+            // doesn't flash back between the ✓ and the stage start.
+            (self.stars as usize - 1, Some(0.0))
         } else {
             (self.stars as usize - 1, Some((self.install_t - INSTALL_START) / draw::install_dur(stage)))
         };

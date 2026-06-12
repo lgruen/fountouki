@@ -25,11 +25,12 @@ const CABLE_MIN: f32 = 0.14; // shortest hoist cable under the jib
 pub(super) const CABLE: Color = Color::new(0.38, 0.35, 0.31, 0.92);
 
 /// Site bounding extents in fractions of `s`: (left, right) of the footprint
-/// center — covers the crane's counter-jib, the parked machines and the spoil
-/// heap (the drive-in/out transits may clip the screen edge: the machines
-/// arrive from "off site").
+/// center. The left covers the counter-jib AND the mixer truck's full
+/// approach (that side faces the tracing card); the right covers the parked
+/// machines + spoil heap (the excavator's drive-off may clip the screen
+/// edge — it leaves "off site").
 pub fn site_extents() -> (f32, f32) {
-    (-0.80, 0.72)
+    (-0.85, 0.72)
 }
 
 /// Total height of the site above `base_y` (the crane's tower head — taller
@@ -127,7 +128,7 @@ pub(super) fn lift(target_x: f32, attach_y: f32, t: f32) -> Lift {
         let p = anim::ease_in_out_cubic((t - 0.88) / 0.12);
         Lift {
             trolley_x: anim::lerp(target_x, TROLLEY_PARK, p),
-            hook_y: anim::lerp(attach_y - 0.06, HOOK_IDLE_Y, p),
+            hook_y: anim::lerp(attach_y, HOOK_IDLE_Y, p),
             dx: 0.0,
             dy: 0.0,
             carrying: false,

@@ -797,6 +797,14 @@ async fn main() {
                     break 'session;
                 }
             }
+            // The final ✓ must NOT hard-cut to the finale: the door's install
+            // (the topping-out beat) plays on-site first…
+            let topping = sc.stars == goal && !sc.is_done();
+            for _ in 0..4 {
+                let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            // …and the house-warming follows once the door lands.
             let persisted = {
                 let kv = db.borrow_kv();
                 let st = fountouki_core::tracing::load(&**kv, now);
@@ -805,6 +813,7 @@ async fn main() {
             if skipped
                 && errorless
                 && graded_each_time
+                && topping
                 && sc.is_done()
                 && sc.stars == goal
                 && persisted == goal
@@ -812,7 +821,7 @@ async fn main() {
                 println!("PASS tracing-session");
             } else {
                 println!(
-                    "FAIL tracing-session (skipped={skipped}, errorless={errorless}, graded={graded_each_time}, done={}, stars={}, persisted={persisted})",
+                    "FAIL tracing-session (skipped={skipped}, errorless={errorless}, graded={graded_each_time}, topping={topping}, done={}, stars={}, persisted={persisted})",
                     sc.is_done(),
                     sc.stars
                 );
