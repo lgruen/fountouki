@@ -92,17 +92,24 @@ pub fn speaker(cx: f32, cy: f32, r: f32, color: Color, muted: bool) {
     }
 }
 
-/// Circular-arrow "replay" glyph.
+/// Circular-arrow "replay" glyph: a nearly-full clockwise loop with the gap
+/// at 12 o'clock and the arrowhead at the arc's end pointing along its
+/// direction of travel — the standard ↻ restart mark.
 pub fn replay_icon(cx: f32, cy: f32, r: f32, color: Color) {
     let w = (r * 0.16).max(2.5);
-    arc(cx, cy, r * 0.5, -2.0, 1.6, w, color);
-    let a = 1.6_f32;
-    let ex = cx + r * 0.5 * a.cos();
-    let ey = cy + r * 0.5 * a.sin();
+    let rad = r * 0.48;
+    // Screen angles (y down): -PI/2 is 12 o'clock, increasing = clockwise.
+    let gap = 0.55;
+    let a0 = -std::f32::consts::FRAC_PI_2 + gap;
+    let a1 = a0 + std::f32::consts::TAU - 2.0 * gap;
+    arc(cx, cy, rad, a0, a1, w, color);
+    let end = vec2(cx + rad * a1.cos(), cy + rad * a1.sin());
+    let dir = vec2(-a1.sin(), a1.cos()); // clockwise tangent at the arc's end
+    let side = vec2(-dir.y, dir.x);
     draw_triangle(
-        vec2(ex - r * 0.18, ey - r * 0.04),
-        vec2(ex + r * 0.12, ey - r * 0.16),
-        vec2(ex + r * 0.04, ey + r * 0.2),
+        end + side * (r * 0.20),
+        end - side * (r * 0.20),
+        end + dir * (r * 0.32),
         color,
     );
 }

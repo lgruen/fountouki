@@ -3,9 +3,11 @@
 //! traces over the faded glyph (trace): a green dot marks the start, a red dot
 //! the end, and ink follows the finger along a generous corridor. Errorless —
 //! a wandering finger just stops laying ink; progress never goes backwards.
-//! After the reward beat the parent grades the trace ✓/✗ (grade) — scheduling
-//! only, the star already happened. Letters come from the shared Leitner SRS
-//! over the motor-skill order; state syncs cross-device like phonics.
+//! After the reward beat the parent grades the trace ✓/✗ (grade): ✓ installs
+//! the next house part (the progress meter advances only on a correct grade,
+//! like phonics' rainbow) and promotes the letter; ✗ only reschedules it.
+//! Letters come from the shared Leitner SRS over the motor-skill order; state
+//! syncs cross-device like phonics.
 //! Stroke geometry + progress logic live in `fountouki_core::tracing`.
 use crate::{
     anim, chrome, draw, input,
@@ -28,11 +30,11 @@ const DEMO_PAUSE: f32 = 0.4;
 const DEMO_DOT_POP: f32 = 0.45;
 /// Reward beat after a finished letter before the parent's grade row appears.
 const ADVANCE_BEAT: f32 = 1.1;
-/// House-part install timeline, relative to the letter finishing (`finish_t`):
-/// the crane lowers the part in starting at `INSTALL_START`, the part is
-/// tapped home (hammer clonk) at `HAMMER_AT`, parked by `INSTALL_START +
-/// INSTALL_DUR`. It overlaps the reward beat and finishes during the grade
-/// row — `finish_t` keeps counting across both.
+/// House-part install timeline, relative to the parent's ✓ grade
+/// (`install_t`): the crane lowers the part in starting at `INSTALL_START`,
+/// the part is tapped home (hammer clonk) at `HAMMER_AT`, parked by
+/// `INSTALL_START + INSTALL_DUR`. It overlaps the next letter's demo —
+/// `install_t` keeps counting across the transition.
 const INSTALL_START: f32 = 0.3;
 const INSTALL_DUR: f32 = 0.9;
 const HAMMER_AT: f32 = INSTALL_START + INSTALL_DUR * 0.72;
@@ -46,8 +48,9 @@ enum Phase {
     Watch,
     Trace,
     /// Letter finished + celebrated; the parent grades it ✓/✗ before the next
-    /// one. The grade only drives the Leitner schedule — the star is already
-    /// the kid's (monotonic, errorless).
+    /// one. The finish celebration already happened (errorless), but the
+    /// house only gains its part on ✓ — the grade drives both the Leitner
+    /// schedule and the progress meter, like phonics.
     Grade,
     Done,
 }
@@ -60,7 +63,8 @@ pub struct TracingScene {
     qi: usize,
     /// The letter just shown, so a rebuilt queue never repeats it back-to-back.
     last: Option<char>,
-    /// Letters finished this session, in order (drives the done-scene cards).
+    /// Letters graded ✓ this session, in order (drives the done-scene
+    /// bunting — the trophies are the letters that built the house).
     traced: Vec<char>,
     pub stars: u32,
     phase: Phase,
@@ -69,9 +73,11 @@ pub struct TracingScene {
     progress: f32,
     demo_t: f32,
     advance_in: Option<f32>,
-    /// Time since the current letter finished (drives the completed-glyph pop,
-    /// the shimmer sweep and the house-part install).
+    /// Time since the current letter finished (drives the completed-glyph pop
+    /// and the shimmer sweep).
     finish_t: f32,
+    /// Time since the last ✓ grade (drives the house-part install).
+    install_t: f32,
     frog_t: f32,
     /// Sparkle-tick accumulator + pentatonic step for the current stroke.
     tick_acc: f32,
@@ -118,6 +124,7 @@ impl TracingScene {
             demo_t: 0.0,
             advance_in: None,
             finish_t: 99.0,
+            install_t: 99.0,
             frog_t: 99.0,
             tick_acc: 0.0,
             tick_step: 0,
@@ -158,6 +165,7 @@ impl TracingScene {
         self.demo_t = 0.0;
         self.advance_in = None;
         self.finish_t = 99.0;
+        self.install_t = 99.0;
         self.done_t = 0.0;
         self.door_t = 99.0;
         self.lit_on = [false; 2];
@@ -176,11 +184,11 @@ impl TracingScene {
     }
 
     fn on_letter_done(&mut self, ctx: &Ctx) {
+        // The kid's celebration is unconditional (errorless) — but the house
+        // part waits for the parent's ✓ (on_grade), like phonics' rainbow.
         let p = plan(&ctx.frame, self.current());
-        self.stars += 1;
-        ctx.audio.correct(self.stars);
+        ctx.audio.correct(self.stars + 1);
         self.finish_t = 0.0;
-        self.traced.push(self.current());
         self.confetti
             .burst(vec2(p.card.x + p.card.w / 2.0, p.card.y + p.card.h * 0.3), 60, p.card.w / 3.0);
         // The reward beat, then the parent's ✓/✗ before the next letter.
@@ -191,6 +199,11 @@ impl TracingScene {
         let c = self.current();
         if got_it {
             srs::grade_got_it(&mut self.state, c, ctx.now);
+            // ✓ builds: the next house part rides the crane down while the
+            // next letter's demo plays.
+            self.stars += 1;
+            self.traced.push(c);
+            self.install_t = 0.0;
         } else {
             srs::grade_missed(&mut self.state, c, ctx.now);
         }
@@ -426,8 +439,9 @@ impl TracingScene {
 impl Scene for TracingScene {
     fn update(&mut self, ctx: &Ctx) -> Nav {
         self.confetti.update(ctx.dt);
-        let finish_prev = self.finish_t;
         self.finish_t += ctx.dt;
+        let install_prev = self.install_t;
+        self.install_t += ctx.dt;
         self.frog_t += ctx.dt;
         self.done_t += ctx.dt;
         self.door_t += ctx.dt;
@@ -438,9 +452,8 @@ impl Scene for TracingScene {
             self.friend_t[i] += ctx.dt;
         }
         // The house part lands: a hammer clonk + a confetti kick at the part.
-        // Driven by finish_t so it fires whether the beat or the grade row is
-        // on screen at that moment.
-        if self.phase != Phase::Done && finish_prev < HAMMER_AT && self.finish_t >= HAMMER_AT {
+        // Driven by install_t so it fires while the next letter's demo plays.
+        if self.phase != Phase::Done && install_prev < HAMMER_AT && self.install_t >= HAMMER_AT {
             ctx.audio.hammer();
             let p = plan(&ctx.frame, self.current());
             let part = (self.stars as usize).saturating_sub(1).min(draw::HOUSE_PARTS - 1);
@@ -525,8 +538,8 @@ impl Scene for TracingScene {
         chrome::draw_topbar(&chrome::topbar(&ctx.frame), ctx);
 
         // The build-a-house progress meter beside the card (monotonic — one
-        // part per finished letter, a finished session = a finished house).
-        // Calm and static during play; the install animates in the reward beat.
+        // part per ✓-graded letter, a finished session = a finished house).
+        // Calm and static during play; the install animates after the ✓.
         let pose = self.house_pose(ctx.time);
         draw::house(p.house.0.x, p.house.0.y, p.house.1, &pose);
 
@@ -572,8 +585,8 @@ impl Scene for TracingScene {
         }
 
         // Action row under the card: while tracing, the watch-again button;
-        // while grading, the parent's ✓/✗ (phonics' exact pair — scheduling
-        // only, the star is already earned).
+        // while grading, the parent's ✓/✗ (phonics' exact pair — ✓ schedules
+        // AND installs the next house part).
         if self.phase == Phase::Trace && !finished {
             draw::circle_btn(p.watch.0.x, p.watch.0.y, p.watch.1, palette::CARD);
             draw::replay_icon(p.watch.0.x, p.watch.0.y, p.watch.1 * 0.9, palette::MUTED);
@@ -675,18 +688,19 @@ impl TracingScene {
         }
     }
 
-    /// The build state shown beside the card: installed parts = stars, with
-    /// the newest part animating in on the `finish_t` install timeline.
+    /// The build state shown beside the card: installed parts = stars (one per
+    /// ✓-graded letter), with the newest part animating in on the `install_t`
+    /// timeline that starts at the parent's ✓.
     fn house_pose(&self, time: f32) -> draw::HousePose {
         let install_end = INSTALL_START + INSTALL_DUR;
-        let (parts, installing) = if self.stars == 0 || self.finish_t >= install_end {
+        let (parts, installing) = if self.stars == 0 || self.install_t >= install_end {
             (self.stars as usize, None)
-        } else if self.finish_t < INSTALL_START {
+        } else if self.install_t < INSTALL_START {
             (self.stars as usize - 1, None)
         } else {
-            (self.stars as usize - 1, Some((self.finish_t - INSTALL_START) / INSTALL_DUR))
+            (self.stars as usize - 1, Some((self.install_t - INSTALL_START) / INSTALL_DUR))
         };
-        let smoke_t = if parts >= draw::HOUSE_PARTS { self.finish_t - install_end } else { -1.0 };
+        let smoke_t = if parts >= draw::HOUSE_PARTS { self.install_t - install_end } else { -1.0 };
         draw::HousePose { parts, installing, smoke_t, time, ..Default::default() }
     }
 
