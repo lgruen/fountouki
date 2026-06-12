@@ -855,6 +855,34 @@ async fn main() {
                 fails += 1;
             }
         }
+        // tracing: the start gate — a finger dropped ON the path mid-stroke
+        // (inside the corridor, but never at the green start dot) lays no
+        // progress; starting at the dot and dragging to the red end dot does.
+        {
+            let mut sc = TracingScene::new(Db::mem(), 7, now);
+            sc.debug_set_letter('c');
+            sc.skip_watch();
+            for _ in 0..5 {
+                let ptr = drag(sc.stroke_point_px(&frame, 0.4));
+                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            let gated = sc.stroke_index() == 0 && sc.stroke_progress() <= 0.0;
+            for i in 0..=40 {
+                let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
+                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if gated && sc.awaiting_advance() {
+                println!("PASS tracing-start-gate");
+            } else {
+                println!(
+                    "FAIL tracing-start-gate (gated={gated}, finished={})",
+                    sc.awaiting_advance()
+                );
+                fails += 1;
+            }
+        }
         // tracing: the parent's ✗ holds the letter's Leitner box down and the
         // house does NOT gain a part (only ✓ builds, like phonics' rainbow);
         // the session moves on to a different letter.
