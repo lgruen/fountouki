@@ -264,14 +264,15 @@ async fn main() {
             }
             "picker" => Box::new(PickerScene::new(db.clone())),
             "tracing" => {
-                // Mid-trace of 'c' (pinned — the SRS queue is shuffled): guides,
-                // faded glyph, laid ink, breadcrumbs, pen marker, red end dot.
+                // Mid-trace of 'c' (pinned — the SRS queue is shuffled): the big
+                // card, the high-contrast guide glyph, the kid's free-drawn ink,
+                // tiny start/end dots, and the always-offered redo / ✗ / ✓ row.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = TracingScene::new(db.clone(), 7, now);
                 sc.debug_set_letter('c');
                 sc.skip_watch();
                 for i in 0..=20 {
-                    let ptr = drag(sc.stroke_point_px(&frame, 0.45 * i as f32 / 20.0));
+                    let ptr = drag(sc.stroke_point_px(&frame, 0, 0.55 * i as f32 / 20.0));
                     let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
@@ -290,39 +291,39 @@ async fn main() {
                 Box::new(sc)
             }
             "tracing-two-stroke" => {
-                // 'x' with stroke 1 traced: shows the numbered "2" start dot.
+                // 'x' fully traced (both strokes' free-drawn ink) with the small
+                // numbered start dots.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = TracingScene::new(db.clone(), 7, now);
                 sc.debug_set_letter('x');
                 sc.skip_watch();
-                for i in 0..=40 {
-                    let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
-                    let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                let idle = Pointer::default();
+                for si in 0..sc.stroke_count() {
+                    for i in 0..=20 {
+                        let ptr = drag(sc.stroke_point_px(&frame, si, i as f32 / 20.0));
+                        let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                        sc.update(&ctx);
+                    }
+                    // Lift between strokes so the polylines stay separate.
+                    let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
-                // Lift at the end dot — strokes complete on the release.
-                let idle = Pointer::default();
-                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
-                sc.update(&ctx);
                 Box::new(sc)
             }
             "tracing-grade" => {
-                // A finished 'c' awaiting the parent's ✓/✗ under the card.
+                // A fully-traced 'c' with the always-present redo / ✗ / ✓ row.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = TracingScene::new(db.clone(), 7, now);
                 sc.debug_set_letter('c');
                 sc.skip_watch();
                 for i in 0..=40 {
-                    let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
+                    let ptr = drag(sc.stroke_point_px(&frame, 0, i as f32 / 40.0));
                     let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
-                // Lift to complete the letter, then settle through the reward
-                // beat into the grade phase.
+                // Lift — the ink stays up over the guide; the row is always there.
                 let idle = Pointer::default();
                 let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
-                sc.update(&ctx);
-                let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
                 Box::new(sc)
             }
@@ -335,17 +336,14 @@ async fn main() {
                 sc.debug_set_letter('c');
                 sc.skip_watch();
                 for i in 0..=40 {
-                    let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
+                    let ptr = drag(sc.stroke_point_px(&frame, 0, i as f32 / 40.0));
                     let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
-                // Lift to complete the letter, settle through the reward beat
-                // into the grade row, tap ✓, then catch the excavator mid-dig
-                // on the foundation stage.
+                // Lift, tap ✓, then catch the excavator mid-dig on the
+                // foundation stage.
                 let idle = Pointer::default();
                 let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
-                sc.update(&ctx);
-                let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
                 let ptr = tap(sc.got_center(&frame));
                 let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
@@ -760,37 +758,33 @@ async fn main() {
             let ptr = tap(vec2(frame.w / 2.0, frame.h / 2.0));
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
-            let skipped = watched && !sc.in_watch();
+            let skipped = watched && sc.in_trace();
 
-            // Errorless: a finger far off the path lays no ink.
-            let far = sc.stroke_point_px(&frame, 0.5) + vec2(200.0, 200.0);
-            let ptr = drag(far);
+            // Free-draw / errorless: a finger off the card lays no ink.
+            let ptr = drag(vec2(frame.w + 50.0, frame.h + 50.0));
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
-            let errorless = sc.stroke_index() == 0 && sc.stars == 0;
+            let errorless = !sc.has_ink() && sc.stars == 0;
 
-            // Trace all SESSION_GOAL letters stroke by stroke, like a finger,
-            // with the parent tapping ✓ after each reward beat.
+            // Free-draw every SESSION_GOAL letter (all its strokes), like a
+            // finger, then the parent taps ✓ — the row is always offered.
             let goal = fountouki_core::tracing::SESSION_GOAL as u32;
             let mut graded_each_time = true;
             'session: for _ in 0..goal {
                 sc.skip_watch();
-                let mut guard = 0;
-                while !sc.awaiting_advance() && !sc.is_done() && guard < 12 {
-                    for i in 0..=30 {
-                        let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 30.0));
+                let in_trace = sc.in_trace();
+                for si in 0..sc.stroke_count() {
+                    for i in 0..=20 {
+                        let ptr = drag(sc.stroke_point_px(&frame, si, i as f32 / 20.0));
                         let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                         sc.update(&ctx);
                     }
-                    // Lift at the end dot — the stroke completes on release.
+                    // Lift between strokes.
                     let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
-                    guard += 1;
                 }
-                // Settle through the reward beat into the parent grade.
-                let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
-                sc.update(&ctx);
-                graded_each_time &= sc.in_grade();
+                // The redo / ✗ / ✓ row must be live with the kid's ink showing.
+                graded_each_time &= in_trace && sc.has_ink();
                 let ptr = tap(sc.got_center(&frame));
                 let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
@@ -869,90 +863,54 @@ async fn main() {
                 fails += 1;
             }
         }
-        // tracing: the dot letters — i's body then its dot (a tap, not a drag).
+        // tracing: a multi-stroke letter ('i' = body + dot) free-draws and
+        // grades ✓ — promoted to box >= 1, the kid gets the star.
         {
             let mut sc = TracingScene::new(Db::mem(), 7, now);
             sc.debug_set_letter('i');
             sc.skip_watch();
-            // Trace the body and lift to complete it; then the dot (a tap
-            // target, not a drag) finishes the letter.
-            for i in 0..=30 {
-                let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 30.0));
-                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
-                sc.update(&ctx);
-            }
             let idle = Pointer::default();
-            let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
-            sc.update(&ctx);
-            if !sc.awaiting_advance() {
-                let ptr = drag(sc.stroke_point_px(&frame, 0.0));
-                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            for si in 0..sc.stroke_count() {
+                for i in 0..=20 {
+                    let ptr = drag(sc.stroke_point_px(&frame, si, i as f32 / 20.0));
+                    let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
-            if sc.awaiting_advance() && sc.current_letter() == 'i' {
+            let drew = sc.has_ink();
+            let ptr = tap(sc.got_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            if drew && sc.stars == 1 && sc.letter_box('i') >= 1 {
                 println!("PASS tracing-dot-letter");
             } else {
                 println!(
-                    "FAIL tracing-dot-letter (finished={}, letter={})",
-                    sc.awaiting_advance(),
-                    sc.current_letter()
-                );
-                fails += 1;
-            }
-        }
-        // tracing: the stroke gates — a finger dropped ON the path mid-stroke
-        // (inside the corridor, but never at the green start dot) lays no
-        // progress; dragging dot-to-dot doesn't finish while the finger is
-        // still down (no mid-drag snap); the LIFT at the red end dot does.
-        {
-            let mut sc = TracingScene::new(Db::mem(), 7, now);
-            sc.debug_set_letter('c');
-            sc.skip_watch();
-            for _ in 0..5 {
-                let ptr = drag(sc.stroke_point_px(&frame, 0.4));
-                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
-                sc.update(&ctx);
-            }
-            let gated = sc.stroke_index() == 0 && sc.stroke_progress() <= 0.0;
-            for i in 0..=40 {
-                let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
-                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
-                sc.update(&ctx);
-            }
-            // Finger held down at the end dot: the stroke must still be live.
-            let held = !sc.awaiting_advance() && sc.stroke_index() == 0;
-            let idle = Pointer::default();
-            let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
-            sc.update(&ctx);
-            if gated && held && sc.awaiting_advance() {
-                println!("PASS tracing-stroke-gates");
-            } else {
-                println!(
-                    "FAIL tracing-stroke-gates (gated={gated}, held={held}, finished={})",
-                    sc.awaiting_advance()
+                    "FAIL tracing-dot-letter (drew={drew}, stars={}, box={})",
+                    sc.stars,
+                    sc.letter_box('i')
                 );
                 fails += 1;
             }
         }
         // tracing: the parent's ✗ holds the letter's Leitner box down and the
         // house does NOT gain a part (only ✓ builds, like phonics' rainbow);
-        // the session moves on to a different letter.
+        // the session moves on to a different letter, no confetti.
         {
             let mut sc = TracingScene::new(Db::mem(), 7, now);
             let idle = Pointer::default();
             sc.debug_set_letter('c');
             sc.skip_watch();
-            for i in 0..=40 {
-                let ptr = drag(sc.stroke_point_px(&frame, i as f32 / 40.0));
+            for i in 0..=20 {
+                let ptr = drag(sc.stroke_point_px(&frame, 0, i as f32 / 20.0));
                 let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
-            // Lift to complete, then settle through the reward beat.
+            // Lift; the ✗/✓ row is offered while tracing (no reward beat).
             let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
-            let ctx = Ctx { dt: 1.5, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
-            sc.update(&ctx);
-            let graded = sc.in_grade();
+            let graded = sc.in_trace();
             let ptr = tap(sc.miss_center(&frame));
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
