@@ -1,18 +1,17 @@
 //! Tracing: finger-trace VicModernCursive letters with the chart's stroke
 //! order. Each letter plays an animated pen demo first (watch), then the kid
-//! traces over the faded glyph (trace): a stroke arms only when the finger
-//! touches the green start dot, the laid ink is the finger's *actual* path
-//! (so a wobbly trace looks wobbly — the parent can judge it at grade time),
-//! and the stroke completes only when the finger LIFTS at the red end dot —
-//! never mid-drag, so the full letter gets drawn. Errorless — a wandering
-//! finger just stops laying ink, a mid-stroke lift just pauses; progress
-//! never goes backwards.
-//! After the reward beat the parent grades the trace ✓/✗ (grade): ✓ installs
-//! the next house part (the progress meter advances only on a correct grade,
-//! like phonics' rainbow) and promotes the letter; ✗ only reschedules it.
+//! traces freely over the high-contrast glyph (trace): the laid ink is the
+//! finger's *actual* path (so a wobbly trace looks wobbly — the parent judges
+//! it), with no corridor, no progress tracking and no moving guide point —
+//! just the kid drawing over the letter. Errorless: there's no fail state and
+//! the letter is never auto-judged "done".
+//! The redo / ✗ / ✓ row is always offered: redo replays the demo, ✓ installs
+//! the next house part (the progress meter advances only on a ✓, like phonics'
+//! rainbow) + celebrates with confetti and promotes the letter, ✗ just
+//! reschedules it and moves on (no confetti).
 //! Letters come from the shared Leitner SRS over the motor-skill order; state
 //! syncs cross-device like phonics.
-//! Stroke geometry + progress logic live in `fountouki_core::tracing`.
+//! Stroke geometry lives in `fountouki_core::tracing`.
 use crate::{
     anim, chrome, draw, input,
     palette,
@@ -24,16 +23,10 @@ use fountouki_core::{rng::Mulberry32, srs, tracing as tr};
 use macroquad::prelude::*;
 use nanoserde::SerJson;
 
-/// Finger corridor half-width + dot tap radius, in font units (UPEM = 1000).
-/// ~36 px on an iPad-sized letter: forgiving for small fingers, tight enough
-/// that the path still shapes the movement.
-const TOL: f32 = 130.0;
 /// Demo pen speed (font units / s) and the pause between demo strokes.
 const DEMO_SPEED: f32 = 620.0;
 const DEMO_PAUSE: f32 = 0.4;
 const DEMO_DOT_POP: f32 = 0.45;
-/// Reward beat after a finished letter before the parent's grade row appears.
-const ADVANCE_BEAT: f32 = 1.1;
 /// House-part install timeline, relative to the parent's ✓ grade
 /// (`install_t`): the build stage starts at `INSTALL_START` and runs
 /// `draw::install_dur(stage)` seconds — stage-specific, since the foundation's
@@ -44,20 +37,17 @@ const ADVANCE_BEAT: f32 = 1.1;
 const INSTALL_START: f32 = 0.35;
 /// Breath between a finished house stage and the next letter's demo.
 const INSTALL_BREAK: f32 = 0.7;
-/// Golden shimmer sweep along the just-finished letter's ink.
-const SWEEP_DUR: f32 = 0.55;
-/// Laid ink (font units) between sparkle ticks while tracing.
-const TICK_EVERY: f32 = 150.0;
+/// Glyph-outline alpha (over `palette::INK`): a strong, high-contrast guide
+/// that stays clearly visible even with the kid's ink laid over it.
+const OUTLINE_ALPHA: f32 = 0.5;
 
 #[derive(PartialEq, Clone, Copy)]
 enum Phase {
     Watch,
+    /// The kid draws freely over the glyph while the redo / ✗ / ✓ row stays
+    /// offered. The house only gains its part on ✓ — the grade drives both the
+    /// Leitner schedule and the progress meter, like phonics.
     Trace,
-    /// Letter finished + celebrated; the parent grades it ✓/✗ before the next
-    /// one. The finish celebration already happened (errorless), but the
-    /// house only gains its part on ✓ — the grade drives both the Leitner
-    /// schedule and the progress meter, like phonics.
-    Grade,
     /// The session's last ✓ landed: the card empties and the crane hangs the
     /// door — the build's final beat plays out (doorbell and all) before the
     /// house-warming, instead of hard-cutting past it.
@@ -78,37 +68,20 @@ pub struct TracingScene {
     traced: Vec<char>,
     pub stars: u32,
     phase: Phase,
-    /// Current stroke being demoed/traced + arc-length progress along it.
-    stroke_i: usize,
-    progress: f32,
-    /// The current stroke has been started at its green dot (the gate that
-    /// keeps a mid-path touch from laying ink).
-    armed: bool,
     /// The finger's actual laid ink for this letter, in font units: one
-    /// polyline per engaged drag (broken when the finger lifts or leaves the
-    /// corridor). This — not the canonical path — is what's drawn, so the
-    /// parent can judge divergence at grade time.
+    /// polyline per drag (broken when the finger lifts or leaves the card).
+    /// This is the free-drawn trace — the parent judges it against the glyph.
     laid: Vec<Vec<(f32, f32)>>,
     /// The last `laid` polyline is still being extended.
     laid_open: bool,
-    /// Where the finger was last seen down (font units) — a stroke completes
-    /// on the lift, judged at this position.
-    last_touch: Option<(f32, f32)>,
     demo_t: f32,
     /// After a ✓-built stage, the next letter's demo waits this many seconds so
     /// the house install (and its breath) finishes first instead of playing on
     /// top of the demo. Zero on a ✗ (no build) — the demo starts at once.
     demo_delay: f32,
-    advance_in: Option<f32>,
-    /// Time since the current letter finished (drives the completed-glyph pop
-    /// and the shimmer sweep).
-    finish_t: f32,
     /// Time since the last ✓ grade (drives the house-part install).
     install_t: f32,
     frog_t: f32,
-    /// Sparkle-tick accumulator + pentatonic step for the current stroke.
-    tick_acc: f32,
-    tick_step: u32,
     // --- finale (the house-warming) ---
     /// Seconds since the done scene was entered (entry pops, smoke, flags).
     done_t: f32,
@@ -146,20 +119,12 @@ impl TracingScene {
             traced: Vec::new(),
             stars: 0,
             phase: Phase::Watch,
-            stroke_i: 0,
-            progress: 0.0,
-            armed: false,
             laid: Vec::new(),
             laid_open: false,
-            last_touch: None,
             demo_t: 0.0,
             demo_delay: 0.0,
-            advance_in: None,
-            finish_t: 99.0,
             install_t: 99.0,
             frog_t: 99.0,
-            tick_acc: 0.0,
-            tick_step: 0,
             done_t: 0.0,
             door_t: 99.0,
             lit_on: [false; 2],
@@ -192,12 +157,10 @@ impl TracingScene {
         self.traced.clear();
         self.stars = 0;
         self.phase = Phase::Watch;
-        self.stroke_i = 0;
-        self.progress = 0.0;
+        self.laid.clear();
+        self.laid_open = false;
         self.demo_t = 0.0;
         self.demo_delay = 0.0;
-        self.advance_in = None;
-        self.finish_t = 99.0;
         self.install_t = 99.0;
         self.done_t = 0.0;
         self.door_t = 99.0;
@@ -210,26 +173,8 @@ impl TracingScene {
 
     fn start_trace(&mut self) {
         self.phase = Phase::Trace;
-        self.stroke_i = 0;
-        self.progress = 0.0;
-        self.armed = false;
         self.laid.clear();
         self.laid_open = false;
-        self.last_touch = None;
-        self.tick_acc = 0.0;
-        self.tick_step = 0;
-    }
-
-    fn on_letter_done(&mut self, ctx: &Ctx) {
-        // The kid's celebration is unconditional (errorless) — but the house
-        // part waits for the parent's ✓ (on_grade), like phonics' rainbow.
-        let p = plan(&ctx.frame, self.current());
-        ctx.audio.correct(self.stars + 1);
-        self.finish_t = 0.0;
-        self.confetti
-            .burst(vec2(p.card.x + p.card.w / 2.0, p.card.y + p.card.h * 0.3), 60, p.card.w / 3.0);
-        // The reward beat, then the parent's ✓/✗ before the next letter.
-        self.advance_in = Some(ADVANCE_BEAT);
     }
 
     fn on_grade(&mut self, ctx: &Ctx, got_it: bool) {
@@ -237,14 +182,19 @@ impl TracingScene {
         if got_it {
             srs::grade_got_it(&mut self.state, c, ctx.now);
             // ✓ builds: the next house part rides the crane down while the
-            // next letter's demo plays.
+            // next letter's demo plays. The celebration (confetti + the
+            // climbing chime) lands only here — a ✗ just moves on.
             self.stars += 1;
             self.traced.push(c);
             self.install_t = 0.0;
+            let p = plan(&ctx.frame, c);
+            ctx.audio.correct(self.stars);
+            self.confetti
+                .burst(vec2(p.card.x + p.card.w / 2.0, p.card.y + p.card.h * 0.3), 60, p.card.w / 3.0);
         } else {
             srs::grade_missed(&mut self.state, c, ctx.now);
+            ctx.audio.tap();
         }
-        ctx.audio.tap();
         self.save();
         self.sync.queue_push(&self.state.serialize_json(), ctx.now);
         self.advance_letter(ctx);
@@ -274,9 +224,8 @@ impl TracingScene {
         self.phase = Phase::Watch;
         self.demo_t = 0.0;
         self.demo_delay = 0.0;
-        self.stroke_i = 0;
-        self.progress = 0.0;
-        self.finish_t = 99.0;
+        self.laid.clear();
+        self.laid_open = false;
     }
 
     /// Demo timeline: per stroke, draw time (length/speed, dots pop) + a pause.
@@ -299,98 +248,26 @@ impl TracingScene {
         self.demo_schedule().iter().map(|(d, p)| d + p).sum::<f32>() + 0.3
     }
 
+    /// Free drawing: lay the finger's actual path as ink while it's down on
+    /// the card. No corridor, no green-dot arming, no progress tracking and no
+    /// auto-completion — whatever the kid draws shows up (wobbles and all), so
+    /// the parent judges the real trace. Lifting (or leaving the card) just
+    /// breaks the polyline; nothing is ever undone (errorless).
     fn update_trace(&mut self, ctx: &Ctx) {
         let pt = ctx.pointer;
-        let g = self.glyph();
-        if self.stroke_i >= g.strokes.len() {
-            return;
-        }
         let p = plan(&ctx.frame, self.current());
-        let stroke = g.strokes[self.stroke_i];
-        // Corridor half-width: TOL font units, but never under ~26 px — on a
-        // small phone the letter shrinks, a 4yo's finger doesn't. The start /
-        // end gates are tighter than the corridor (with their own px floors).
-        let tol = TOL.max(26.0 / p.map.scale);
-        let start_r = tr::START_RADIUS.max(30.0 / p.map.scale);
-        let end_r = tr::END_RADIUS.max(24.0 / p.map.scale);
-        if !pt.down {
+        if !pt.down || !p.card.contains(pt.pos) {
             self.laid_open = false;
-            // A stroke completes only when the finger LIFTS at the red end
-            // dot — never mid-drag (a pen doesn't stop the hand; the kid
-            // draws the whole letter, the parent judges it). Lifting anywhere
-            // else just pauses: progress keeps, the kid resumes (errorless).
-            if let Some(f) = self.last_touch.take() {
-                if !tr::is_dot(stroke) && tr::stroke_done(stroke, self.progress, f, end_r) {
-                    self.finish_stroke(ctx, &p, stroke);
-                }
-            }
             return;
         }
         let finger = p.map.px_to_units(pt.pos);
-        self.last_touch = Some(finger);
-        if tr::is_dot(stroke) {
-            // The dot of i / j: tap it (a small wiggle of the finger is fine).
-            if units_dist(finger, stroke[0]) <= start_r * 1.3 {
-                // Ink the dot where the finger actually landed.
-                self.laid.push(vec![finger]);
-                self.last_touch = None;
-                self.finish_stroke(ctx, &p, stroke);
-            }
-            return;
+        if !self.laid_open {
+            self.laid.push(Vec::new());
+            self.laid_open = true;
         }
-        if self.progress <= 0.0 && !self.armed {
-            // Not started yet: the finger must touch the green dot first.
-            if units_dist(finger, stroke[0]) > start_r {
-                self.laid_open = false;
-                return;
-            }
-            self.armed = true;
-        }
-        let before = self.progress;
-        self.progress = tr::advance_progress(stroke, self.progress, finger, tol);
-        // Lay ink along the finger's real path while it stays in the
-        // corridor; lifting or wandering breaks the polyline (errorless —
-        // it just stops inking, nothing is undone).
-        if units_dist(finger, tr::point_at(stroke, self.progress)) <= tol {
-            if !self.laid_open {
-                self.laid.push(Vec::new());
-                self.laid_open = true;
-            }
-            let seg = self.laid.last_mut().unwrap();
-            if seg.last().is_none_or(|&l| units_dist(l, finger) >= 4.0) {
-                seg.push(finger);
-            }
-        } else {
-            self.laid_open = false;
-        }
-        // Laid ink rewards as it grows: a tiny sparkle + a tick that climbs
-        // a pentatonic ladder, so the stroke literally sings upward.
-        self.tick_acc += (self.progress - before).max(0.0);
-        if self.tick_acc >= TICK_EVERY {
-            self.tick_acc %= TICK_EVERY;
-            ctx.audio.trace_tick(self.tick_step);
-            self.tick_step += 1;
-            let tip = p.map.to_px(tr::point_at(stroke, self.progress));
-            self.confetti.burst(tip, 2, p.start_r * 0.4);
-        }
-    }
-
-    /// A stroke is in: confetti at its end, reset the per-stroke state, and
-    /// either arm the next stroke or celebrate the finished letter.
-    fn finish_stroke(&mut self, ctx: &Ctx, p: &TLayout, stroke: &[(f32, f32)]) {
-        let end = p.map.to_px(*stroke.last().unwrap());
-        self.confetti.burst(end, 12, p.start_r);
-        self.stroke_i += 1;
-        self.progress = 0.0;
-        self.armed = false;
-        self.laid_open = false;
-        self.last_touch = None;
-        self.tick_acc = 0.0;
-        self.tick_step = 0;
-        if self.stroke_i >= self.glyph().strokes.len() {
-            self.on_letter_done(ctx);
-        } else {
-            ctx.audio.tap();
+        let seg = self.laid.last_mut().unwrap();
+        if seg.last().is_none_or(|&l| units_dist(l, finger) >= 4.0) {
+            seg.push(finger);
         }
     }
 
@@ -451,18 +328,12 @@ impl TracingScene {
     pub(crate) fn in_watch(&self) -> bool {
         self.phase == Phase::Watch
     }
-    pub(crate) fn in_grade(&self) -> bool {
-        self.phase == Phase::Grade
+    pub(crate) fn in_trace(&self) -> bool {
+        self.phase == Phase::Trace
     }
-    pub(crate) fn stroke_index(&self) -> usize {
-        self.stroke_i
-    }
-    pub(crate) fn stroke_progress(&self) -> f32 {
-        self.progress
-    }
-    /// The reward beat between a finished letter and the parent's grade.
-    pub(crate) fn awaiting_advance(&self) -> bool {
-        self.advance_in.is_some()
+    /// Whether the kid has laid any free-drawn ink for the current letter.
+    pub(crate) fn has_ink(&self) -> bool {
+        self.laid.iter().any(|s| !s.is_empty())
     }
     pub(crate) fn current_letter(&self) -> char {
         self.current()
@@ -520,11 +391,16 @@ impl TracingScene {
     pub(crate) fn friend_taps(&self) -> u32 {
         self.friend_taps
     }
-    /// Screen point at fraction `t` (0..1) along the current stroke — playtest
-    /// feeds these as drag positions, exactly like a finger would.
-    pub(crate) fn stroke_point_px(&self, f: &crate::layout::Frame, t: f32) -> Vec2 {
+    pub(crate) fn stroke_count(&self) -> usize {
+        self.glyph().strokes.len()
+    }
+    /// Screen point at fraction `t` (0..1) along stroke `si` — playtest +
+    /// captures feed these as drag positions, exactly like a finger tracing
+    /// over the glyph.
+    pub(crate) fn stroke_point_px(&self, f: &crate::layout::Frame, si: usize, t: f32) -> Vec2 {
         let p = plan(f, self.current());
-        let stroke = self.glyph().strokes[self.stroke_i.min(self.glyph().strokes.len() - 1)];
+        let strokes = self.glyph().strokes;
+        let stroke = strokes[si.min(strokes.len() - 1)];
         let s = tr::stroke_len(stroke) * t.clamp(0.0, 1.0);
         p.map.to_px(tr::point_at(stroke, s))
     }
@@ -536,7 +412,6 @@ impl TracingScene {
 impl Scene for TracingScene {
     fn update(&mut self, ctx: &Ctx) -> Nav {
         self.confetti.update(ctx.dt);
-        self.finish_t += ctx.dt;
         let install_prev = self.install_t;
         self.install_t += ctx.dt;
         self.frog_t += ctx.dt;
@@ -584,16 +459,6 @@ impl Scene for TracingScene {
                 self.save();
             }
         }
-        if let Some(t) = self.advance_in {
-            let t = t - ctx.dt;
-            if t <= 0.0 {
-                self.advance_in = None;
-                self.phase = Phase::Grade;
-            } else {
-                self.advance_in = Some(t);
-            }
-            return Nav::Stay;
-        }
         if self.phase == Phase::Done {
             return self.update_done(ctx);
         }
@@ -624,26 +489,24 @@ impl Scene for TracingScene {
                 }
             }
             Phase::Trace => {
+                // The redo / ✗ / ✓ row is always live; anything else on the
+                // card is free drawing.
                 let p = plan(&ctx.frame, self.current());
                 let pt = ctx.pointer;
-                if pt.tapped() && input::hit_circle(pt.pos, p.watch.0.x, p.watch.0.y, p.watch.1) {
+                let hit = |c: (Vec2, f32)| pt.tapped() && input::hit_circle(pt.pos, c.0.x, c.0.y, c.1);
+                if hit(p.watch) {
+                    // Redo: replay the demo from the top and clear the trace.
                     self.phase = Phase::Watch;
                     self.demo_t = 0.0;
-                    self.stroke_i = 0;
-                    self.progress = 0.0;
+                    self.demo_delay = 0.0;
+                    self.laid.clear();
+                    self.laid_open = false;
+                } else if hit(p.got) {
+                    self.on_grade(ctx, true);
+                } else if hit(p.miss) {
+                    self.on_grade(ctx, false);
                 } else {
                     self.update_trace(ctx);
-                }
-            }
-            Phase::Grade => {
-                let p = plan(&ctx.frame, self.current());
-                let pt = ctx.pointer;
-                if pt.tapped() {
-                    if input::hit_circle(pt.pos, p.got.0.x, p.got.0.y, p.got.1) {
-                        self.on_grade(ctx, true);
-                    } else if input::hit_circle(pt.pos, p.miss.0.x, p.miss.0.y, p.miss.1) {
-                        self.on_grade(ctx, false);
-                    }
                 }
             }
             Phase::Topping => {
@@ -682,16 +545,10 @@ impl Scene for TracingScene {
         draw::card(p.card.x, p.card.y, p.card.w, p.card.h, palette::CARD);
         self.draw_guides(&p);
 
-        // The letter, rendered by the real font — faded while it's a guide,
-        // popping to full ink for the just-finished beat. The topping-out
-        // beat leaves the card empty: all eyes on the door going in.
-        let finished = self.finish_t < ADVANCE_BEAT;
+        // The letter, rendered by the real font — a strong, high-contrast guide
+        // (it stays clearly visible even with the kid's ink over it). The
+        // topping-out beat leaves the card empty: all eyes on the door going in.
         if self.phase != Phase::Topping {
-            let glyph_col = if finished {
-                palette::INK
-            } else {
-                palette::hexa(0x2b2c34, 0.22)
-            };
             let glyph = self.current().to_string();
             draw_text_ex(
                 &glyph,
@@ -700,43 +557,28 @@ impl Scene for TracingScene {
                 TextParams {
                     font: Some(&ctx.fonts.cursive),
                     font_size: p.font_px,
-                    color: glyph_col,
+                    color: palette::hexa(0x2b2c34, OUTLINE_ALPHA),
                     ..Default::default()
                 },
             );
         }
 
         match self.phase {
-            // While the post-build hold runs, the card shows only the faded
+            // While the post-build hold runs, the card shows only the guide
             // letter waiting — the demo pen starts once the house is in.
             Phase::Watch if self.demo_delay <= 0.0 => self.draw_demo(&p),
             Phase::Watch => {}
-            Phase::Trace | Phase::Grade => {
-                if self.phase == Phase::Trace && !finished {
-                    self.draw_trace(&p, ctx);
-                } else {
-                    // The finished letter pops: the kid's actual ink with a
-                    // brief width swell + a golden shimmer sweeping along the
-                    // stroke path. The same real ink stays up through the
-                    // grade phase, over the faded glyph — that contrast is
-                    // what the parent judges ✓/✗ on.
-                    let pop = (self.finish_t / 0.45).clamp(0.0, 1.0);
-                    let swell = 1.0 + 0.16 * (std::f32::consts::PI * pop).sin();
-                    self.draw_laid_ink(&p, swell);
-                    self.draw_finish_sweep(&p);
-                }
-            }
+            // The kid's free-drawn ink over the guide — the parent judges this.
+            Phase::Trace => self.draw_trace(&p),
             Phase::Topping | Phase::Done => {}
         }
 
-        // Action row under the card: while tracing, the watch-again button;
-        // while grading, the parent's ✓/✗ (phonics' exact pair — ✓ schedules
-        // AND installs the next house part).
-        if self.phase == Phase::Trace && !finished {
+        // The always-offered action row under the card: redo (replay the demo),
+        // ✗ (move on, no build) and ✓ (phonics' green check — celebrates AND
+        // installs the next house part).
+        if self.phase == Phase::Trace {
             draw::circle_btn(p.watch.0.x, p.watch.0.y, p.watch.1, palette::CARD);
             draw::replay_icon(p.watch.0.x, p.watch.0.y, p.watch.1 * 0.9, palette::MUTED);
-        }
-        if self.phase == Phase::Grade {
             draw::circle_btn(p.miss.0.x, p.miss.0.y, p.miss.1, palette::CARD);
             draw::mark_cross(p.miss.0.x, p.miss.0.y, p.miss.1, palette::MUTED);
             draw::circle_btn(p.got.0.x, p.got.0.y, p.got.1, palette::OK);
@@ -813,35 +655,6 @@ impl TracingScene {
         }
     }
 
-    /// A golden sparkle riding the whole letter's stroke path right after it's
-    /// finished — the "magic" that turns the trace into ink.
-    fn draw_finish_sweep(&self, p: &TLayout) {
-        let t = self.finish_t / SWEEP_DUR;
-        if !(0.0..1.0).contains(&t) {
-            return;
-        }
-        let strokes = self.glyph().strokes;
-        let total: f32 = strokes.iter().filter(|st| !tr::is_dot(st)).map(|st| tr::stroke_len(st)).sum();
-        if total <= 0.0 {
-            return;
-        }
-        let mut s = total * anim::ease_out_cubic(t);
-        for st in strokes {
-            if tr::is_dot(st) {
-                continue;
-            }
-            let l = tr::stroke_len(st);
-            if s <= l {
-                let tip = p.map.to_px(tr::point_at(st, s));
-                let fade = 1.0 - t;
-                draw::disc(tip.x, tip.y, p.ink_w * 1.5, palette::hexa(0xf6b800, 0.55 * fade));
-                draw::disc(tip.x, tip.y, p.ink_w * 0.7, palette::hexa(0xffffff, 0.9 * fade));
-                return;
-            }
-            s -= l;
-        }
-    }
-
     /// The build state shown beside the card: installed parts = stars (one per
     /// ✓-graded letter), with the newest stage animating in on the `install_t`
     /// timeline that starts at the parent's ✓.
@@ -862,26 +675,29 @@ impl TracingScene {
         draw::HousePose { parts, installing, site: true, smoke_t, time, ..Default::default() }
     }
 
-    /// Start dot (green, numbered when the letter has several strokes) and end
-    /// dot (red) for stroke `i` — the chart's convention.
-    fn draw_stroke_dots(&self, p: &TLayout, i: usize, pulse: f32) {
+    /// Small start dot (green) and end dot (red) for stroke `i` — the chart's
+    /// convention, kept tiny so they cue start/end without burying the glyph.
+    /// Multi-stroke letters get a legible order number beside the start dot.
+    fn draw_stroke_dots(&self, p: &TLayout, i: usize) {
         let g = self.glyph();
         let stroke = g.strokes[i];
         let start = p.map.to_px(stroke[0]);
-        let r = p.dot_r * (1.0 + 0.12 * pulse);
         if !tr::is_dot(stroke) {
             let end = p.map.to_px(*stroke.last().unwrap());
             draw::disc(end.x, end.y, p.dot_r * 0.62, palette::RAINBOW[0]);
         }
-        draw::disc(start.x, start.y, r, palette::OK_STRONG);
-        draw::disc(start.x, start.y, r * 0.78, palette::OK);
+        draw::disc(start.x, start.y, p.dot_r, palette::OK_STRONG);
+        draw::disc(start.x, start.y, p.dot_r * 0.78, palette::OK);
         if g.strokes.len() > 1 {
+            // The dot is too small to hold the number — set it just above-left,
+            // in start-green, with a readable floor.
+            let fs = (p.dot_r * 2.4).max(14.0);
             text::ui_centered(
                 &format!("{}", i + 1),
-                start.x,
-                start.y,
-                (r * 1.1) as u16,
-                palette::WHITE,
+                start.x - p.dot_r * 1.6,
+                start.y - p.dot_r * 1.6,
+                fs as u16,
+                palette::OK_STRONG,
             );
         }
     }
@@ -907,58 +723,21 @@ impl TracingScene {
             } else {
                 let s = tr::stroke_len(stroke) * anim::ease_in_out_cubic(prog);
                 self.draw_stroke_ink(p, stroke, s);
-                // The pen: a real pencil writing the letter, with a soft glow
-                // where the ink comes out.
-                let tip = p.map.to_px(tr::point_at(stroke, s));
-                draw::disc(tip.x, tip.y, p.start_r * 0.8, palette::hexa(0xf582ae, 0.45));
-                draw::pencil(tip.x, tip.y, p.start_r * 5.4);
             }
-            self.draw_stroke_dots(p, i, 0.0);
+            self.draw_stroke_dots(p, i);
             return;
         }
         // Demo finished — settle frame(s) before the trace phase begins.
         self.draw_ink_full(p);
     }
 
-    fn draw_trace(&self, p: &TLayout, ctx: &Ctx) {
-        let g = self.glyph();
-        // The ink is the finger's real path (completed strokes included) — a
-        // wobble inside the corridor stays visible instead of snapping to the
-        // perfect glyph, so the trace can actually be judged.
+    /// The trace screen: the kid's free-drawn ink (whatever they drew, wobbles
+    /// and all) over the high-contrast glyph, plus small start/end dots for
+    /// each stroke. No path tracking, no breadcrumbs, no moving guide point.
+    fn draw_trace(&self, p: &TLayout) {
         self.draw_laid_ink(p, 1.0);
-        if self.stroke_i >= g.strokes.len() {
-            return;
-        }
-        let stroke = g.strokes[self.stroke_i];
-        // Breadcrumb dots from the pen position to the end of the stroke — the
-        // route reminder for parts the faded glyph shows but direction doesn't
-        // (retraces), without the noise of arrows.
-        if !tr::is_dot(stroke) {
-            let total = tr::stroke_len(stroke);
-            let mut s = self.progress + 70.0;
-            while s < total - 30.0 {
-                let c = p.map.to_px(tr::point_at(stroke, s));
-                draw::disc(c.x, c.y, p.ink_w * 0.16, palette::hexa(0x2b2c34, 0.3));
-                s += 70.0;
-            }
-            // Pen position marker once underway: where to keep the finger.
-            if self.progress > 0.0 {
-                let tip = p.map.to_px(tr::point_at(stroke, self.progress));
-                draw::disc(tip.x, tip.y, p.start_r * 0.7, palette::ACCENT);
-            }
-        }
-        // Start dot pulses until the stroke is underway.
-        let pulse = if self.progress <= 0.0 {
-            anim::pulse(ctx.time, 1.1)
-        } else {
-            0.0
-        };
-        if self.progress <= 0.0 || tr::is_dot(stroke) {
-            self.draw_stroke_dots(p, self.stroke_i, pulse.max(0.0));
-        } else {
-            // Underway: keep only the red end target visible.
-            let end = p.map.to_px(*stroke.last().unwrap());
-            draw::disc(end.x, end.y, p.dot_r * 0.62, palette::RAINBOW[0]);
+        for i in 0..self.glyph().strokes.len() {
+            self.draw_stroke_dots(p, i);
         }
     }
 
@@ -1209,15 +988,12 @@ struct TLayout {
     map: GlyphMap,
     /// Traced-ink width (px) ≈ the glyph's own stroke weight.
     ink_w: f32,
-    /// Start-dot radius (px) — also the unit for the pencil, the moving pen
-    /// marker and confetti bursts.
-    start_r: f32,
-    /// Start/end target-dot radius (px) — smaller than `start_r` so the green
-    /// and red dots sit on the letter without burying it.
+    /// Start/end target-dot radius (px) — tiny, so the green/red dots cue
+    /// start/end without burying the glyph.
     dot_r: f32,
-    /// Watch-again button (center, radius).
+    /// Redo button (center, radius) — replays the demo.
     watch: (Vec2, f32),
-    /// Parent grade buttons (grade phase): ✗ left, ✓ right — phonics' pair.
+    /// Parent grade buttons: ✗ (smaller) + ✓ — phonics' pair.
     miss: (Vec2, f32),
     got: (Vec2, f32),
     /// Build-a-house progress meter: footprint center + ground line, width.
@@ -1238,8 +1014,11 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
         let card_w = (card_h * 1.15).max(f.w * 0.3);
         (card_w, card_h, card_bottom - card_h, btn_r, by)
     } else {
-        let card_w = (f.w * 0.42).clamp(320.0, 560.0);
-        let card_h = (f.h * 0.5).clamp(280.0, 470.0);
+        // A big writing surface — grow the card (≈2× the old area) while still
+        // leaving a margin for the build-a-house meter and a row for the
+        // redo / ✗ / ✓ buttons below.
+        let card_w = (f.w * 0.46).clamp(320.0, 620.0);
+        let card_h = (f.h * 0.72).clamp(280.0, 620.0);
         let card_y = f.h * 0.49 - card_h / 2.0;
         let btn_r = (f.w * 0.038).clamp(30.0, 46.0);
         let by = card_y + card_h + (f.h - (card_y + card_h)) * 0.45;
@@ -1264,11 +1043,12 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
     let baseline = card.y + card_h / 2.0 + (bb.1 + bb.3) / 2.0 * scale;
     let pen_x = cx - (bb.0 + bb.2) / 2.0 * scale;
 
-    // Grade row: ✗ (smaller) left of ✓, the same arrangement as phonics so
-    // the parent's hand already knows it.
+    // Always-offered action row, evenly spaced around center: redo (replay the
+    // demo) on the left, ✗ (smaller, phonics' miss) in the middle, ✓ on the
+    // right — ✗/✓ keep phonics' colours so the parent's hand already knows them.
     let slot = btn_r * 2.0;
     let ggap = if phone { 22.0 } else { 34.0 };
-    let gx0 = cx - (2.0 * slot + ggap) / 2.0;
+    let step = slot + ggap;
 
     // The build-a-house meter (with its construction site) lives in the right
     // margin beside the card, grounded on the card's bottom edge — same spot
@@ -1291,11 +1071,10 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
         font_px,
         map: GlyphMap { pen: vec2(pen_x, baseline), scale },
         ink_w: (64.0 * scale).max(8.0),
-        start_r: (90.0 * scale).clamp(12.0, 26.0),
-        dot_r: (58.0 * scale).clamp(8.0, 17.0),
-        watch: (vec2(cx, by), btn_r),
-        miss: (vec2(gx0 + slot / 2.0, by), btn_r * 0.66),
-        got: (vec2(gx0 + slot + ggap + slot / 2.0, by), btn_r),
+        dot_r: (58.0 * scale / 4.0).clamp(2.5, 4.5),
+        watch: (vec2(cx - step, by), btn_r),
+        miss: (vec2(cx, by), btn_r * 0.66),
+        got: (vec2(cx + step, by), btn_r),
         house: (vec2(house_cx, house_base), house_s),
     }
 }

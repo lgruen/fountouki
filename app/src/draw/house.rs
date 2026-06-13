@@ -1,5 +1,5 @@
-//! The build-a-house — the tracing game's progress meter and finale set piece,
-//! plus the demo pencil. Six parts go up over a six-letter session in real
+//! The build-a-house — the tracing game's progress meter and finale set piece.
+//! Six parts go up over a six-letter session in real
 //! construction order — foundation → brick walls → roof → chimney → windows →
 //! door — so the meter doubles as a how-houses-get-built picture book: the
 //! digger digs and the mixer pours the slab, the bricks rise course by course
@@ -668,29 +668,6 @@ fn draw_door(cx: f32, base_y: f32, s: f32, dx: f32, dy: f32, open: f32) {
 /// The concrete doorstep — the finishing touch that lands with the door.
 fn draw_door_step(cx: f32, base_y: f32, s: f32) {
     rounded_rect(cx - 0.14 * s, base_y - 0.006 * s, 0.28 * s, 0.038 * s, 0.010 * s, palette::CONCRETE);
-}
-
-/// The demo pencil: a chunky kid's pencil leaning up-right at a writing angle,
-/// its graphite point exactly on (`tip_x`, `tip_y`) — so the ink visibly comes
-/// from a pencil during the watch demo, not from an abstract dot.
-pub fn pencil(tip_x: f32, tip_y: f32, len: f32) {
-    let dir = vec2(0.585, -0.811); // unit, up-right
-    let perp = vec2(-dir.y, dir.x);
-    let at = |d: f32| vec2(tip_x + dir.x * d * len, tip_y + dir.y * d * len);
-    let w = 0.16 * len;
-    let wood = palette::hex(0xeec98f);
-    let body = palette::hex(0xffc94d);
-    // Sharpened wood cone, then the graphite point on top of it.
-    let shoulder = at(0.18);
-    draw_triangle(at(0.0), shoulder + perp * (w * 0.5), shoulder - perp * (w * 0.5), wood);
-    let neck = at(0.07);
-    draw_triangle(at(0.0), neck + perp * (w * 0.20), neck - perp * (w * 0.20), palette::INK);
-    // Body (round-capped capsule) + a lighter facet stripe.
-    stroke_path(&[at(0.20), at(0.80)], w, body);
-    stroke_path(&[at(0.22) + perp * (w * 0.26), at(0.78) + perp * (w * 0.26)], w * 0.28, palette::hex(0xffdf8a));
-    // Ferrule + eraser.
-    stroke_path(&[at(0.82), at(0.87)], w * 1.02, palette::hex(0xbcc6cf));
-    stroke_path(&[at(0.90), at(0.96)], w * 0.94, palette::ACCENT);
 }
 
 #[cfg(test)]
