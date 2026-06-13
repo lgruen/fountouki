@@ -327,8 +327,9 @@ async fn main() {
                 Box::new(sc)
             }
             "tracing-reward" => {
-                // The post-✓ install: the next letter's demo starting while
-                // the excavator digs the freshly earned foundation trench.
+                // The post-✓ install: the excavator digging the freshly earned
+                // foundation trench while the next letter's card waits (its demo
+                // holds off until the build finishes).
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = TracingScene::new(db.clone(), 7, now);
                 sc.debug_set_letter('c');

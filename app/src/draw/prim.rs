@@ -34,6 +34,32 @@ pub fn rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32, color: Color) {
     draw_circle(x + w - r, y + h - r, r, color);
 }
 
+/// Filled rounded rectangle, rotated `rot` radians (clockwise, screen y-down)
+/// about `pivot`. The unrotated rect is `(x, y, w, h)` in screen space; the
+/// straight `rounded_rect` is the `rot == 0` case. Used for the house-warming
+/// bunting flags, which hang orthogonal to a sagging string.
+pub fn rounded_rect_rot(rect: Rect, r: f32, pivot: Vec2, rot: f32, color: Color) {
+    let Rect { x, y, w, h } = rect;
+    let r = r.min(w / 2.0).min(h / 2.0);
+    let (s, c) = rot.sin_cos();
+    let tf = |px: f32, py: f32| {
+        let (dx, dy) = (px - pivot.x, py - pivot.y);
+        vec2(pivot.x + dx * c - dy * s, pivot.y + dx * s + dy * c)
+    };
+    let quad = |ax, ay, bx, by, cx, cy, dx, dy| {
+        draw_triangle(tf(ax, ay), tf(bx, by), tf(cx, cy), color);
+        draw_triangle(tf(ax, ay), tf(cx, cy), tf(dx, dy), color);
+    };
+    // The plus-shaped core (two overlapping rects) as rotated quads…
+    quad(x + r, y, x + w - r, y, x + w - r, y + h, x + r, y + h);
+    quad(x, y + r, x + w, y + r, x + w, y + h - r, x, y + h - r);
+    // …and the four corner fillets (circles are rotation-invariant).
+    for (cx, cy) in [(x + r, y + r), (x + w - r, y + r), (x + r, y + h - r), (x + w - r, y + h - r)] {
+        let p = tf(cx, cy);
+        draw_circle(p.x, p.y, r, color);
+    }
+}
+
 /// Soft drop shadow behind a rounded rect (layered translucent rects — no blur
 /// in macroquad, so fake it with a few expanding low-alpha passes).
 pub fn soft_shadow(x: f32, y: f32, w: f32, h: f32, r: f32) {

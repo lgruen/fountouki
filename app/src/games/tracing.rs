@@ -38,9 +38,12 @@ const ADVANCE_BEAT: f32 = 1.1;
 /// (`install_t`): the build stage starts at `INSTALL_START` and runs
 /// `draw::install_dur(stage)` seconds — stage-specific, since the foundation's
 /// dig + pour tells a longer story than a single crane lift. Sound cues come
-/// from `draw::install_cues(stage)`. It overlaps the next letter's demo —
-/// `install_t` keeps counting across the transition.
+/// from `draw::install_cues(stage)`. The next letter's demo holds off
+/// (`demo_delay`) until this stage plays out, so the build and the demo don't
+/// compete for the kid's attention.
 const INSTALL_START: f32 = 0.35;
+/// Breath between a finished house stage and the next letter's demo.
+const INSTALL_BREAK: f32 = 0.7;
 /// Golden shimmer sweep along the just-finished letter's ink.
 const SWEEP_DUR: f32 = 0.55;
 /// Laid ink (font units) between sparkle ticks while tracing.
@@ -92,6 +95,10 @@ pub struct TracingScene {
     /// on the lift, judged at this position.
     last_touch: Option<(f32, f32)>,
     demo_t: f32,
+    /// After a ✓-built stage, the next letter's demo waits this many seconds so
+    /// the house install (and its breath) finishes first instead of playing on
+    /// top of the demo. Zero on a ✗ (no build) — the demo starts at once.
+    demo_delay: f32,
     advance_in: Option<f32>,
     /// Time since the current letter finished (drives the completed-glyph pop
     /// and the shimmer sweep).
@@ -113,7 +120,7 @@ pub struct TracingScene {
     /// Door taps this finale (playtest hook).
     door_taps: u32,
     /// The party guests: seconds since each friend frog was tapped (99 = idle).
-    friend_t: [f32; 2],
+    friend_t: [f32; 3],
     friend_taps: u32,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
@@ -146,6 +153,7 @@ impl TracingScene {
             laid_open: false,
             last_touch: None,
             demo_t: 0.0,
+            demo_delay: 0.0,
             advance_in: None,
             finish_t: 99.0,
             install_t: 99.0,
@@ -157,7 +165,7 @@ impl TracingScene {
             lit_on: [false; 2],
             lit_t: [0.0; 2],
             door_taps: 0,
-            friend_t: [99.0; 2],
+            friend_t: [99.0; 3],
             friend_taps: 0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x7e11_e77a),
             sync,
@@ -187,6 +195,7 @@ impl TracingScene {
         self.stroke_i = 0;
         self.progress = 0.0;
         self.demo_t = 0.0;
+        self.demo_delay = 0.0;
         self.advance_in = None;
         self.finish_t = 99.0;
         self.install_t = 99.0;
@@ -195,7 +204,7 @@ impl TracingScene {
         self.lit_on = [false; 2];
         self.lit_t = [0.0; 2];
         self.door_taps = 0;
-        self.friend_t = [99.0; 2];
+        self.friend_t = [99.0; 3];
         self.friend_taps = 0;
     }
 
@@ -239,6 +248,13 @@ impl TracingScene {
         self.save();
         self.sync.queue_push(&self.state.serialize_json(), ctx.now);
         self.advance_letter(ctx);
+        // On a ✓ the next letter's demo holds off until the earned house stage
+        // has installed (with its sound cues) plus a short breath — so the
+        // build plays out fully before the demo, rather than overlapping it.
+        if got_it && self.phase == Phase::Watch {
+            let stage = (self.stars as usize).saturating_sub(1).min(draw::HOUSE_PARTS - 1);
+            self.demo_delay = INSTALL_START + draw::install_dur(stage) + INSTALL_BREAK;
+        }
     }
 
     fn advance_letter(&mut self, ctx: &Ctx) {
@@ -257,6 +273,7 @@ impl TracingScene {
         }
         self.phase = Phase::Watch;
         self.demo_t = 0.0;
+        self.demo_delay = 0.0;
         self.stroke_i = 0;
         self.progress = 0.0;
         self.finish_t = 99.0;
@@ -412,7 +429,7 @@ impl TracingScene {
                 self.frog_t = 0.0;
                 ctx.audio.frog();
                 self.confetti.burst(vec2(dl.frog_c.x, dl.frog_c.y - dl.frog_r), 14, dl.frog_r * 0.5);
-            } else if let Some(i) = (0..2).find(|&i| {
+            } else if let Some(i) = (0..3).find(|&i| {
                 let (fc, fr) = dl.friends[i];
                 input::hit_circle(pt.pos, fc.x, fc.y, fr * 1.4) && self.friend_t[i] > 0.8
             }) {
@@ -498,7 +515,7 @@ impl TracingScene {
         self.lit_on[i.min(1)]
     }
     pub(crate) fn friend_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
-        done_layout(f).friends[i.min(1)].0
+        done_layout(f).friends[i.min(2)].0
     }
     pub(crate) fn friend_taps(&self) -> u32 {
         self.friend_taps
@@ -529,11 +546,13 @@ impl Scene for TracingScene {
             if self.lit_on[i] {
                 self.lit_t[i] += ctx.dt;
             }
-            self.friend_t[i] += ctx.dt;
+        }
+        for t in &mut self.friend_t {
+            *t += ctx.dt;
         }
         // The build stage's sound cues (digger scoops, truck beeps, brick
         // taps, the lands-home thunk + confetti…) fire as install_t crosses
-        // them — while the next letter's demo plays.
+        // them — while the next letter's demo waits on `demo_delay`.
         if self.phase != Phase::Done && self.stars > 0 {
             let stage = (self.stars as usize - 1).min(draw::HOUSE_PARTS - 1);
             let dur = draw::install_dur(stage);
@@ -589,10 +608,19 @@ impl Scene for TracingScene {
         }
         match self.phase {
             Phase::Watch => {
-                self.demo_t += ctx.dt;
-                // An impatient tap skips straight to tracing.
-                if self.demo_t >= self.demo_total() || ctx.pointer.tapped() {
+                // An impatient tap skips straight to tracing — even past the
+                // post-build hold.
+                if ctx.pointer.tapped() {
                     self.start_trace();
+                } else if self.demo_delay > 0.0 {
+                    // The earned house stage is still installing: the card waits
+                    // (faded letter only) so the build has the kid's attention.
+                    self.demo_delay -= ctx.dt;
+                } else {
+                    self.demo_t += ctx.dt;
+                    if self.demo_t >= self.demo_total() {
+                        self.start_trace();
+                    }
                 }
             }
             Phase::Trace => {
@@ -679,7 +707,10 @@ impl Scene for TracingScene {
         }
 
         match self.phase {
-            Phase::Watch => self.draw_demo(&p),
+            // While the post-build hold runs, the card shows only the faded
+            // letter waiting — the demo pen starts once the house is in.
+            Phase::Watch if self.demo_delay <= 0.0 => self.draw_demo(&p),
+            Phase::Watch => {}
             Phase::Trace | Phase::Grade => {
                 if self.phase == Phase::Trace && !finished {
                     self.draw_trace(&p, ctx);
@@ -837,10 +868,10 @@ impl TracingScene {
         let g = self.glyph();
         let stroke = g.strokes[i];
         let start = p.map.to_px(stroke[0]);
-        let r = p.start_r * (1.0 + 0.12 * pulse);
+        let r = p.dot_r * (1.0 + 0.12 * pulse);
         if !tr::is_dot(stroke) {
             let end = p.map.to_px(*stroke.last().unwrap());
-            draw::disc(end.x, end.y, p.start_r * 0.55, palette::RAINBOW[0]);
+            draw::disc(end.x, end.y, p.dot_r * 0.62, palette::RAINBOW[0]);
         }
         draw::disc(start.x, start.y, r, palette::OK_STRONG);
         draw::disc(start.x, start.y, r * 0.78, palette::OK);
@@ -927,7 +958,7 @@ impl TracingScene {
         } else {
             // Underway: keep only the red end target visible.
             let end = p.map.to_px(*stroke.last().unwrap());
-            draw::disc(end.x, end.y, p.start_r * 0.55, palette::RAINBOW[0]);
+            draw::disc(end.x, end.y, p.dot_r * 0.62, palette::RAINBOW[0]);
         }
     }
 
@@ -990,12 +1021,13 @@ impl TracingScene {
         // trophies ARE the letters (no words needed).
         self.draw_letter_flags(ctx, &dl);
 
-        // The party guests: two friend frogs in cone hats, back-left and in
-        // the front yard. They hop on a lazy ambient cadence and ribbit-jump
-        // when tapped (the front one pokes its tongue out).
+        // The party guests: three friend frogs in cone hats, back-left, in the
+        // front yard, and a small one front-left. They hop on a lazy ambient
+        // cadence and ribbit-jump when tapped (the front ones poke a tongue out).
         for (i, &((fc, fr), (body, hat), phase)) in [
             (dl.friends[0], (palette::RAINBOW[6], palette::GOLD), 2.0f32),
             (dl.friends[1], (palette::RAINBOW[1], palette::RAINBOW[4]), 4.2),
+            (dl.friends[2], (palette::RAINBOW[4], palette::RAINBOW[0]), 0.9),
         ]
         .iter()
         .enumerate()
@@ -1006,7 +1038,7 @@ impl TracingScene {
                     dy: -fly * fr * 1.1,
                     sy: 1.0 + fly * 0.18,
                     sx: 1.0 - fly * 0.09,
-                    tongue: if i == 1 { fly } else { 0.0 },
+                    tongue: if i >= 1 { fly } else { 0.0 },
                     ..Default::default()
                 }
             } else {
@@ -1062,15 +1094,23 @@ impl TracingScene {
             let fs = dl.flag_s * sc;
             let x = x0 + (x1 - x0) * t + (ctx.time * 1.6 + i as f32 * 1.3).sin() * 2.0;
             let top = yat(t);
-            draw::rounded_rect(x - fs / 2.0, top, fs, fs * 1.22, fs * 0.12, palette::CARD);
-            draw::rounded_rect(x - fs / 2.0, top, fs, fs * 0.18, fs * 0.10, palette::RAINBOW[i % 7]);
-            text::draw_centered(
+            // Hang each flag perpendicular to the string: rotate by the swag's
+            // local tangent (downhill on the left, uphill on the right, upright
+            // at the dip) so the bunting reads as one strung line, not a row of
+            // upright cards.
+            let rot = (sag * 4.0 * (1.0 - 2.0 * t)).atan2(x1 - x0);
+            let pivot = vec2(x, top);
+            draw::rounded_rect_rot(Rect::new(x - fs / 2.0, top, fs, fs * 1.22), fs * 0.12, pivot, rot, palette::CARD);
+            draw::rounded_rect_rot(Rect::new(x - fs / 2.0, top, fs, fs * 0.18), fs * 0.10, pivot, rot, palette::RAINBOW[i % 7]);
+            let (sr, cr) = rot.sin_cos();
+            text::draw_centered_rot(
                 &ch.to_string(),
-                x,
-                top + fs * 0.74,
+                x - fs * 0.74 * sr,
+                top + fs * 0.74 * cr,
                 (fs * 0.62).max(1.0) as u16,
                 &ctx.fonts.cursive,
                 palette::INK,
+                rot,
             );
         }
     }
@@ -1105,8 +1145,8 @@ struct DoneLayout {
     frog_c: Vec2,
     frog_r: f32,
     /// Party guests (center, radius): one behind-left of the house, one in
-    /// the front yard.
-    friends: [(Vec2, f32); 2],
+    /// the front yard, and a small one front-left.
+    friends: [(Vec2, f32); 3],
     flag_s: f32,
     /// Bunting swag: x0, x1, top y, center sag.
     bunt: (f32, f32, f32, f32),
@@ -1129,6 +1169,7 @@ fn done_layout(f: &crate::layout::Frame) -> DoneLayout {
     let band = |frac: f32| ground_y + (f.h - ground_y) * frac;
     let fr0 = fr * 0.72;
     let fr1 = fr * 0.62;
+    let fr2 = fr * 0.5;
     DoneLayout {
         ground_y,
         house_c: vec2(cx, base_y),
@@ -1138,6 +1179,7 @@ fn done_layout(f: &crate::layout::Frame) -> DoneLayout {
         friends: [
             (vec2(cx - s * 0.72, band(0.40) - 0.92 * fr0), fr0),
             (vec2(cx + s * 0.30, band(0.78) - 0.92 * fr1), fr1),
+            (vec2(cx - s * 0.34, band(0.82) - 0.92 * fr2), fr2),
         ],
         flag_s,
         bunt,
@@ -1167,8 +1209,12 @@ struct TLayout {
     map: GlyphMap,
     /// Traced-ink width (px) ≈ the glyph's own stroke weight.
     ink_w: f32,
-    /// Start-dot radius (px).
+    /// Start-dot radius (px) — also the unit for the pencil, the moving pen
+    /// marker and confetti bursts.
     start_r: f32,
+    /// Start/end target-dot radius (px) — smaller than `start_r` so the green
+    /// and red dots sit on the letter without burying it.
+    dot_r: f32,
     /// Watch-again button (center, radius).
     watch: (Vec2, f32),
     /// Parent grade buttons (grade phase): ✗ left, ✓ right — phonics' pair.
@@ -1246,6 +1292,7 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
         map: GlyphMap { pen: vec2(pen_x, baseline), scale },
         ink_w: (64.0 * scale).max(8.0),
         start_r: (90.0 * scale).clamp(12.0, 26.0),
+        dot_r: (58.0 * scale).clamp(8.0, 17.0),
         watch: (vec2(cx, by), btn_r),
         miss: (vec2(gx0 + slot / 2.0, by), btn_r * 0.66),
         got: (vec2(gx0 + slot + ggap + slot / 2.0, by), btn_r),

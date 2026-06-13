@@ -49,6 +49,33 @@ pub fn draw_centered(text: &str, cx: f32, cy: f32, size: u16, font: &Font, color
     );
 }
 
+/// Like [`draw_centered`], but the glyphs are rotated `rot` radians (clockwise,
+/// screen y-down) about their visual center `(cx, cy)` — so the centered text
+/// rides a tilted surface (e.g. a bunting flag) instead of staying upright.
+pub fn draw_centered_rot(text: &str, cx: f32, cy: f32, size: u16, font: &Font, color: Color, rot: f32) {
+    let dim = measure_text(text, Some(font), size, 1.0);
+    // macroquad rotates a text run about its draw anchor (the baseline-left
+    // pen point). The unrotated center sits (width/2) right and (offset_y/2) up
+    // from there; place the anchor so that vector, once rotated, lands on the
+    // requested center.
+    let (s, c) = rot.sin_cos();
+    let (ox, oy) = (dim.width / 2.0, -dim.offset_y / 2.0);
+    let x = cx - (ox * c - oy * s);
+    let y = cy - (ox * s + oy * c);
+    draw_text_ex(
+        text,
+        x,
+        y,
+        TextParams {
+            font: Some(font),
+            font_size: size,
+            rotation: rot,
+            color,
+            ..Default::default()
+        },
+    );
+}
+
 // --- UI font (Varela Round) ------------------------------------------------
 // Clean rounded sans for chrome, labels, parent menu, HUD. Cursive is reserved
 // for letter/number learning stimuli. Baked in + held thread-local so the free

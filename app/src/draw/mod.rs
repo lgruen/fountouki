@@ -31,7 +31,8 @@ pub use glyphs::{
     chevron_left, circle_btn, house_icon, mark_arrow, mark_check, mark_cross, replay_icon, speaker,
 };
 pub use prim::{
-    card, disc, fill_ellipse, pop_clip, push_clip, rounded_rect, star, stroke_path, vgradient,
+    card, disc, fill_ellipse, pop_clip, push_clip, rounded_rect, rounded_rect_rot, star,
+    stroke_path, vgradient,
 };
 pub use scenery::{
     cloud, garden_plant, grass_tuft, igloo, plant, rainbow, rainbow_ghost, sun, Plant,
