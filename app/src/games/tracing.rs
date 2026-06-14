@@ -87,14 +87,22 @@ pub struct TracingScene {
     done_t: f32,
     /// Seconds since the door was last tapped (drives the swing); 99 = idle.
     door_t: f32,
-    /// Window lamps: lit stays lit (monotonic); the clock drives the pop.
+    /// Window lamps are switches, not stars: each tap flips the switch
+    /// (`lit_on`) and `lit_warm` eases toward it, so a lamp turns OFF as readily
+    /// as on — a light you can actually play with.
     lit_on: [bool; 2],
-    lit_t: [f32; 2],
+    lit_warm: [f32; 2],
     /// Door taps this finale (playtest hook).
     door_taps: u32,
     /// The party guests: seconds since each friend frog was tapped (99 = idle).
     friend_t: [f32; 3],
     friend_taps: u32,
+    /// Seconds since the sun was tapped (rays burst + spin); 99 = idle.
+    sun_t: f32,
+    sun_taps: u32,
+    /// Seconds since the chimney was tapped (a cough of smoke); 99 = idle.
+    chimney_t: f32,
+    chimney_taps: u32,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
 }
@@ -128,10 +136,14 @@ impl TracingScene {
             done_t: 0.0,
             door_t: 99.0,
             lit_on: [false; 2],
-            lit_t: [0.0; 2],
+            lit_warm: [0.0; 2],
             door_taps: 0,
             friend_t: [99.0; 3],
             friend_taps: 0,
+            sun_t: 99.0,
+            sun_taps: 0,
+            chimney_t: 99.0,
+            chimney_taps: 0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x7e11_e77a),
             sync,
         }
@@ -165,10 +177,14 @@ impl TracingScene {
         self.done_t = 0.0;
         self.door_t = 99.0;
         self.lit_on = [false; 2];
-        self.lit_t = [0.0; 2];
+        self.lit_warm = [0.0; 2];
         self.door_taps = 0;
         self.friend_t = [99.0; 3];
         self.friend_taps = 0;
+        self.sun_t = 99.0;
+        self.sun_taps = 0;
+        self.chimney_t = 99.0;
+        self.chimney_taps = 0;
     }
 
     fn start_trace(&mut self) {
@@ -279,6 +295,7 @@ impl TracingScene {
         if pt.tapped() {
             let door = draw::house_door_rect(hc.x, hc.y, hs);
             let wins = draw::house_window_centers(hc.x, hc.y, hs);
+            let chim = draw::house_chimney_center(hc.x, hc.y, hs);
             if input::hit_circle(pt.pos, replay.x, replay.y, br) {
                 self.restart_session(ctx.now);
             } else if input::hit_circle(pt.pos, home_b.x, home_b.y, br) {
@@ -293,13 +310,24 @@ impl TracingScene {
             } else if let Some(i) =
                 (0..2).find(|&i| input::hit_circle(pt.pos, wins[i].x, wins[i].y, hs * 0.16))
             {
-                // A window lamp flicks on (and stays on — monotonic).
-                if !self.lit_on[i] {
-                    self.lit_on[i] = true;
-                    self.lit_t[i] = 0.0;
-                }
+                // The window lamp is a switch: each tap flips it. Turning it on
+                // sparkles; turning it off just clicks (the warmth eases away).
+                self.lit_on[i] = !self.lit_on[i];
                 ctx.audio.twinkle();
-                self.confetti.burst(wins[i], 8, hs * 0.12);
+                if self.lit_on[i] {
+                    self.confetti.burst(wins[i], 8, hs * 0.12);
+                }
+            } else if input::hit_circle(pt.pos, chim.x, chim.y, hs * 0.16) {
+                // Poke the chimney → it coughs out a puff of smoke.
+                self.chimney_t = 0.0;
+                self.chimney_taps += 1;
+                ctx.audio.train_whistle();
+            } else if input::hit_circle(pt.pos, dl.sun_c.x, dl.sun_c.y, dl.sun_r * 1.5) {
+                // Tap the sun → rays burst out and the sky sparkles.
+                self.sun_t = 0.0;
+                self.sun_taps += 1;
+                ctx.audio.twinkle();
+                self.confetti.burst(dl.sun_c, 12, dl.sun_r * 0.8);
             } else if input::hit_circle(pt.pos, dl.frog_c.x, dl.frog_c.y, dl.frog_r * 1.3)
                 && self.frog_t > 0.8
             {
@@ -391,6 +419,19 @@ impl TracingScene {
     pub(crate) fn friend_taps(&self) -> u32 {
         self.friend_taps
     }
+    pub(crate) fn sun_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        done_layout(f).sun_c
+    }
+    pub(crate) fn sun_taps(&self) -> u32 {
+        self.sun_taps
+    }
+    pub(crate) fn chimney_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        let dl = done_layout(f);
+        draw::house_chimney_center(dl.house_c.x, dl.house_c.y, dl.house_s)
+    }
+    pub(crate) fn chimney_taps(&self) -> u32 {
+        self.chimney_taps
+    }
     pub(crate) fn stroke_count(&self) -> usize {
         self.glyph().strokes.len()
     }
@@ -417,10 +458,14 @@ impl Scene for TracingScene {
         self.frog_t += ctx.dt;
         self.done_t += ctx.dt;
         self.door_t += ctx.dt;
+        self.sun_t += ctx.dt;
+        self.chimney_t += ctx.dt;
+        // Each lamp's warmth eases toward its switch (on = 1, off = 0), so it
+        // glows up and dims down instead of snapping.
         for i in 0..2 {
-            if self.lit_on[i] {
-                self.lit_t[i] += ctx.dt;
-            }
+            let target = if self.lit_on[i] { 1.0 } else { 0.0 };
+            let step = ctx.dt * 4.0;
+            self.lit_warm[i] += (target - self.lit_warm[i]).clamp(-step, step);
         }
         for t in &mut self.friend_t {
             *t += ctx.dt;
@@ -743,8 +788,9 @@ impl TracingScene {
 
     /// The house-warming: the finished house front and center under a sunny
     /// sky, the session's letters strung up as bunting flags, the frog in its
-    /// builder's hard hat out front. The door rings + swings, windows light up,
-    /// the frog jumps — everything the kid can reach does something.
+    /// builder's hard hat out front. The door rings + swings, the window lamps
+    /// toggle on AND off, the chimney puffs when poked, the sun bursts into
+    /// rays, the frogs jump — everything the kid can reach does something.
     fn draw_done(&mut self, ctx: &Ctx) {
         let f = &ctx.frame;
         let dl = done_layout(f);
@@ -760,8 +806,15 @@ impl TracingScene {
             let x = (ctx.time * spd + ph * span).rem_euclid(span) - cloud_r * 4.0;
             draw::cloud(x, dl.ground_y * hy, cloud_r * sc);
         }
-        // The sun sits mid-sky on the right, clear of the letter bunting.
-        draw::sun(f.w * 0.84, dl.ground_y * 0.50, f.vmin(0.06).max(32.0));
+        // The sun sits mid-sky on the right, clear of the letter bunting — tap
+        // it and rays burst out, spinning, before settling back to a calm disc.
+        let sun_pop = if self.sun_t < 0.6 {
+            1.0 + (self.sun_t / 0.6 * std::f32::consts::PI).sin() * 0.18
+        } else {
+            1.0
+        };
+        draw::sun_rays(dl.sun_c.x, dl.sun_c.y, dl.sun_r, (1.0 - self.sun_t).max(0.0), ctx.time * 1.5);
+        draw::sun(dl.sun_c.x, dl.sun_c.y, dl.sun_r * sun_pop);
 
         // Ground.
         draw::vgradient(0.0, dl.ground_y, f.w, f.h - dl.ground_y, palette::GROUND_TOP, palette::GROUND_BOT);
@@ -771,10 +824,7 @@ impl TracingScene {
         let pop = anim::back_out(((self.done_t) / 0.5).clamp(0.0, 1.0));
         let hs = dl.house_s * pop.max(0.05);
         let door_open = door_swing(self.door_t);
-        let lit = [
-            if self.lit_on[0] { (self.lit_t[0] * 2.5).clamp(0.0, 1.0) } else { 0.0 },
-            if self.lit_on[1] { (self.lit_t[1] * 2.5).clamp(0.0, 1.0) } else { 0.0 },
-        ];
+        let lit = [self.lit_warm[0].clamp(0.0, 1.0), self.lit_warm[1].clamp(0.0, 1.0)];
         let pose = draw::HousePose {
             parts: draw::HOUSE_PARTS,
             installing: None,
@@ -783,6 +833,7 @@ impl TracingScene {
             door_open,
             lit,
             smoke_t: (self.done_t - 0.45).max(-1.0),
+            puff_t: if self.chimney_t < 0.9 { self.chimney_t } else { -1.0 },
             time: ctx.time,
         };
         draw::house(dl.house_c.x, dl.house_c.y, hs, &pose);
@@ -926,6 +977,9 @@ struct DoneLayout {
     /// Party guests (center, radius): one behind-left of the house, one in
     /// the front yard, and a small one front-left.
     friends: [(Vec2, f32); 3],
+    /// The sun (center, radius) — a tappable sky element.
+    sun_c: Vec2,
+    sun_r: f32,
     flag_s: f32,
     /// Bunting swag: x0, x1, top y, center sag.
     bunt: (f32, f32, f32, f32),
@@ -960,6 +1014,8 @@ fn done_layout(f: &crate::layout::Frame) -> DoneLayout {
             (vec2(cx + s * 0.30, band(0.78) - 0.92 * fr1), fr1),
             (vec2(cx - s * 0.34, band(0.82) - 0.92 * fr2), fr2),
         ],
+        sun_c: vec2(f.w * 0.84, ground_y * 0.50),
+        sun_r: f.vmin(0.06).max(32.0),
         flag_s,
         bunt,
     }

@@ -35,6 +35,9 @@ pub struct HousePose {
     pub lit: [f32; 2],
     /// Seconds the chimney has been smoking; negative = no smoke.
     pub smoke_t: f32,
+    /// Seconds since the chimney was last tapped (a quick cough of fat puffs);
+    /// negative = idle.
+    pub puff_t: f32,
     /// Ambient clock (smoke drift wiggle).
     pub time: f32,
 }
@@ -48,6 +51,7 @@ impl Default for HousePose {
             door_open: 0.0,
             lit: [0.0, 0.0],
             smoke_t: -1.0,
+            puff_t: -1.0,
             time: 0.0,
         }
     }
@@ -85,6 +89,11 @@ pub fn house_door_rect(cx: f32, base_y: f32, s: f32) -> Rect {
     let w = DOOR_W * s * 1.6;
     let h = DOOR_H * s * 1.25;
     Rect::new(cx - w / 2.0, base_y - h, w, h)
+}
+
+/// Chimney center (finale tap target) — the mid-point of the stack.
+pub fn house_chimney_center(cx: f32, base_y: f32, s: f32) -> Vec2 {
+    vec2(cx + CHIM_X * s, base_y + (CHIM_TOP + 0.17) * s)
 }
 
 /// Window centers (left, right) — finale tap targets.
@@ -186,6 +195,26 @@ pub fn house(cx: f32, base_y: f32, s: f32, pose: &HousePose) {
                 tip.y - 0.22 * s * age,
                 0.07 * s * (1.0 + a * 1.6),
                 0.7 * (1.0 - a),
+            );
+        }
+    }
+
+    // A tapped chimney coughs out a quick cluster of fat puffs that race up
+    // faster than the lazy ambient drift — the kid pokes it, it goes "poof".
+    if upto >= HOUSE_PARTS && (0.0..0.9).contains(&pose.puff_t) {
+        let tip = vec2(cx + CHIM_X * s, base_y + CHIM_TOP * s);
+        for k in 0..4 {
+            let age = pose.puff_t - k as f32 * 0.10;
+            if !(0.0..0.6).contains(&age) {
+                continue;
+            }
+            let a = age / 0.6;
+            let wiggle = ((pose.time + k as f32 * 1.3) * 3.0).sin() * 0.05 * s;
+            steam_puff(
+                tip.x + 0.14 * s * a + wiggle,
+                tip.y - 0.5 * s * a,
+                0.09 * s * (1.0 + a * 1.5),
+                0.9 * (1.0 - a),
             );
         }
     }
@@ -686,6 +715,10 @@ mod tests {
             assert!(w.x > cx - s * 0.5 && w.x < cx + s * 0.5);
             assert!(w.y < base_y && w.y > base_y - WALL_H * s);
         }
+        // The chimney target sits on the stack, above the roof line.
+        let ch = house_chimney_center(cx, base_y, s);
+        assert!(ch.x > cx && ch.x < cx + s * 0.5);
+        assert!(ch.y < base_y - WALL_H * s && ch.y > base_y - house_height(s));
     }
 
     /// Every part's anchor sits within the finished silhouette.

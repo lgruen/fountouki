@@ -22,8 +22,8 @@ mod train;
 
 pub use frog::{frog, frog_hard_hat, frog_party_hat, FrogPose};
 pub use house::{
-    house, house_door_rect, house_height, house_part_anchor, house_window_centers, HousePose,
-    HOUSE_PARTS,
+    house, house_chimney_center, house_door_rect, house_height, house_part_anchor,
+    house_window_centers, HousePose, HOUSE_PARTS,
 };
 pub use site::{install_cues, install_dur, site_extents, site_height, BuildCue};
 pub use glyphs::{
@@ -34,7 +34,7 @@ pub use prim::{
     stroke_path, vgradient,
 };
 pub use scenery::{
-    cloud, garden_plant, grass_tuft, igloo, plant, rainbow, rainbow_ghost, sun, Plant,
+    cloud, garden_plant, grass_tuft, igloo, plant, rainbow, rainbow_ghost, sun, sun_rays, Plant,
     GARDEN_SPECIES,
 };
 pub use train::{
