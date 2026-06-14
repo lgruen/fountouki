@@ -393,6 +393,42 @@ async fn main() {
                 }
                 Box::new(sc)
             }
+            "tracing-housewarming" => {
+                // The finale mid-play, to show off the touchables: both window
+                // lamps switched on, the door ringing open, the sun bursting
+                // into rays and the chimney coughing a puff.
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let mut sc = TracingScene::new(db.clone(), 7, now);
+                sc.debug_finish_session();
+                let idle = Pointer::default();
+                for _ in 0..4 {
+                    let ctx = Ctx { dt: 0.2, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                // Flick both lamps on, then let them warm up to full glow.
+                for i in 0..2 {
+                    let ptr = tap(sc.window_center(&frame, i));
+                    let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                for _ in 0..6 {
+                    let ctx = Ctx { dt: 0.06, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                // Ring the door, tap the sun (rays), poke the chimney (puff).
+                let ptr = tap(sc.door_center(&frame));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let ptr = tap(sc.sun_center(&frame));
+                let ctx = Ctx { dt: 0.02, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let ptr = tap(sc.chimney_center(&frame));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                Box::new(sc)
+            }
             "phonics-done" => {
                 // Play 7 correct rounds to reach the rainbow-done garden scene.
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
@@ -823,14 +859,29 @@ async fn main() {
                 fails += 1;
             }
             // House-warming finale: the door rings + swings (and the scene
-            // stays), a window lamp lights and STAYS lit (monotonic).
+            // stays).
             let ptr = tap(sc.door_center(&frame));
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let door_ok = sc.is_done() && sc.door_taps() == 1;
+            // The window lamp is a switch: a tap lights it, another tap turns it
+            // OFF again (no longer a one-way star).
             let ptr = tap(sc.window_center(&frame, 1));
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
+            let lit_on = sc.window_lit(1);
+            let ptr = tap(sc.window_center(&frame, 1));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let lit_off = !sc.window_lit(1);
+            // The sky is touchable too: tap the sun, poke the chimney.
+            let ptr = tap(sc.sun_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let ptr = tap(sc.chimney_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let sky_ok = sc.sun_taps() == 1 && sc.chimney_taps() == 1;
             // A party-guest frog reacts to its tap too.
             let ptr = tap(sc.friend_center(&frame, 0));
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
@@ -839,13 +890,12 @@ async fn main() {
             let idle2 = Pointer::default();
             let ctx = Ctx { dt: 2.0, time: 0.0, now, pointer: &idle2, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
-            if door_ok && friend_ok && sc.is_done() && sc.window_lit(1) && !sc.window_lit(0) {
+            if door_ok && friend_ok && lit_on && lit_off && sky_ok && sc.is_done() && !sc.window_lit(0) {
                 println!("PASS tracing-housewarming");
             } else {
                 println!(
-                    "FAIL tracing-housewarming (door_ok={door_ok}, friend_ok={friend_ok}, done={}, lit1={}, lit0={})",
+                    "FAIL tracing-housewarming (door_ok={door_ok}, friend_ok={friend_ok}, lit_on={lit_on}, lit_off={lit_off}, sky_ok={sky_ok}, done={}, lit0={})",
                     sc.is_done(),
-                    sc.window_lit(1),
                     sc.window_lit(0)
                 );
                 fails += 1;

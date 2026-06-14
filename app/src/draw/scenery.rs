@@ -68,6 +68,25 @@ pub fn sun(cx: f32, cy: f32, r: f32) {
     disc(cx - r * 0.18, cy - r * 0.18, r * 0.5, palette::SUN_CORE);
 }
 
+/// Rays bursting from a tapped sun: `t` 0..1 fades them out, `rot` spins the
+/// spokes. Drawn over the sun's glow so the whole sky lights up when poked.
+pub fn sun_rays(cx: f32, cy: f32, r: f32, t: f32, rot: f32) {
+    let t = t.clamp(0.0, 1.0);
+    if t <= 0.0 {
+        return;
+    }
+    const N: usize = 10;
+    let len = r * (0.45 + 0.8 * t);
+    let col = Color::new(1.0, 0.82, 0.32, 0.55 * t);
+    let w = (r * 0.12).max(2.0);
+    for k in 0..N {
+        let a = rot + k as f32 / N as f32 * std::f32::consts::TAU;
+        let (s, c) = a.sin_cos();
+        let r0 = r * 1.2;
+        draw_line(cx + c * r0, cy + s * r0, cx + c * (r0 + len), cy + s * (r0 + len), w, col);
+    }
+}
+
 /// A drawn igloo — vector art, not an emoji: there is no igloo glyph in Unicode
 /// (so no Twemoji sprite exists), and "igloo" is the gold-standard preschool
 /// 'i' word. Reads as a snow-block dome with an arched entrance; fills a box of
