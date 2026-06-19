@@ -37,8 +37,8 @@ const PAD_COLOR_IDX: [usize; 4] = [0, 2, 3, 6];
 
 /// Per-difficulty beat timing (seconds the pad is lit / the gap between beats)
 /// during the Show playback, and the starting sequence length. The Ready
-/// count-in now runs at its OWN fixed brisk tempo (`READY_TICK_S`), independent
-/// of this difficulty timing, so a slow difficulty can't drag the lead-in.
+/// get-ready cue runs at its OWN fixed duration (`READY_TOTAL_S`), independent of
+/// this difficulty timing, so a slow difficulty can't drag the lead-in.
 ///
 /// Reveal slowed from the first playtest (a 4yo lost the thread): normal now
 /// on 0.62s + gap 0.34s (was 0.52 + 0.22); gentle slower still; speedy stays
@@ -57,21 +57,33 @@ fn tuning(difficulty: &str) -> Tuning {
     }
 }
 
-/// The Ready count-in: `READY_TICKS` soft metronome pulses (a synchronized
-/// pulse of all four critters + a soft central ring + an audio tick on each) at
-/// a fixed BRISK spacing (`READY_TICK_S`, NOT scaled by difficulty — a slow
-/// difficulty mustn't make the lead-in drag), then a short still beat
-/// (`READY_STILL_S`), then Show begins on the downbeat. A clear non-text
-/// "ready-set-go" of ~1.35s total so a 4yo doesn't lose patience before the
-/// sequence even starts — never an instant cold start.
-const READY_TICKS: u32 = 3;
-/// Fixed brisk spacing between count-in ticks (seconds) — difficulty-independent.
-const READY_TICK_S: f32 = 0.40;
-/// The still beat after the last tick, before Show begins on the downbeat.
-const READY_STILL_S: f32 = 0.55;
-/// Total count-in duration: ticks at 0,1,2·`READY_TICK_S` then the still beat —
-/// ~1.35s of "ready-set-go".
-const READY_TOTAL_S: f32 = (READY_TICKS as f32 - 1.0) * READY_TICK_S + READY_STILL_S;
+/// The Ready get-ready cue: a purely ENVIRONMENTAL "dim-and-bloom" fade over the
+/// still choir — NO character motion. A fullscreen overlay dims the stage (lights
+/// down → "settle"), holds briefly, then blooms back to full reveal (lights up →
+/// "now"), resolving to alpha 0 EXACTLY at `READY_TOTAL_S` so the first critter
+/// sings the instant the scene is fully revealed. Replaces the old metronome
+/// count-in (which jumped all four critters in unison and mis-read as part of the
+/// sequence). The critters stay perfectly still throughout.
+///
+/// Curve, in fractions of `READY_TOTAL_S`: alpha eases 0 → `READY_DIM_PEAK` over
+/// `[0, READY_DIM_IN]` (dim-in), holds across `[READY_DIM_IN, READY_HOLD_END]`,
+/// then eases back to 0 over `[READY_HOLD_END, 1]` (bloom-out / reveal).
+const READY_TOTAL_S: f32 = 1.15;
+/// Peak overlay alpha at the dim — "lights down to settle". Tuned by eye (A/B'd
+/// against 0.5): 0.65 + a deep cool indigo tint reads as a deliberate theatre
+/// "lights down → settle", where 0.5 navy-over-cream read as a flat beige-grey
+/// "disabled" wash. High enough to dim clearly without fully hiding the choir.
+const READY_DIM_PEAK: f32 = 0.65;
+/// End of the dim-in ramp (fraction of `READY_TOTAL_S`).
+const READY_DIM_IN: f32 = 0.42;
+/// End of the dim hold, where the bloom-out (reveal) ramp begins (fraction of
+/// `READY_TOTAL_S`).
+const READY_HOLD_END: f32 = 0.58;
+/// Overlay color: a deep, cool theatre indigo. Chosen over a cream/white bloom
+/// (white-on-cream is near-invisible) AND over the old near-INK navy 0x2b2c34
+/// (which, half-opaque over cream, flattened to a muddy beige-grey "disabled"
+/// wash). A deeper, cooler indigo reads as a deliberate "lights down → settle".
+const READY_OVERLAY: u32 = 0x1e1b3a;
 /// Sequence lengths UNDER which (or whenever `gentle`) a freshly-appended pad
 /// is rerolled so it never equals the immediately-preceding pad — same-critter-
 /// twice-in-a-row confuses beginners. At/beyond this length, repeats are allowed
@@ -98,10 +110,98 @@ const FLASH_IDLE: f32 = 99.0;
 const TGT_REPLAY: u32 = 10;
 const TGT_FINALE_REPLAY: u32 = 20;
 const TGT_FINALE_HOME: u32 = 21;
+/// Finale dance-party tap targets: one per dancing critter (0..4 shifted past
+/// the pad ids), the frog DJ, and the balloons. Distinct so a fast tap on a
+/// neighbour always lands (the per-target debounce only swallows a same-target
+/// re-fire).
+const TGT_DANCER_BASE: u32 = 30; // dancer i → TGT_DANCER_BASE + i
+const TGT_FINALE_FROG: u32 = 40;
+const TGT_BALLOON_BASE: u32 = 50; // balloon i → TGT_BALLOON_BASE + i
+
+// --- finale dance party -----------------------------------------------------
+
+/// The looping happy TUNE the choir sings during the Finale: pentatonic steps
+/// restricted to 0..=3 so every note maps to a visible critter (frog/duck/cat/
+/// owl, low→high). A short cheerful motif (8 beats) then a rest, on a loop, so
+/// the party has a voice without being relentless. Driven off the finale clock:
+/// each time the melody clock crosses a beat we play `memory_tone(step)` and
+/// make that critter sing+dance.
+const MELODY: [u8; 8] = [0, 2, 1, 3, 2, 3, 1, 0];
+/// Seconds per melody beat (the on-beat cadence of the tune).
+const BEAT_S: f32 = 0.36;
+/// A trailing rest after the 8-beat motif before it loops, so the tune breathes.
+const MELODY_REST_S: f32 = 0.8;
+/// Total melody loop period: the 8 beats + the trailing rest.
+const MELODY_LOOP_S: f32 = MELODY.len() as f32 * BEAT_S + MELODY_REST_S;
+/// How long a critter's auto-sing (driven by the melody) lights it for — a touch
+/// under one beat so each note reads as a distinct pop.
+const DANCER_SING_S: f32 = 0.30;
+/// How long a tapped critter's DANCE MOVE animates. A tap is ignored while a
+/// move is mid-flight (the per-critter timer < this); `DANCE_IDLE` (99) is idle.
+const DANCE_MOVE_S: f32 = 0.6;
+/// Parked dance-timer value meaning "this critter is idle" (no move in flight).
+const DANCE_IDLE: f32 = 99.0;
+/// How long the frog DJ's special flourish (hop + spin + ribbit) runs.
+const FROG_FLOURISH_S: f32 = 0.7;
+/// The non-escalating set of tapped-dance moves, cycled `mod` its length per
+/// critter so a tap is always errorless and never harder. Each is a small,
+/// distinct (dy, rot, squash) recipe driven by a half-sine impulse.
+const DANCE_MOVES: usize = 4;
+
+/// The party backdrop wash — a warm festive gradient distinct from the plain
+/// cream BG, so the finale unmistakably reads as a different (party) screen: a
+/// deep grape/violet up top fading to a warm amber glow near the dance floor.
+const PARTY_TOP: Color = palette::hex(0x4a2d6b); // deep party violet
+const PARTY_BOT: Color = palette::hex(0xffc97a); // warm amber floor glow
+/// Festive balloon colours: one RAINBOW index per balloon (spread across the
+/// ramp for a bright party spread).
+const BALLOON_COLOR_IDX: [usize; FINALE_BALLOONS] = [0, 1, 3, 5, 6];
+/// Dance-floor tile colours (two warm party hues, alternated checker-style).
+const FLOOR_TILE_A: Color = palette::hexa(0xff8fb3, 0.55); // pink
+const FLOOR_TILE_B: Color = palette::hexa(0x8fd0ff, 0.55); // sky-blue
+/// How many triangular pennants the bunting swag strings across the top.
+const BUNTING_FLAGS: usize = 12;
+/// A warm-amber spotlight glow (NOT near-white) for the DJ's spot — near-white
+/// glows merged into a flat pale wash over the violet floor.
+const SPOTLIGHT_AMBER: u32 = 0xfff0b8;
+/// Per-dancer spotlight radius as a multiple of the dancer's body radius (idle).
+/// Kept tight so adjacent dancers' halos don't merge into one centre-stage blob;
+/// it widens a touch on the beat (see the draw).
+const DANCER_GLOW_SCALE: f32 = 0.92;
+/// The DJ's spotlight radius as a multiple of `dj_r` — tightened from 1.4 so the
+/// host's spot reads discretely from the dancers' (no central washed-out blob).
+const DJ_GLOW_SCALE: f32 = 1.1;
+
+// Confetti burst recipes (piece count + horizontal spread), named for the file's
+// "every magic number named" style. Spreads are expressed in the local geometry
+// of each burst's source (pad / dance-unit / body radius) at the call site.
+/// The Reward (round-complete) star burst: a full spray to fill the frame.
+const REWARD_BURST_N: usize = 140;
+const REWARD_BURST_SPREAD_PAD: f32 = 1.1; // × `lay.pad`
+/// The Finale opening burst centred on the trophy.
+const FINALE_OPEN_BURST_N: usize = 180;
+const FINALE_OPEN_BURST_SPREAD_UNIT: f32 = 3.0; // × `fl.unit`
+/// The frog DJ's tap-flourish burst.
+const DJ_TAP_BURST_N: usize = 22;
+const DJ_TAP_BURST_SPREAD: f32 = 0.6; // × `dj_r`
+/// A dancer's tap burst.
+const DANCER_TAP_BURST_N: usize = 16;
+const DANCER_TAP_BURST_SPREAD: f32 = 0.5; // × the dancer's body radius
+/// A balloon's pop burst.
+const BALLOON_POP_BURST_N: usize = 14;
+const BALLOON_POP_BURST_SPREAD: f32 = 0.8; // × the balloon radius
 
 /// Confetti-rain pump cadence: one piece every `RAIN_INTERVAL_S` of accumulated
 /// time, shared by the Reward (new-best) escalation and the Finale.
 const RAIN_INTERVAL_S: f32 = 0.10;
+
+/// Salt added to the base `seed` when the constructor seeds the confetti stream,
+/// so confetti is independent of the sequence RNG (golden-ratio mix constant).
+const CONFETTI_SEED_SALT: u32 = 0x9E37_79B9;
+/// A DISTINCT salt for the restart() confetti reseed, so a restarted session's
+/// confetti differs from the first session's but is STILL derived from the base
+/// seed (never drawn from the sequence RNG, which would couple the two streams).
+const CONFETTI_RESTART_SALT: u32 = 0x85EB_CA6B;
 
 /// The reward/finale star-pop curve: `back_out(t / STAR_POP_DUR)` capped at
 /// `STAR_POP_CAP` for the springy overshoot that both share.
@@ -109,32 +209,30 @@ const STAR_POP_DUR: f32 = 0.45;
 const STAR_POP_CAP: f32 = 1.25;
 /// The reward (new-best) star is drawn at `star_r * pop * NEW_BEST_SCALE`.
 const NEW_BEST_SCALE: f32 = 1.5;
-/// The finale star is drawn at `star_r * FINALE_STAR_SCALE * pop * throb`.
-const FINALE_STAR_SCALE: f32 = 1.8;
 /// The finale throb is `1.0 + FINALE_THROB_AMP * pulse(..).max(0.0)`, peaking at
-/// `1.0 + FINALE_THROB_AMP` when the pulse tops out.
+/// `1.0 + FINALE_THROB_AMP` when the pulse tops out. (Applied only in the finale
+/// draw; the finale star is sized by `finale_layout`, not the gameplay `layout`.)
 const FINALE_THROB_AMP: f32 = 0.06;
-/// The LARGEST multiplier the drawn star radius can ever reach over its base
-/// `star_r`, across both celebrations at their animated PEAK. Reward new-best
-/// peaks at `STAR_POP_CAP * NEW_BEST_SCALE` = 1.875; the finale peaks at
-/// `FINALE_STAR_SCALE * STAR_POP_CAP * (1 + FINALE_THROB_AMP)` = 2.385 — the
-/// finale is the true max.
+/// The LARGEST multiplier the gameplay reward star's drawn radius can reach over
+/// its base `star_r`, at its animated PEAK: the new-best reward draws at
+/// `star_r * pop * NEW_BEST_SCALE`, so the peak is `STAR_POP_CAP * NEW_BEST_SCALE`
+/// = 1.875. (The FINALE star is sized independently by `finale_layout` and is NOT
+/// drawn through the gameplay `layout`, so it does not enter this cap.)
 ///
 /// The star is BOTTOM-ANCHORED (grows upward from a fixed lower edge above the
-/// heads), so its bottom never covers a face regardless of pop. layout() uses
+/// heads), so its bottom never covers a face regardless of pop. `layout()` uses
 /// this as the cap that keeps even the PEAK upward growth
-/// (`star_r * STAR_PEAK_SCALE` tall) inside the headroom above the anchor — so
-/// the celebratory pop is big yet never overruns the topbar.
-const STAR_PEAK_SCALE: f32 =
-    FINALE_STAR_SCALE * STAR_POP_CAP * (1.0 + FINALE_THROB_AMP);
+/// (`star_r * REWARD_STAR_PEAK_SCALE` tall) inside the headroom above the anchor
+/// — so the celebratory pop is big yet never overruns the topbar.
+const REWARD_STAR_PEAK_SCALE: f32 = STAR_POP_CAP * NEW_BEST_SCALE;
 
 #[derive(PartialEq, Clone, Copy)]
 enum Phase {
-    /// The count-in before Show: `t` = seconds in. All four critters pulse +
-    /// a soft ring expands on each of `READY_TICKS` beats at the fixed brisk
-    /// `READY_TICK_S` spacing, then a `READY_STILL_S` beat, then Show begins on
-    /// the downbeat. This is the only place ambient "it's starting" energy lives
-    /// before the task.
+    /// The get-ready cue before Show: `t` = seconds in. A fullscreen overlay
+    /// dims the still choir (lights down → settle), holds, then blooms back to a
+    /// full reveal (lights up → now), reaching alpha 0 at `READY_TOTAL_S` — when
+    /// Show begins so the first critter sings on the reveal. The critters stay
+    /// STILL: this cue is purely environmental, never character motion.
     Ready { t: f32 },
     /// Playing the sequence back to the kid: `idx` = which sequence step is
     /// lighting now, `t` = seconds into that step (on-beat then gap). Ambient
@@ -159,6 +257,9 @@ enum Phase {
 
 pub struct SingbackScene {
     db: Db,
+    /// The scene's base seed (from construction). Confetti is reseeded from this
+    /// (salted) on `restart()` so its stream stays independent of the sequence RNG.
+    seed: u32,
     rng: Mulberry32,
     state: sb::SingBackState,
     tuning: Tuning,
@@ -189,7 +290,33 @@ pub struct SingbackScene {
     tap_debounce: input::TapDebounce,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
+
+    // --- finale dance-party state (only meaningful in Phase::Finale) ---
+    /// Looping melody clock: seconds into the current `MELODY_LOOP_S` cycle. The
+    /// previous frame's value too, so a beat that the clock CROSSES this frame
+    /// fires exactly once (deterministic off `ctx.dt`).
+    melody_t: f32,
+    /// The last melody beat index we fired (`-1` until the first beat / after a
+    /// loop wrap), so each of the 8 beats triggers its note exactly once a loop.
+    melody_beat: i32,
+    /// Per-critter dance-move timer: seconds into the current tapped move, or
+    /// `DANCE_IDLE` when idle. A tap is ignored while this is < `DANCE_MOVE_S`.
+    dance_t: [f32; 4],
+    /// Per-critter dance-move kind (cycled `mod DANCE_MOVES` on each tap), and
+    /// the auto-sing timer (seconds since the melody last lit this critter, or
+    /// `DANCE_IDLE`), which drives the looping-tune sing pose independent of taps.
+    dance_kind: [usize; 4],
+    sing_t: [f32; 4],
+    /// Count of dancer taps accepted this finale (a --playtest reaction hook).
+    dancer_taps: u32,
+    /// The frog DJ's flourish timer (seconds in, or `DANCE_IDLE` when idle).
+    frog_t: f32,
+    /// Per-balloon "popped" flag; a popped balloon stops drawing + isn't tappable.
+    balloon_popped: [bool; FINALE_BALLOONS],
 }
+
+/// How many festive balloons bob over the dance floor (tappable → pop).
+const FINALE_BALLOONS: usize = 5;
 
 impl SingbackScene {
     pub fn new(db: Db, seed: u32, now: i64) -> SingbackScene {
@@ -211,6 +338,7 @@ impl SingbackScene {
         let sync = crate::net::SyncClient::new(db.clone(), "singback");
         let mut sc = SingbackScene {
             db,
+            seed,
             rng,
             state,
             tuning,
@@ -225,8 +353,16 @@ impl SingbackScene {
             tap_debounce: input::TapDebounce::new(),
             // Separate confetti stream, salted distinctly from `seed` so it is
             // genuinely independent (and never perturbs the sequence RNG).
-            confetti: crate::confetti::Confetti::new(seed.wrapping_add(0x9E37_79B9)),
+            confetti: crate::confetti::Confetti::new(seed.wrapping_add(CONFETTI_SEED_SALT)),
             sync,
+            melody_t: 0.0,
+            melody_beat: -1,
+            dance_t: [DANCE_IDLE; 4],
+            dance_kind: [0; 4],
+            sing_t: [DANCE_IDLE; 4],
+            dancer_taps: 0,
+            frog_t: DANCE_IDLE,
+            balloon_popped: [false; FINALE_BALLOONS],
         };
         // Apply the easy-stage no-repeat rule to the initial sequence too.
         sc.dedupe_initial();
@@ -330,7 +466,11 @@ impl SingbackScene {
         self.phase = Phase::Reward { t: 0.0 };
         // A fuller burst: more pieces over a wider radius so the reward fills
         // more of the frame (the star sits high now, so spread it generously).
-        self.confetti.burst(vec2(lay.star.x, lay.star.y), 140, lay.pad * 1.1);
+        self.confetti.burst(
+            vec2(lay.star.x, lay.star.y),
+            REWARD_BURST_N,
+            lay.pad * REWARD_BURST_SPREAD_PAD,
+        );
         if self.new_best {
             // Escalate: bigger fanfare + persist & push the new best.
             ctx.audio.level_up();
@@ -342,18 +482,32 @@ impl SingbackScene {
     }
 
     /// The closing payoff: a `FINALE_SPAN` round completed (always a new best).
-    /// Persists + pushes, then dances. Reseeds the debounce for the corner taps.
+    /// Persists + pushes, then throws a dance party. Reseeds the debounce for the
+    /// dancer / frog / balloon / corner taps; resets the melody + dance clocks so
+    /// the tune starts from the top and every dancer pops in fresh.
     fn enter_finale(&mut self, ctx: &Ctx) {
         self.phase = Phase::Finale { t: 0.0 };
         self.flash_pad = None;
         self.clear_flash();
         self.tap_debounce = input::TapDebounce::new();
+        // Reset the dance-party clocks so a restart-then-replay never inherits a
+        // stale beat / mid-move pose.
+        self.melody_t = 0.0;
+        self.melody_beat = -1;
+        self.dance_t = [DANCE_IDLE; 4];
+        self.dance_kind = [0; 4];
+        self.sing_t = [DANCE_IDLE; 4];
+        self.dancer_taps = 0;
+        self.frog_t = DANCE_IDLE;
+        self.balloon_popped = [false; FINALE_BALLOONS];
+        self.rain_acc = 0.0;
         ctx.audio.finale();
         self.save();
         self.sync.queue_push(&self.state.serialize_json(), ctx.now);
-        let f = &ctx.frame;
-        let lay = layout(f);
-        self.confetti.burst(vec2(lay.star.x, lay.star.y), 180, lay.pad * 1.4);
+        // The opening confetti burst centred on the dance floor (its OWN geometry,
+        // not the gameplay pads).
+        let fl = finale_layout(&ctx.frame);
+        self.confetti.burst(fl.trophy, FINALE_OPEN_BURST_N, fl.unit * FINALE_OPEN_BURST_SPREAD_UNIT);
     }
 
     /// Restart the session from the Finale: sequence back to the difficulty's
@@ -368,9 +522,11 @@ impl SingbackScene {
         self.streak = 0;
         self.new_best = false;
         self.rain_acc = 0.0;
-        // Fresh, independent confetti stream for the new session.
-        let cseed = (self.rng.next_f64() * u32::MAX as f64) as u32;
-        self.confetti = crate::confetti::Confetti::new(cseed);
+        // Fresh confetti stream for the new session, reseeded from the base seed
+        // (salted) — NOT from `self.rng`, so the sequence stream is untouched and
+        // confetti stays independent of gameplay (mirrors the constructor's salt).
+        self.confetti =
+            crate::confetti::Confetti::new(self.seed.wrapping_add(CONFETTI_RESTART_SALT));
         self.enter_ready();
     }
 
@@ -439,6 +595,15 @@ impl SingbackScene {
     pub(crate) fn replay_center(&self, f: &crate::layout::Frame) -> Vec2 {
         layout(f).replay
     }
+    /// Finale dance-party hooks (used by --playtest to drive + assert taps).
+    /// The on-floor center of dancer `i` (its tap target).
+    pub(crate) fn finale_dancer_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        finale_layout(f).dancers[i.min(3)].0
+    }
+    /// How many dancer taps have been accepted this finale (a reaction proof).
+    pub(crate) fn dancer_taps(&self) -> u32 {
+        self.dancer_taps
+    }
 }
 
 impl Scene for SingbackScene {
@@ -464,29 +629,13 @@ impl Scene for SingbackScene {
             }
         }
 
-        // The Finale is a full-screen celebration that draws NO topbar — handle
-        // it (its own corner replay/home) FIRST and return, so the invisible
-        // topbar's top-corner hit targets are never consulted during it (a
-        // top-left tap must NOT silently go Home / open parent over the dance).
-        if let Phase::Finale { t } = self.phase {
-            // A steady, gentle confetti rain over the dance.
-            self.pump_rain(ctx.dt, ctx.frame.w);
-            self.phase = Phase::Finale { t: t + ctx.dt };
-            let pt = ctx.pointer;
-            if pt.tapped() {
-                let (replay, home, br) = chrome::corner_buttons(&ctx.frame);
-                if input::hit_circle(pt.pos, replay.x, replay.y, br) {
-                    if self.tap_debounce.accept(TGT_FINALE_REPLAY, ctx.time) {
-                        self.restart();
-                    }
-                } else if input::hit_circle(pt.pos, home.x, home.y, br)
-                    && self.tap_debounce.accept(TGT_FINALE_HOME, ctx.time)
-                {
-                    self.sync.flush();
-                    return Nav::Home;
-                }
-            }
-            return Nav::Stay;
+        // The Finale is a full-screen dance party that draws NO topbar — handle
+        // it (its own corner replay/home + the interactive dancers) FIRST and
+        // return, so the invisible topbar's top-corner hit targets are never
+        // consulted during it (a top-left tap must NOT silently go Home / open
+        // parent over the dance).
+        if matches!(self.phase, Phase::Finale { .. }) {
+            return self.update_finale(ctx);
         }
 
         match chrome::handle_topbar(&chrome::topbar(&ctx.frame), ctx, &self.db) {
@@ -504,17 +653,17 @@ impl Scene for SingbackScene {
 
         match self.phase {
             Phase::Ready { t } => {
-                // Count-in: a soft audio tick on each of READY_TICKS beats at the
-                // fixed brisk READY_TICK_S spacing (a clear "ready-set-go", NOT
-                // scaled by difficulty), then a short still beat, then Show on the
-                // downbeat. The all-critter pulse + central ring are drawn off `t`.
+                // The dim-and-bloom get-ready cue: the choir stays still while a
+                // fullscreen overlay dims (settle) then blooms back (reveal). One
+                // subtle twinkle marks the start of the bloom (the reveal), so the
+                // cue has a single gentle voice — no rhythmic count. Show begins
+                // when the bloom resolves to full reveal, so the first note lands
+                // on the "now".
                 let prev = t;
                 let t = t + ctx.dt;
-                for k in 0..READY_TICKS {
-                    let beat = k as f32 * READY_TICK_S;
-                    if prev <= beat && t > beat {
-                        ctx.audio.tap();
-                    }
+                let bloom = READY_HOLD_END * READY_TOTAL_S;
+                if prev <= bloom && t > bloom {
+                    ctx.audio.twinkle();
                 }
                 if t >= READY_TOTAL_S {
                     self.phase = Phase::Show { idx: 0, t: 0.0 };
@@ -602,14 +751,15 @@ impl Scene for SingbackScene {
     fn draw(&mut self, ctx: &Ctx) {
         clear_background(palette::BG);
         let f = &ctx.frame;
-        let lay = layout(f);
 
-        // The Finale is its own full-screen celebration scene.
+        // The Finale is its own full-screen dance-party scene (its OWN geometry
+        // + backdrop — never the gameplay layout).
         if let Phase::Finale { t } = self.phase {
-            self.draw_finale(ctx, &lay, t);
+            self.draw_finale(ctx, t);
             return;
         }
 
+        let lay = layout(f);
         chrome::draw_topbar(&chrome::topbar(f), ctx);
 
         // The reward star — popped in the empty band ABOVE the choir so it
@@ -624,15 +774,20 @@ impl Scene for SingbackScene {
             draw_star_halo(lay.star.x, sy, r, 0.12, 1.5);
         }
 
-        // The count-in ring: a soft circle expanding+fading on each Ready beat,
-        // a non-text "it's starting now" pulse centered on the choir.
-        if let Phase::Ready { t } = self.phase {
-            self.draw_ready_ring(&lay, t);
-        }
-
         // The choir: four pads, each a glow ring + the critter in its pad color.
         for i in 0..4 {
             self.draw_pad(&lay, i);
+        }
+
+        // The get-ready cue: a fullscreen dim-and-bloom overlay OVER the still
+        // choir. Dims to settle, holds, then blooms back to a full reveal exactly
+        // as Show begins — a purely environmental "get ready → now" (no character
+        // motion). Drawn over the choir + topbar so the whole stage dims as one.
+        if let Phase::Ready { t } = self.phase {
+            let a = ready_overlay_alpha(t);
+            if a > 0.001 {
+                draw_rectangle(0.0, 0.0, f.w, f.h, palette::hexa(READY_OVERLAY, a));
+            }
         }
 
         // Progress pips + the replay affordance (Input only). No text anywhere —
@@ -665,10 +820,12 @@ impl SingbackScene {
             if self.sequence.get(got).copied() == Some(i as u8));
 
         // Pose: pop + sing when flashing; wiggle when teaching; staggered hop in
-        // Reward; a synchronized count-in pulse in Ready; a ONE-SHOT welcome
-        // bounce the instant Input opens — then everything sits perfectly still
-        // (no ambient breathing/blink during the memory task: only the lit pad
-        // in Show, or the just-tapped pad in Input, ever moves).
+        // Reward; a ONE-SHOT welcome bounce the instant Input opens — then
+        // everything sits perfectly still (no ambient breathing/blink during the
+        // memory task: only the lit pad in Show, or the just-tapped pad in Input,
+        // ever moves). Ready has NO pose: the critters stay neutral/still while
+        // the environmental dim-and-bloom overlay (drawn in draw()) does the cue,
+        // so the get-ready beat never reads as part of the sequence.
         let mut pose = draw::CritterPose::default();
         let mut glow = 0.0_f32;
         match self.phase {
@@ -680,18 +837,6 @@ impl SingbackScene {
                 pose.sing = hop;
                 pose.sy = 1.0 + hop * 0.12;
                 pose.sx = 1.0 - hop * 0.06;
-            }
-            Phase::Ready { t } => {
-                // Synchronized soft pulse on each count-in beat (all four in
-                // unison — "we're about to start together"), on the fixed brisk
-                // tick spacing. Pulses only while the ticks are still firing.
-                let phase_t = (t % READY_TICK_S) / READY_TICK_S; // 0..1 in the beat
-                let env = (1.0 - phase_t).powi(2); // sharp attack, soft decay
-                let active = t < READY_TICKS as f32 * READY_TICK_S;
-                let p = if active { env } else { 0.0 };
-                pose.sy = 1.0 + 0.10 * p;
-                pose.sx = 1.0 - 0.05 * p;
-                glow = 0.16 * p;
             }
             Phase::Input { t, .. } if !lit && t < TURN_BOUNCE_DUR => {
                 // One-shot welcome bounce: all four hop once, in unison, then
@@ -761,64 +906,300 @@ impl SingbackScene {
         }
     }
 
-    /// The count-in ring: on each Ready beat a soft circle expands from the
-    /// choir center and fades — a non-text "ready… ready… NOW" metronome that
-    /// matches the audio tick + the synchronized critter pulse.
-    fn draw_ready_ring(&self, lay: &SLayout, t: f32) {
-        if t >= READY_TICKS as f32 * READY_TICK_S {
-            return; // the still beat before the downbeat: no ring
+    /// Drive the Finale dance party for one frame: advance the looping melody
+    /// (firing each beat's note + sing once), tick every per-critter dance + the
+    /// frog flourish, rain confetti, and handle taps — dancers sing+dance, the
+    /// frog DJ flourishes, balloons pop, corners replay/home. Errorless +
+    /// non-escalating: every tap reacts, none is ever "wrong". Handled FIRST in
+    /// `update()` (before the topbar) so the invisible topbar corners stay dead.
+    fn update_finale(&mut self, ctx: &Ctx) -> Nav {
+        let Phase::Finale { t } = self.phase else { return Nav::Stay };
+        let dt = ctx.dt;
+
+        // A steady, gentle confetti rain over the dance.
+        self.pump_rain(dt, ctx.frame.w);
+
+        // Tick the per-critter dance moves + auto-sing + the frog flourish (all
+        // dt-driven; `DANCE_IDLE` parks a timer when idle so it never wraps).
+        for i in 0..4 {
+            if self.dance_t[i] < DANCE_MOVE_S {
+                self.dance_t[i] += dt;
+            } else {
+                self.dance_t[i] = DANCE_IDLE;
+            }
+            if self.sing_t[i] < DANCER_SING_S {
+                self.sing_t[i] += dt;
+            } else {
+                self.sing_t[i] = DANCE_IDLE;
+            }
         }
-        let phase_t = (t % READY_TICK_S) / READY_TICK_S; // 0..1 within the beat
-        let cx = lay.star.x;
-        let cy = (lay.pads[0].y + lay.pads.last().unwrap().y) / 2.0;
-        let base = lay.pad * 0.6;
-        let radius = base + phase_t * base * 1.4;
-        let alpha = (1.0 - phase_t) * 0.45;
-        let col = Color { a: alpha, ..palette::RAINBOW[3] };
-        draw::arc(cx, cy, radius, 0.0, std::f32::consts::TAU, lay.pad * 0.06, col);
+        if self.frog_t < FROG_FLOURISH_S {
+            self.frog_t += dt;
+        } else {
+            self.frog_t = DANCE_IDLE;
+        }
+
+        // Advance the looping melody clock. Each beat the clock CROSSES fires its
+        // note + lights that critter exactly once; the trailing rest gives the
+        // tune room to breathe before it loops.
+        let prev = self.melody_t;
+        let mut mt = self.melody_t + dt;
+        if mt >= MELODY_LOOP_S {
+            mt -= MELODY_LOOP_S;
+            self.melody_beat = -1; // a new loop: re-arm every beat
+        }
+        self.melody_t = mt;
+        // Fire any motif beat whose onset lies in the half-open window [prev, mt)
+        // this frame (in-loop only — never during the rest tail). Half-open at the
+        // FRONT (`prev <= onset`) so beat 0's onset of 0.0 fires on the very first
+        // frame of a loop (prev == 0.0) — a strict `prev < onset` would drop the
+        // opening downbeat on loop 1. The `melody_beat < beat` guard below stops a
+        // beat re-firing within the loop, so the inclusive front never double-fires.
+        // On a wrap, `prev > mt`, so only the post-wrap window is checked (the
+        // pre-wrap tail was the rest).
+        for (beat, &step_u8) in MELODY.iter().enumerate() {
+            let onset = beat as f32 * BEAT_S;
+            let crossed = if prev <= mt {
+                prev <= onset && onset < mt
+            } else {
+                onset < mt // after a wrap
+            };
+            if crossed && self.melody_beat < beat as i32 {
+                self.melody_beat = beat as i32;
+                let step = step_u8 as usize;
+                ctx.audio.memory_tone(step as u32);
+                // The auto-sing pose for that critter (independent of taps).
+                self.sing_t[step] = 0.0;
+            }
+        }
+
+        self.phase = Phase::Finale { t: t + dt };
+
+        // Taps: dancers / frog DJ / balloons / corners. Gated per-target through
+        // the debounce so one press never double-fires the same thing.
+        let pt = ctx.pointer;
+        if pt.tapped() {
+            let fl = finale_layout(&ctx.frame);
+            let (replay, home, br) = chrome::corner_buttons(&ctx.frame);
+            if input::hit_circle(pt.pos, replay.x, replay.y, br) {
+                if self.tap_debounce.accept(TGT_FINALE_REPLAY, ctx.time) {
+                    self.restart();
+                }
+                return Nav::Stay;
+            }
+            if input::hit_circle(pt.pos, home.x, home.y, br) {
+                if self.tap_debounce.accept(TGT_FINALE_HOME, ctx.time) {
+                    self.sync.flush();
+                    return Nav::Home;
+                }
+                return Nav::Stay;
+            }
+            // Frog DJ: a special flourish (ribbit + hop/spin). The frog isn't one
+            // of the four dancers — it's the host, on its own spot + timer.
+            if input::hit_circle(pt.pos, fl.dj.x, fl.dj.y, fl.dj_r * 1.2)
+                && self.frog_t >= FROG_FLOURISH_S
+                && self.tap_debounce.accept(TGT_FINALE_FROG, ctx.time)
+            {
+                self.frog_t = 0.0;
+                ctx.audio.frog();
+                self.confetti.burst(
+                    vec2(fl.dj.x, fl.dj.y - fl.dj_r),
+                    DJ_TAP_BURST_N,
+                    fl.dj_r * DJ_TAP_BURST_SPREAD,
+                );
+                return Nav::Stay;
+            }
+            // A dancer: sing its note + a fresh DANCE MOVE (cycled, non-escalating)
+            // + a small burst. Ignored while that critter's move is mid-flight.
+            for i in 0..4 {
+                let (c, rr) = fl.dancers[i];
+                if input::hit_circle(pt.pos, c.x, c.y, rr * 1.15)
+                    && self.dance_t[i] >= DANCE_MOVE_S
+                    && self.tap_debounce.accept(TGT_DANCER_BASE + i as u32, ctx.time)
+                {
+                    self.dance_t[i] = 0.0;
+                    self.dance_kind[i] = (self.dance_kind[i] + 1) % DANCE_MOVES;
+                    self.sing_t[i] = 0.0;
+                    self.dancer_taps += 1;
+                    ctx.audio.memory_tone(i as u32);
+                    self.confetti.burst(
+                        vec2(c.x, c.y - rr),
+                        DANCER_TAP_BURST_N,
+                        rr * DANCER_TAP_BURST_SPREAD,
+                    );
+                    return Nav::Stay;
+                }
+            }
+            // A balloon: pop it (confetti + twinkle); it stops drawing afterwards.
+            for i in 0..FINALE_BALLOONS {
+                if self.balloon_popped[i] {
+                    continue;
+                }
+                let (bc, brad) = fl.balloons[i];
+                if input::hit_circle(pt.pos, bc.x, bc.y, brad * 1.2)
+                    && self.tap_debounce.accept(TGT_BALLOON_BASE + i as u32, ctx.time)
+                {
+                    self.balloon_popped[i] = true;
+                    ctx.audio.twinkle();
+                    self.confetti.burst(bc, BALLOON_POP_BURST_N, brad * BALLOON_POP_BURST_SPREAD);
+                    return Nav::Stay;
+                }
+            }
+        }
+        Nav::Stay
     }
 
-    /// The Finale: a full-screen celebration — confetti rain, a big trophy/star
-    /// pop, all four critters dancing on a loop, with corner replay + home.
-    fn draw_finale(&self, ctx: &Ctx, lay: &SLayout, t: f32) {
+    /// The Finale: a full-screen DANCE PARTY — a festive backdrop wash, a glowing
+    /// dance floor of tiles, bobbing balloons, the trophy star, the four critters
+    /// scattered + dancing across the floor, the frog DJ as host, confetti rain,
+    /// and corner replay/home. A DISTINCT arrangement from the gameplay row/grid
+    /// (its own [`FinaleLayout`] geometry, never `lay.pads`).
+    fn draw_finale(&self, ctx: &Ctx, t: f32) {
         let f = &ctx.frame;
+        let fl = finale_layout(f);
 
-        // A big gold star/trophy pop high in the frame, with a soft halo and a
-        // gentle ongoing throb so it never goes static.
+        // Festive backdrop wash (distinct from the plain cream BG): a warm party
+        // gradient, deep at the top fading to a glow near the floor.
+        draw::vgradient(0.0, 0.0, f.w, f.h, PARTY_TOP, PARTY_BOT);
+
+        // Bunting strung high across the top (a row of little triangular flags on
+        // a gentle catenary), gently swaying off the finale clock. Reuses the
+        // shared train bunting so the festive dressing never drifts between games.
+        draw::bunting(0.0, f.w, fl.bunting_y, fl.bunting_drop, BUNTING_FLAGS, t);
+
+        // The dance floor: a glowing ellipse pool under a band of alternating
+        // rounded tiles, so the critters clearly stand ON a floor (not a row).
+        let floor_glow = palette::hexa(0xffe9a8, 0.35);
+        draw::fill_ellipse(f.w / 2.0, fl.floor_y, fl.floor_rx, fl.floor_ry, 0.0, floor_glow);
+        draw_dance_floor(&fl, t);
+
+        // The trophy star, bottom-anchored above the dancers, with a tight bright
+        // core + a few radiating sparkle points + a gentle throb so it never goes
+        // static. Over the dark party backdrop the old stacked faint-gold discs
+        // browned out to a dull tan ring, so the halo is now a single tight bright
+        // core plus radiating twinkles — the star reads as radiant GOLD, not muddy.
         let pop = anim::back_out((t / STAR_POP_DUR).clamp(0.0, 1.0)).min(STAR_POP_CAP);
         let throb = 1.0 + FINALE_THROB_AMP * anim::pulse(t, 0.9).max(0.0);
-        let r = lay.star_r * FINALE_STAR_SCALE * pop * throb;
-        // Bottom-anchored: grow UPWARD from the fixed lower edge so even the big
-        // finale pop never drops onto the dancers' faces.
-        let sy = lay.star_bottom - r;
-        draw_star_halo(lay.star.x, sy, r, 0.14, 1.6);
+        let r = fl.star_r * pop * throb;
+        draw_star_spotlight(fl.trophy.x, fl.trophy.y, r, t);
 
-        // The dancing choir: all four hop on a continuous staggered loop.
-        for (i, c) in lay.pads.iter().enumerate() {
-            let rr = lay.pad * 0.42;
+        // Bobbing balloons (festive RAINBOW colours), behind the dancers so a tap
+        // burst reads in front. Each bobs on its own phase off the party clock.
+        for (i, (&(bc, brad), &ci)) in fl.balloons.iter().zip(BALLOON_COLOR_IDX.iter()).enumerate() {
+            if self.balloon_popped[i] {
+                continue;
+            }
+            let bob = (t * 1.3 + i as f32 * 1.7).sin() * brad * 0.18;
+            draw_balloon(bc.x, bc.y + bob, brad, fl.floor_y, palette::RAINBOW[ci]);
+        }
+
+        // The dancers: the four critters scattered across the floor at varied
+        // positions + sizes, each on an idle sway PLUS its tapped move + its
+        // melody-driven sing pop. The frog is NOT here — it's the DJ host.
+        for i in 0..4 {
+            let (c, rr) = fl.dancers[i];
             let color = palette::RAINBOW[PAD_COLOR_IDX[i]];
-            let ph = t * 5.0 - i as f32 * 0.5;
-            let hop = ph.sin().max(0.0);
-            let pose = draw::CritterPose {
-                dy: -hop * rr * 0.45,
-                sing: hop,
-                sy: 1.0 + hop * 0.12,
-                sx: 1.0 - hop * 0.06,
-                rot: (t * 3.0 + i as f32).sin() * 0.06,
-                ..Default::default()
-            };
-            // A warm glow under each dancer.
-            let glow = Color::new(color.r, color.g, color.b, 0.30 + 0.25 * hop);
-            draw::disc(c.x, c.y + pose.dy, rr * 1.4, glow);
+            let pose = self.dancer_pose(i, rr, t);
+            // A tight per-dancer spotlight under each, brightening on the beat. Kept
+            // SMALL (was rr*1.2 — adjacent halos merged into one washed-out blob at
+            // centre stage) so each dancer reads as separately spotlit, not a wash.
+            let lift = (-pose.dy / (rr * 0.5)).clamp(0.0, 1.0);
+            let glow = Color::new(color.r, color.g, color.b, 0.24 + 0.20 * lift);
+            draw::disc(c.x, c.y + rr * 0.55, rr * (DANCER_GLOW_SCALE + 0.10 * lift), glow);
             draw::critter(CRITTERS[i], c.x, c.y, rr, color, &pose);
         }
 
+        // The frog DJ (the host) — prominent on its spot, with a TIGHT warm-amber
+        // spotlight (was dj_r*1.4 near-white → it merged with the dancer halos into
+        // one pale centre blob; now dj_r*1.1 + a touch fainter so it reads as the
+        // host's own discrete spot). Headphones + a party hat make it visibly RUN
+        // THE MUSIC (a green frog with a hat alone read as a 5th choir frog).
+        let djp = self.frog_dj_pose(fl.dj_r, t);
+        let dj_glow = palette::hexa(SPOTLIGHT_AMBER, 0.34 + 0.16 * (t * 2.0).sin().abs());
+        draw::disc(fl.dj.x, fl.dj.y + fl.dj_r * 0.55, fl.dj_r * DJ_GLOW_SCALE, dj_glow);
+        draw::frog(fl.dj.x, fl.dj.y, fl.dj_r, palette::RAINBOW[3], djp);
+        draw::frog_party_hat(fl.dj.x, fl.dj.y, fl.dj_r, djp, palette::RAINBOW[0]);
+        draw::frog_headphones(fl.dj.x, fl.dj.y, fl.dj_r, djp, palette::RAINBOW[5]);
+
         self.confetti.draw();
 
-        // Corner buttons (replay + home), placed identically to the other
-        // finale scenes so the kid always finds them.
+        // Corner buttons (replay + home), placed identically to the other finale
+        // scenes so the kid always finds them.
         let (replay, home, br) = chrome::corner_buttons(f);
         chrome::draw_corner_buttons(replay, home, br);
+    }
+
+    /// The pose for dancer `i`: a continuous idle sway (so the party never goes
+    /// static), its melody-driven SING pop, and — when tapped — a `dance_kind`
+    /// move layered on top via a half-sine impulse.
+    fn dancer_pose(&self, i: usize, rr: f32, t: f32) -> draw::CritterPose {
+        // Idle sway: a gentle staggered bob + lean so even untouched dancers move.
+        let sway = (t * 2.2 - i as f32 * 0.7).sin();
+        let mut pose = draw::CritterPose {
+            dy: -sway.max(0.0) * rr * 0.10,
+            rot: (t * 1.6 + i as f32).sin() * 0.05,
+            sy: 1.0 + 0.04 * sway,
+            sx: 1.0 - 0.02 * sway,
+            ..Default::default()
+        };
+        // Melody / tap sing pop (mouth open + a little lift).
+        if self.sing_t[i] < DANCER_SING_S {
+            let s = 1.0 - self.sing_t[i] / DANCER_SING_S;
+            pose.sing = s;
+            pose.dy -= s * rr * 0.16;
+            pose.sy += s * 0.12;
+            pose.sx -= s * 0.06;
+        }
+        // A tapped DANCE MOVE: a distinct (hop / spin / shimmy / squash) recipe.
+        if self.dance_t[i] < DANCE_MOVE_S {
+            let p = self.dance_t[i] / DANCE_MOVE_S;
+            let imp = (p * std::f32::consts::PI).sin();
+            match self.dance_kind[i] {
+                0 => {
+                    // Big hop.
+                    pose.dy -= imp * rr * 0.5;
+                    pose.sy += imp * 0.12;
+                }
+                1 => {
+                    // Twist/spin (a quick rotation that returns to upright).
+                    pose.rot += imp * 0.5;
+                    pose.dy -= imp * rr * 0.18;
+                }
+                2 => {
+                    // Side shimmy (two little lateral leans) + small lift.
+                    pose.rot += (p * std::f32::consts::PI * 4.0).sin() * 0.18 * imp;
+                    pose.dy -= imp * rr * 0.12;
+                }
+                _ => {
+                    // Squash-and-stretch bounce.
+                    pose.sy += imp * 0.28;
+                    pose.sx -= imp * 0.16;
+                    pose.dy -= imp * rr * 0.10;
+                }
+            }
+        }
+        pose
+    }
+
+    /// The frog DJ's pose: an idle host bob + a tap-triggered hop/spin flourish.
+    fn frog_dj_pose(&self, r: f32, t: f32) -> draw::FrogPose {
+        let bob = (t * 2.6).sin();
+        let mut pose = draw::FrogPose {
+            dy: -bob.max(0.0) * r * 0.08,
+            rot: (t * 1.4).sin() * 0.05,
+            sy: 1.0 + 0.04 * bob,
+            sx: 1.0 - 0.02 * bob,
+            ..Default::default()
+        };
+        if self.frog_t < FROG_FLOURISH_S {
+            let p = self.frog_t / FROG_FLOURISH_S;
+            let imp = (p * std::f32::consts::PI).sin();
+            pose.dy -= imp * r * 0.55; // a big hop
+            pose.rot += imp * 0.6; // with a spin
+            pose.tongue = imp; // tongue-out ribbit
+            pose.blink = (imp * 0.5).min(0.5);
+        }
+        pose
     }
 }
 
@@ -904,30 +1285,31 @@ fn layout(f: &crate::layout::Frame) -> SLayout {
     let btn_r = (f.icon_btn() / 2.0 * 1.5).min(region_h).max(36.0);
     let replay = vec2(f.w / 2.0, region_bot - btn_r - f.safe.bottom.max(6.0));
 
-    // The reward/finale star lives in the empty band ABOVE the choir row
-    // (between the pip strip and the top critter heads) so it celebrates WITHOUT
-    // ever occluding faces — the top heads sit ~pad/2 above each pad center.
+    // The REWARD star lives in the empty band ABOVE the choir row (between the pip
+    // strip and the top critter heads) so it celebrates WITHOUT ever occluding
+    // faces — the top heads sit ~pad/2 above each pad center. (The finale star is
+    // sized by `finale_layout`, not here — this layout serves only gameplay.)
     //
-    // The star is drawn at `star_r * pop * scale`, peaking at
-    // `star_r * STAR_PEAK_SCALE` (the finale's springy throb is the worst case).
+    // The reward star is drawn at `star_r * pop * scale`, peaking at
+    // `star_r * REWARD_STAR_PEAK_SCALE` (the new-best pop is the worst case).
     // Rather than shrink the RESTING star so its PEAK fits (which left the star
     // tiny on short bands — phone landscape, iPad portrait), the star is
     // BOTTOM-ANCHORED: its lower edge is pinned at `star_bottom` (just above the
     // heads) and the pop grows it UPWARD. So a resting star fills the band big,
-    // and at ANY pop magnitude its bottom never dips onto a face. `star_r` is
-    // then sized so even the PEAK upward growth (`star_r * STAR_PEAK_SCALE` tall)
+    // and at ANY pop magnitude its bottom never dips onto a face. `star_r` is then
+    // sized so even the PEAK upward growth (`star_r * REWARD_STAR_PEAK_SCALE` tall)
     // clears the pips above — the band above the anchor bounds the peak radius.
     let heads_top = pads[0].y - pad * 0.5;
     // Pin the star's bottom just above the heads; the pop grows it upward only.
     let star_bottom = heads_top - pad * 0.06; // a small margin above the heads
     // The headroom above the anchor, up to the top of the play region (the pips
-    // don't draw during Reward/Finale, so the star may rise through that strip,
-    // but it must NOT overrun the topbar). The PEAK star (diameter
-    // `2 * star_r * STAR_PEAK_SCALE`) must fit that headroom; that bound, the
-    // preferred `pad`-relative size, and a floor pick the resting radius.
+    // don't draw during Reward, so the star may rise through that strip, but it
+    // must NOT overrun the topbar). The PEAK star (diameter
+    // `2 * star_r * REWARD_STAR_PEAK_SCALE`) must fit that headroom; that bound,
+    // the preferred `pad`-relative size, and a floor pick the resting radius.
     let headroom = (star_bottom - region_top).max(0.0);
     let star_r = (pad * 0.5)
-        .min(headroom / (2.0 * STAR_PEAK_SCALE))
+        .min(headroom / (2.0 * REWARD_STAR_PEAK_SCALE))
         .max(pad * 0.12);
     // Resting center: bottom-anchored at rest (pop = 1). Confetti bursts from
     // here; the Reward/Finale draws recompute the center from `star_bottom` as
@@ -942,6 +1324,185 @@ fn pad_center(f: &crate::layout::Frame, i: usize) -> Vec2 {
     layout(f).pads[i.min(3)]
 }
 
+// --- finale dance-party layout ----------------------------------------------
+
+/// The Finale dance-party geometry — a DISTINCT arrangement from the gameplay
+/// row/grid (the achievement made a hero): the four critters SCATTERED at varied
+/// positions + sizes across a dance-floor band in a loose arc, the frog DJ host
+/// front-and-centre + larger, balloons bobbing above, bunting up top, and a
+/// trophy star high. All viewport-derived (vw/vh/vmin + safe area) so it fits
+/// every form factor (phone-landscape 844×390 is the tight case).
+struct FinaleLayout {
+    /// A base unit (≈ a dancer's body radius) the whole scene scales from.
+    unit: f32,
+    /// The four dancers (center, body radius), scattered across the floor in a
+    /// loose arc at VARIED sizes — index 0..4 maps frog→duck→cat→owl colours, but
+    /// the FROG critter art is reused as the DJ; the four dancers are the choir.
+    dancers: [(Vec2, f32); 4],
+    /// The frog DJ host (center + larger body radius) — the hero of the party.
+    dj: Vec2,
+    dj_r: f32,
+    /// The festive balloons (center + radius), bobbing above the floor.
+    balloons: [(Vec2, f32); FINALE_BALLOONS],
+    /// The dance-floor ellipse: vertical center + radii (the band the dancers
+    /// stand on), plus the tile band's row count for the checker tiles.
+    floor_y: f32,
+    floor_rx: f32,
+    floor_ry: f32,
+    /// The trophy star center (bottom-anchored above the dancers) + base radius.
+    trophy: Vec2,
+    star_r: f32,
+    /// Bunting line: the y the flags hang from + how far the lowest dips.
+    bunting_y: f32,
+    bunting_drop: f32,
+}
+
+fn finale_layout(f: &crate::layout::Frame) -> FinaleLayout {
+    let (w, h) = (f.w, f.h);
+    let vmin = f.vmin(1.0);
+    // Base dancer radius: a generous-but-clamped fraction of the smaller dim, so
+    // the dancers are big on tablets yet still fit the short phone-landscape band.
+    let unit = (vmin * 0.085).clamp(34.0, 96.0);
+
+    // The dance floor sits in the lower-middle band, lifted off the very bottom so
+    // the corner buttons + safe inset stay clear.
+    let floor_y = h * 0.72 - f.safe.bottom * 0.5;
+    let floor_rx = (w * 0.46).min(w / 2.0 - 12.0);
+    let floor_ry = (h * 0.12).clamp(unit * 0.7, unit * 1.6);
+
+    // The frog DJ: front-and-centre on the floor, the largest character (the
+    // hero), standing a touch ahead (lower) so it reads clearly in FRONT of the
+    // back dancers rather than overlapping them.
+    let dj_r = unit * 1.3;
+    let dj = vec2(w * 0.5, floor_y + dj_r * 0.18);
+
+    // The four dancers scattered in a loose arc ACROSS the floor at VARIED
+    // positions + sizes (clearly not the even gameplay row/grid). The DJ owns the
+    // centre-front, so the back pair (1,2) sit HIGHER and further out and the
+    // flanks (0,3) sit low + wide — a fanned cluster, never an even row.
+    // (fx as a fraction of width, fy lift above floor_y in units, size multiplier)
+    let specs = [
+        (0.13_f32, 0.20_f32, 1.05_f32), // far left, low + big
+        (0.32, 1.35, 0.78),             // left-back, high + small
+        (0.68, 1.35, 0.82),             // right-back, high
+        (0.87, 0.20, 1.08),             // far right, low + big
+    ];
+    // On short landscape (phone) the top band is doing star + balloons + bunting
+    // at once; pull the high back pair (1,2) DOWN so the back dancers don't crowd
+    // under the bunting/balloon stack. A no-op on tall viewports.
+    let short_land = !f.is_portrait() && h < 480.0;
+    let back_lift_scale = if short_land { 0.72 } else { 1.0 };
+    let mut dancers = [(vec2(0.0, 0.0), unit); 4];
+    for (i, &(fx, lift, sz)) in specs.iter().enumerate() {
+        let rr = unit * sz;
+        let cx = w * fx;
+        // Only the high back pair gets pulled down; the low flanks stay put.
+        let lift = if lift > 1.0 { lift * back_lift_scale } else { lift };
+        let cy = floor_y - lift * unit;
+        dancers[i] = (vec2(cx, cy), rr);
+    }
+
+    // Balloons bob in the upper band, spread across the width on a gentle arc, at
+    // slightly varied sizes for a festive cluster (kept below the bunting).
+    let brad = (unit * 0.55).clamp(20.0, 64.0);
+    let bal_band = (h * 0.30).max(brad * 2.0 + f.safe.top);
+    let bspecs = [
+        (0.12_f32, 0.55_f32, 1.0_f32),
+        (0.30, 0.20, 0.85),
+        (0.50, 0.62, 1.1),
+        (0.70, 0.18, 0.9),
+        (0.88, 0.52, 1.0),
+    ];
+    let mut balloons = [(vec2(0.0, 0.0), brad); FINALE_BALLOONS];
+    for (i, &(fx, fy, sz)) in bspecs.iter().enumerate() {
+        balloons[i] = (vec2(w * fx, bal_band * (0.45 + fy * 0.45)), brad * sz);
+    }
+
+    // The trophy star, bottom-anchored above the dancers (in the gap below the
+    // balloon cluster), sized so its throbbing pop never overruns the bunting.
+    let dancer_top = dancers
+        .iter()
+        .map(|(c, r)| c.y - r * 1.6)
+        .fold(f32::INFINITY, f32::min);
+    let star_bottom = dancer_top - unit * 0.2;
+    // Hang the bunting a touch higher + shallower on short landscape so the top
+    // band isn't bunting + balloons + star all at once.
+    let bunting_y = (f.safe.top + h * if short_land { 0.04 } else { 0.06 }).max(brad * 1.2);
+    let bunting_drop = h * if short_land { 0.04 } else { 0.05 };
+    let headroom = (star_bottom - (bunting_y + bunting_drop + unit * 0.4)).max(unit * 0.6);
+    let star_r = (unit * 1.1).min(headroom / (2.0 * STAR_POP_CAP)).max(unit * 0.45);
+    let trophy = vec2(w * 0.5, star_bottom - star_r);
+
+    FinaleLayout {
+        unit,
+        dancers,
+        dj,
+        dj_r,
+        balloons,
+        floor_y,
+        floor_rx,
+        floor_ry,
+        trophy,
+        star_r,
+        bunting_y,
+        bunting_drop,
+    }
+}
+
+/// A festive balloon: a teardrop body + a tiny knot + a thin curving string down
+/// toward the floor. Local to the finale (not reused elsewhere). RAINBOW-coloured.
+fn draw_balloon(cx: f32, cy: f32, r: f32, floor_y: f32, color: Color) {
+    // The string: a gentle S-curve from the knot down toward the floor.
+    let knot_y = cy + r * 1.08;
+    let end_y = (cy + r * 4.0).min(floor_y);
+    let mid = vec2(cx + r * 0.35, (knot_y + end_y) / 2.0);
+    draw::stroke_path(
+        &[vec2(cx, knot_y), mid, vec2(cx - r * 0.12, end_y)],
+        (r * 0.06).max(1.5),
+        palette::hexa(0x6f6e77, 0.7),
+    );
+    // The body: a slightly tall ellipse, with a soft highlight + a darker base.
+    draw::fill_ellipse(cx, cy, r * 0.86, r * 1.04, 0.0, color);
+    let hi = palette::hexa(0xffffff, 0.35);
+    draw::fill_ellipse(cx - r * 0.28, cy - r * 0.34, r * 0.24, r * 0.34, 0.0, hi);
+    // The knot: a tiny triangle/disc at the base.
+    draw::disc(cx, knot_y, r * 0.12, color);
+}
+
+/// The dance floor's checker tiles: a band of alternating rounded-rect tiles
+/// across the floor ellipse, with a subtle parallax shimmer off the party clock.
+/// Local to the finale.
+fn draw_dance_floor(fl: &FinaleLayout, t: f32) {
+    let cols = 7usize;
+    let rows = 3usize;
+    let band_w = fl.floor_rx * 1.7;
+    let band_h = fl.floor_ry * 1.5;
+    let x0 = fl.dj.x - band_w / 2.0;
+    let y0 = fl.floor_y - band_h * 0.35;
+    let tw = band_w / cols as f32;
+    let th = band_h / rows as f32;
+    let gap = tw * 0.12;
+    for row in 0..rows {
+        for col in 0..cols {
+            // Tiles narrow toward the back (a cheap perspective) — back rows inset.
+            let inset = row as f32 * tw * 0.18;
+            let x = x0 + inset + col as f32 * tw;
+            let bw = tw - inset * 2.0 / cols as f32;
+            if bw <= gap {
+                continue;
+            }
+            let y = y0 + row as f32 * th;
+            // The checker, with a slow shimmer that flips the parity over time.
+            let lit = (row + col + (t * 1.5) as usize).is_multiple_of(2);
+            let base = if lit { FLOOR_TILE_A } else { FLOOR_TILE_B };
+            // Back rows fade a touch (depth).
+            let a = base.a * (1.0 - row as f32 * 0.18);
+            let col_c = Color { a, ..base };
+            draw::rounded_rect(x + gap / 2.0, y + gap / 2.0, bw - gap, th - gap, th * 0.18, col_c);
+        }
+    }
+}
+
 /// The reward/finale gold star with its soft halo: a faint gold disc behind a
 /// solid gold star of radius `r`. Shared by Reward + Finale so the two never
 /// drift. `halo_alpha`/`halo_scale` tune the wash (Finale runs a touch bigger).
@@ -951,13 +1512,66 @@ fn draw_star_halo(x: f32, y: f32, r: f32, halo_alpha: f32, halo_scale: f32) {
     draw::star(x, y, r, palette::GOLD);
 }
 
+/// The finale trophy star, drawn to read as RADIANT GOLD over the dark violet
+/// party backdrop. The old stacked faint-gold discs browned out to a dull tan
+/// ring there, so this draws a single TIGHT bright core plus a few radiating
+/// sparkle points (a slow twinkle on `t`) behind the solid gold star — light
+/// that shines outward, not a flat wash that muddies. `t` only spins/twinkles
+/// the sparkles; the star size is the caller's `r`.
+fn draw_star_spotlight(x: f32, y: f32, r: f32, t: f32) {
+    // Radiating sparkle points: small bright twinkles spoked around the star,
+    // slowly rotating + breathing so it never goes static. NO faint backing disc:
+    // a half-opaque gold disc over the violet→amber backdrop browned out to a dull
+    // tan ring, so the radiance is carried by bright opaque sparkles instead.
+    const SPARKS: usize = 8;
+    let pi = std::f32::consts::PI;
+    for i in 0..SPARKS {
+        let a = t * 0.6 + i as f32 * (2.0 * pi / SPARKS as f32);
+        // Alternate near/far spokes and breathe each on its own phase.
+        let far = if i % 2 == 0 { 1.55 } else { 1.95 };
+        let breathe = 0.5 + 0.5 * (t * 2.4 + i as f32 * 0.8).sin();
+        let sr = r * far;
+        let sx = x + a.cos() * sr;
+        let sy = y + a.sin() * sr;
+        // A bright opaque warm-gold sparkle with a hot white centre (twinkle).
+        let pr = r * (0.11 + 0.07 * breathe);
+        draw::disc(sx, sy, pr, palette::hexa(0xffe066, 0.95));
+        draw::disc(sx, sy, pr * 0.45, palette::hexa(0xfffcea, 0.95));
+    }
+    // The solid gold star on top, with a thin brighter inner star so it reads as
+    // LIT gold rather than a flat shape over the dark backdrop.
+    draw::star(x, y, r, palette::GOLD);
+    draw::star(x, y, r * 0.62, palette::hexa(0xffe066, 0.9));
+}
+
+/// The get-ready overlay alpha at `t` seconds into Ready: dim-in → hold →
+/// bloom-out over `READY_TOTAL_S`. Eases 0 → `READY_DIM_PEAK` (lights down to
+/// settle), holds at the peak, then eases back to 0 (lights up to reveal),
+/// reaching exactly 0 at `READY_TOTAL_S` so the first note lands on the full
+/// reveal ("now"). Cubic ease both directions for a soft, non-mechanical feel.
+fn ready_overlay_alpha(t: f32) -> f32 {
+    let f = anim::clamp01(t / READY_TOTAL_S); // fraction of the cue
+    if f < READY_DIM_IN {
+        // Dim-in: ease 0 → peak.
+        let u = f / READY_DIM_IN;
+        READY_DIM_PEAK * anim::ease_out_cubic(u)
+    } else if f < READY_HOLD_END {
+        // Hold at the dim.
+        READY_DIM_PEAK
+    } else {
+        // Bloom-out: ease peak → 0 across the remaining span.
+        let u = (f - READY_HOLD_END) / (1.0 - READY_HOLD_END);
+        READY_DIM_PEAK * (1.0 - anim::ease_out_cubic(u))
+    }
+}
+
 // --- capture-state construction (goldens) -----------------------------------
 
 /// The phase a golden wants the scene pinned into. Mirrors patterns' approach of
 /// constructing the scene directly into a representative single frame.
 pub(crate) enum CaptureState {
-    /// The count-in mid-tick (all four critters pulse + the central ring
-    /// expands) — the "ready-set-go" lead-in, made reviewable.
+    /// The get-ready cue at the dim peak (the still choir under the fullscreen
+    /// dim-and-bloom overlay) — the environmental "settle → now", made reviewable.
     Ready,
     /// Show playback mid-flash (a pad lit + singing; the rest calm).
     Show,
@@ -982,10 +1596,11 @@ impl SingbackScene {
         sc.sequence = vec![0, 2, 3];
         match cap {
             CaptureState::Ready => {
-                // Mid count-in, just after the 2nd brisk tick: all four critters
-                // pulse in unison + the central ring is expanding (phase_t small,
-                // so the ring reads bright). A representative "ready-set-go" frame.
-                sc.phase = Phase::Ready { t: READY_TICK_S + 0.06 };
+                // The dim peak (mid-hold): the still choir under the fullscreen
+                // dim-and-bloom overlay at full READY_DIM_PEAK alpha — a
+                // representative "settle" frame of the environmental get-ready cue.
+                // Critters stay neutral (no Ready pose) for a deterministic golden.
+                sc.phase = Phase::Ready { t: 0.5 * READY_TOTAL_S };
                 sc.clear_flash();
             }
             CaptureState::Show => {
@@ -1013,11 +1628,22 @@ impl SingbackScene {
                 drive(&mut sc, ctx0, 18);
             }
             CaptureState::Finale => {
-                // A full FINALE_SPAN sequence completed → the big closing dance.
+                // A full FINALE_SPAN sequence completed → the closing dance party.
                 sc.sequence = (0..FINALE_SPAN).map(|i| (i % 4) as u8).collect();
                 sc.enter_finale(ctx0);
-                // Drive ~0.4s in so the dancers are mid-hop + confetti is falling.
-                drive(&mut sc, ctx0, 14);
+                // Settle the entrance, then pin a representative frame: a couple of
+                // dancers mid-move, the frog DJ mid-flourish, balloons up, confetti
+                // falling. Driving ~0.5s lands the entrance pops + some rain.
+                drive(&mut sc, ctx0, 16);
+                // Force two distinct dance moves + the DJ flourish at fixed phases so
+                // the single captured frame clearly shows the party in motion.
+                sc.dance_t[0] = DANCE_MOVE_S * 0.4;
+                sc.dance_kind[0] = 0; // a big hop
+                sc.dance_t[3] = DANCE_MOVE_S * 0.5;
+                sc.dance_kind[3] = 3; // a squash bounce
+                sc.sing_t[1] = DANCER_SING_S * 0.3; // duck mid-sing
+                sc.sing_t[2] = DANCER_SING_S * 0.5; // cat mid-sing
+                sc.frog_t = FROG_FLOURISH_S * 0.18; // DJ early in its hop (clean still)
             }
         }
         sc

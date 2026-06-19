@@ -23,7 +23,7 @@ mod site;
 mod train;
 
 pub use critters::{critter, Critter, CritterPose};
-pub use frog::{frog, frog_hard_hat, frog_party_hat, FrogPose};
+pub use frog::{frog, frog_hard_hat, frog_headphones, frog_party_hat, FrogPose};
 pub use house::{
     house, house_chimney_center, house_door_rect, house_height, house_part_anchor,
     house_window_centers, HousePose, HOUSE_PARTS,
@@ -33,7 +33,7 @@ pub use glyphs::{
     chevron_left, circle_btn, house_icon, mark_arrow, mark_check, mark_cross, replay_icon, speaker,
 };
 pub use prim::{
-    arc, card, disc, fill_ellipse, pop_clip, push_clip, rounded_rect, rounded_rect_rot, star,
+    card, disc, fill_ellipse, pop_clip, push_clip, rounded_rect, rounded_rect_rot, star,
     stroke_path, vgradient,
 };
 pub use scenery::{
