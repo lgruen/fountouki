@@ -446,15 +446,18 @@ async fn main() {
                 }
                 Box::new(sc)
             }
-            "singback" | "singback-input" | "singback-miss" | "singback-reward" => {
+            "singback" | "singback-ready" | "singback-input" | "singback-miss"
+            | "singback-reward" | "singback-finale" => {
                 use games::singback::CaptureState;
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let idle = Pointer::default();
                 let ctx0 = Ctx { dt: 0.016, time: 0.4, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 let cap = match which {
+                    "singback-ready" => CaptureState::Ready,
                     "singback-input" => CaptureState::Input,
                     "singback-miss" => CaptureState::Miss,
                     "singback-reward" => CaptureState::Reward,
+                    "singback-finale" => CaptureState::Finale,
                     _ => CaptureState::Show, // "singback"
                 };
                 Box::new(SingbackScene::capture(db.clone(), 99, now, cap, &ctx0))
@@ -1004,13 +1007,17 @@ async fn main() {
             let mut ok = true;
             let mut best_prev = sc.best_span(); // starts at 0 on a fresh Db::mem()
             let mut longest = 0u32;
+            // Advancing game clock: each tap is a distinct physical press well
+            // past the tap-debounce window, so the debounce passes every one.
+            let mut clk = 0.0f32;
             for round in 0..2u32 {
                 sc.skip_to_input(); // skip the watch playback
                 let seq: Vec<u8> = sc.sequence().to_vec();
                 let len = seq.len();
                 for &p in &seq {
+                    clk += 0.3;
                     let ptr = tap(sc.pad_center(&frame, p as usize));
-                    let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
                 let rewarded = sc.in_reward();
@@ -1046,9 +1053,11 @@ async fn main() {
             let mut sc = SingbackScene::new(db.clone(), 99, now);
             sc.skip_to_input();
             let seq: Vec<u8> = sc.sequence().to_vec();
+            let mut clk = 0.0f32;
             for &p in &seq {
+                clk += 0.3; // advance past the tap-debounce window per tap
                 let ptr = tap(sc.pad_center(&frame, p as usize));
-                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             }
             let earned = sc.best_span();
@@ -1075,10 +1084,13 @@ async fn main() {
             sc.skip_to_input();
             let seq: Vec<u8> = sc.sequence().to_vec();
             let len0 = seq.len();
+            // Advancing game clock so each distinct tap clears the debounce.
+            let mut clk = 0.0f32;
             // Tap a pad that is NOT the first step.
             let wrong = (0..4u8).find(|&p| p != seq[0]).unwrap();
+            clk += 0.3;
             let ptr = tap(sc.pad_center(&frame, wrong as usize));
-            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let missed = sc.in_miss();
             // Settle past the Miss beat → it replays the same sequence.
@@ -1091,18 +1103,213 @@ async fn main() {
             // Replay button: advance got>0 first, then hit replay — it must reset
             // got to 0 and re-Show WITHOUT shortening the sequence (length held).
             sc.skip_to_input();
+            clk += 0.3;
             let ptr = tap(sc.pad_center(&frame, seq[0] as usize)); // one correct tap
-            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let progressed = sc.got() == 1;
+            clk += 0.3;
             let ptr = tap(sc.replay_center(&frame));
-            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let replayed = !sc.in_input() && sc.got() == 0 && sc.sequence().len() == len0;
             if missed && same_len && never_scored && progressed && replayed {
                 println!("PASS singback-errorless");
             } else {
                 println!("FAIL singback-errorless (missed={missed}, same_len={same_len}, never_scored={never_scored}, progressed={progressed}, replayed={replayed})");
+                fails += 1;
+            }
+        }
+        // singback: the sequence NEVER starts cold — a fresh scene opens in the
+        // Ready count-in lead-in, and only reaches Show after the lead-in, then
+        // Input after the whole sequence plays. Advance frames and confirm the
+        // phase order Ready → Show → Input.
+        {
+            let mut sc = SingbackScene::new(Db::mem(), 99, now);
+            let idle = Pointer::default();
+            let starts_ready = sc.in_ready();
+            // Run a couple seconds of frames; we should pass through Show and end
+            // in Input (nobody tapping). Track that Show was actually entered
+            // before Input (no instant cold start into the sequence).
+            let mut saw_show = false;
+            let mut clk = 0.0f32;
+            for _ in 0..200 {
+                clk += 0.03;
+                let ctx = Ctx { dt: 0.03, time: clk, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if !sc.in_ready() && !sc.in_input() {
+                    saw_show = true; // the only remaining reachable phase here
+                }
+                if sc.in_input() {
+                    break;
+                }
+            }
+            if starts_ready && saw_show && sc.in_input() {
+                println!("PASS singback-lead-in");
+            } else {
+                println!("FAIL singback-lead-in (starts_ready={starts_ready}, saw_show={saw_show}, in_input={})", sc.in_input());
+                fails += 1;
+            }
+        }
+        // singback: no same-critter-twice-in-a-row in the easy stage. Grow the
+        // sequence (by completing rounds) across many seeds and assert that while
+        // the length is in the easy stage, no two ADJACENT pads are equal.
+        {
+            use games::singback::EASY_NO_REPEAT_LEN;
+            let mut ok = true;
+            for seed in 0..40u32 {
+                let mut sc = SingbackScene::new(Db::mem(), seed * 7 + 1, now);
+                // Check the freshly-built sequence first.
+                for win in sc.sequence().windows(2) {
+                    if sc.sequence().len() < EASY_NO_REPEAT_LEN && win[0] == win[1] {
+                        ok = false;
+                    }
+                }
+                // Complete a few rounds to grow it, re-checking each easy-stage seq.
+                let mut clk = 0.0f32;
+                for _ in 0..4 {
+                    sc.skip_to_input();
+                    let seq: Vec<u8> = sc.sequence().to_vec();
+                    if seq.len() < EASY_NO_REPEAT_LEN {
+                        for win in seq.windows(2) {
+                            if win[0] == win[1] {
+                                ok = false;
+                            }
+                        }
+                    }
+                    for &p in &seq {
+                        clk += 0.3;
+                        let ptr = tap(sc.pad_center(&frame, p as usize));
+                        let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                        sc.update(&ctx);
+                    }
+                    // Settle past Reward so the next pad appends (it deduped).
+                    for _ in 0..40 {
+                        clk += 0.1;
+                        let idle = Pointer::default();
+                        let ctx = Ctx { dt: 0.1, time: clk, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                        sc.update(&ctx);
+                    }
+                }
+            }
+            if ok {
+                println!("PASS singback-no-repeat");
+            } else {
+                println!("FAIL singback-no-repeat (adjacent equal pads found in easy stage)");
+                fails += 1;
+            }
+        }
+        // singback: completing a round of FINALE_SPAN (6) enters the Finale; then
+        // tapping the corner REPLAY restarts the session at the difficulty's
+        // start length (best_span stays — monotonic). Drive rounds until len 6.
+        {
+            let mut sc = SingbackScene::new(Db::mem(), 99, now);
+            let idle = Pointer::default();
+            let mut clk = 0.0f32;
+            let mut reached_finale = false;
+            // Up to a generous number of rounds; each completes + grows by one.
+            for _ in 0..12 {
+                sc.skip_to_input();
+                let seq: Vec<u8> = sc.sequence().to_vec();
+                for &p in &seq {
+                    clk += 0.3;
+                    let ptr = tap(sc.pad_center(&frame, p as usize));
+                    let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                if sc.in_finale() {
+                    reached_finale = true;
+                    break;
+                }
+                // Settle past Reward → append + back to Ready.
+                for _ in 0..40 {
+                    clk += 0.1;
+                    let ctx = Ctx { dt: 0.1, time: clk, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+            }
+            let best_at_finale = sc.best_span();
+            // The invisible topbar must be DEAD during the Finale: a tap on the
+            // top-LEFT (where ← Home / long-press parent would live) must NOT
+            // navigate (no visible control there) and must leave us in Finale.
+            let tb = chrome::topbar(&frame);
+            clk += 0.3;
+            let ptr = tap(tb.home.0);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let nav = sc.update(&ctx);
+            let topbar_dead = matches!(nav, Nav::Stay) && sc.in_finale();
+            // Corner replay restarts the session. Find the corner replay center.
+            let (rc, _home, _br) = chrome::corner_buttons(&frame);
+            clk += 0.3;
+            let ptr = tap(rc);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            // Restarted: short sequence again, count-in begins, best unchanged.
+            let restarted_short = sc.sequence().len() <= 3; // normal start_len = 2
+            let best_kept = sc.best_span() == best_at_finale && best_at_finale >= 6;
+            let restarted_ready = sc.in_ready();
+            if reached_finale && topbar_dead && restarted_short && best_kept && restarted_ready {
+                println!("PASS singback-finale");
+            } else {
+                println!("FAIL singback-finale (reached={reached_finale}, topbar_dead={topbar_dead}, short={restarted_short}, best_kept={best_kept} (best={}), ready={restarted_ready})", sc.best_span());
+                fails += 1;
+            }
+        }
+        // singback: a rapid double-tap on the SAME pad registers ONCE (the tap
+        // debounce swallows the second edge of one physical press). With the
+        // game clock barely advancing, two taps on the first step's pad must
+        // leave `got` at 1, not 2 (the second never lands).
+        {
+            let mut sc = SingbackScene::new(Db::mem(), 99, now);
+            sc.skip_to_input();
+            let first = sc.sequence()[0];
+            // Two taps within the debounce window (clock barely moves).
+            let ptr = tap(sc.pad_center(&frame, first as usize));
+            let ctx = Ctx { dt: 0.0, time: 5.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let after_one = sc.got();
+            // Second edge: only +0.05s of clock (< TAP_DEBOUNCE_S = 0.15).
+            let ptr = tap(sc.pad_center(&frame, first as usize));
+            let ctx = Ctx { dt: 0.0, time: 5.05, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let after_two = sc.got();
+            // got advanced exactly once (1), the second tap was swallowed.
+            if after_one == 1 && after_two == 1 {
+                println!("PASS singback-debounce");
+            } else {
+                println!("FAIL singback-debounce (after_one={after_one}, after_two={after_two})");
+                fails += 1;
+            }
+        }
+        // singback: the debounce is PER-TARGET — a fast tap on a DIFFERENT pad is
+        // NOT a bounce, so two correct taps on distinct pads in quick succession
+        // (clock inside the debounce window) BOTH land — completing the 2-pad
+        // start round. This guards the real failure mode: eating a legitimate
+        // fast distinct-pad tap.
+        {
+            let mut sc = SingbackScene::new(Db::mem(), 99, now);
+            sc.skip_to_input();
+            let seq: Vec<u8> = sc.sequence().to_vec();
+            // The easy-stage dedupe guarantees seq[0] != seq[1] (distinct pads).
+            let p0 = seq[0];
+            let p1 = seq[1];
+            let ptr = tap(sc.pad_center(&frame, p0 as usize));
+            let ctx = Ctx { dt: 0.0, time: 8.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let after_first = sc.got();
+            // Second tap, a DIFFERENT pad, only +0.05s (< TAP_DEBOUNCE_S = 0.15).
+            let ptr = tap(sc.pad_center(&frame, p1 as usize));
+            let ctx = Ctx { dt: 0.0, time: 8.05, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            // Both correct taps landed despite the tiny gap (distinct ≠ bounce):
+            // the first advanced got, the second completed the 2-pad start round
+            // into Reward — NOT Miss (a swallowed 2nd tap would leave us in Input,
+            // so reaching Reward proves the distinct-pad tap was accepted).
+            let completed = sc.in_reward();
+            if p0 != p1 && after_first == 1 && completed {
+                println!("PASS singback-debounce-distinct");
+            } else {
+                println!("FAIL singback-debounce-distinct (p0={p0}, p1={p1}, after_first={after_first}, in_reward={}, in_input={})", sc.in_reward(), sc.in_input());
                 fails += 1;
             }
         }

@@ -152,12 +152,23 @@ fn duck(cx: f32, cy: f32, r: f32, color: Color, pose: &CritterPose) {
     fill_ellipse(bc.x, bc.y, 0.86 * r * sx, 0.78 * r * sy, rot_deg, color);
     let bl = tf(0.0, 0.44 * r);
     fill_ellipse(bl.x, bl.y, 0.52 * r * sx, 0.42 * r * sy, rot_deg, belly);
-    // Folded wing tucked along the body's side EDGE (overlapping the body, not
-    // floating in the gap), with a soft darker rim so it reads as a separate
-    // wing, not a smudge.
-    let wing = tf(0.58 * r, 0.22 * r);
-    fill_ellipse(wing.x, wing.y, 0.32 * r * sx, 0.21 * r * sy, rot_deg + 34.0, wing_edge);
-    fill_ellipse(wing.x, wing.y, 0.26 * r * sx, 0.16 * r * sy, rot_deg + 34.0, wing_col);
+    // Two folded wings, one tucked along each body-side EDGE (overlapping the
+    // body, not floating in the gap), each with a soft darker rim so it reads as
+    // a separate wing, not a smudge. Sit them a touch HIGHER on the body (so they
+    // read as folded wings, not low paws) and finish each with a small pointed
+    // lower tip (a flight-feather flick). Mirror the x offset AND the tilt so the
+    // pair reads symmetric — a balanced, chunky duck.
+    for s in [-1.0_f32, 1.0] {
+        let wing = tf(s * 0.58 * r, 0.14 * r);
+        fill_ellipse(wing.x, wing.y, 0.32 * r * sx, 0.21 * r * sy, rot_deg + s * 34.0, wing_edge);
+        fill_ellipse(wing.x, wing.y, 0.26 * r * sx, 0.16 * r * sy, rot_deg + s * 34.0, wing_col);
+        // A pointed feather tip at the wing's lower-outer end, so it reads as a
+        // folded wing rather than a rounded paw.
+        let tip = tf(s * 0.66 * r, 0.42 * r);
+        let ti = tf(s * 0.44 * r, 0.30 * r);
+        let to = tf(s * 0.62 * r, 0.24 * r);
+        draw_triangle(tip, ti, to, wing_edge);
+    }
 
     // Round head sitting high on the body, with a cowlick tuft.
     let head = tf(0.0, -0.66 * r);
