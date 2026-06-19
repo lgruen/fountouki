@@ -6,12 +6,14 @@
 //!   centered on true geometric center; this deleted the old iOS glyph CSS debt.
 //! - [`scenery`]: rainbow, sky, igloo and the phonics garden plants.
 //! - [`frog`]: the rigged frog mascot + its pose type (and its hard hat).
+//! - [`critters`]: the Sing Back choir (frog + duck/cat/owl) on one pose API.
 //! - [`train`]: the Pattern Train engine, cars, flag and bunting.
 //! - [`house`]: the tracing build-a-house (real construction order).
 //! - [`site`]: the construction site around it — tower crane, excavator,
 //!   mixer truck, and the per-stage install timing + sound cues.
 //!
 //! Everything is re-exported flat so call sites stay `draw::frog(..)` etc.
+mod critters;
 mod frog;
 mod glyphs;
 mod house;
@@ -20,6 +22,7 @@ mod scenery;
 mod site;
 mod train;
 
+pub use critters::{critter, Critter, CritterPose};
 pub use frog::{frog, frog_hard_hat, frog_party_hat, FrogPose};
 pub use house::{
     house, house_chimney_center, house_door_rect, house_height, house_part_anchor,

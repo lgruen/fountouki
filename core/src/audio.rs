@@ -277,6 +277,24 @@ pub fn trace_tick(step: u32) -> Vec<f32> {
     mix(&notes)
 }
 
+/// Number of distinct [`memory_tone`] pitches (the Sing Back game uses the
+/// first 4; the rest are headroom).
+pub const MEMORY_TONES: u32 = 7;
+
+/// `memory_tone(step)` — one clean Simon-says tone for the "Sing Back" memory
+/// game. Climbs a C-major pentatonic over ~an octave-and-a-half, so step order
+/// == pitch order == the rainbow color the game maps each step to. A single
+/// sustained sine per call (long enough to read as a distinct note, never
+/// timbre-distinguished). Pitch strictly rises with `step`.
+pub fn memory_tone(step: u32) -> Vec<f32> {
+    // Pentatonic so any back-to-back pair is consonant: the played-back
+    // sequence sounds like a melody, never a buzzer.
+    const SCALE: [f32; 7] = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66]; // C5..D6
+    let freq = SCALE[(step.min(MEMORY_TONES - 1)) as usize];
+    let notes = [Note::new(freq, 0.0, 0.32)];
+    mix(&notes)
+}
+
 /// `digger()` — a low diesel "chugga-chugga" + a bucket-scrape clank for the
 /// excavator's dig scoops in the tracing game's foundation stage. All low
 /// triangles so it rumbles rather than rings.
@@ -375,6 +393,9 @@ mod tests {
         for step in 0..=TRACE_TICK_STEPS {
             assert_clean(&trace_tick(step));
         }
+        for step in 0..=MEMORY_TONES {
+            assert_clean(&memory_tone(step));
+        }
     }
 
     #[test]
@@ -393,6 +414,7 @@ mod tests {
             doorbell(),
             twinkle(),
             trace_tick(0),
+            memory_tone(0),
         ] {
             assert!(!buf.is_empty());
             assert!(max_abs(&buf) <= 1.0);
@@ -408,6 +430,25 @@ mod tests {
         assert_eq!(lo.len(), hi.len(), "tick length must not vary with step");
         assert!(zero_crossings(&hi) > zero_crossings(&lo));
         assert_eq!(trace_tick(TRACE_TICK_STEPS - 1), trace_tick(TRACE_TICK_STEPS + 5));
+    }
+
+    #[test]
+    fn memory_tones_climb_in_pitch() {
+        // step order == pitch order == rainbow color order in the game: each
+        // step must strictly out-pitch the one below it. Same single-note shape
+        // per step, only freq rises, so zero-crossings strictly increase.
+        let mut prev = 0usize;
+        for step in 0..MEMORY_TONES {
+            let buf = memory_tone(step);
+            assert_clean(&buf);
+            let zc = zero_crossings(&buf);
+            if step > 0 {
+                assert!(zc > prev, "step {step} must out-pitch {}: zc={zc}, prev={prev}", step - 1);
+            }
+            prev = zc;
+        }
+        // Steps past the scale clamp to the top tone.
+        assert_eq!(memory_tone(MEMORY_TONES - 1), memory_tone(MEMORY_TONES + 5));
     }
 
     #[test]

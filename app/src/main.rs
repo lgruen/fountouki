@@ -25,6 +25,7 @@ mod text;
 use games::patterns::PatternsScene;
 use games::phonics::PhonicsScene;
 use games::picker::PickerScene;
+use games::singback::SingbackScene;
 use games::tracing::TracingScene;
 use parent::{ParentPanel, PanelResult};
 use input::Pointer;
@@ -72,6 +73,7 @@ fn build_game(id: &str, db: &Db, now: i64) -> Box<dyn Scene> {
     match id {
         "patterns" => Box::new(PatternsScene::new(db.clone(), now as u32 ^ 0x1234_5678, now)),
         "tracing" => Box::new(TracingScene::new(db.clone(), now as u32 ^ 0x7e11_e77a, now)),
+        "singback" => Box::new(SingbackScene::new(db.clone(), now as u32 ^ 0x5126_acc0, now)),
         _ => Box::new(PhonicsScene::new(db.clone(), now as u32 ^ 0x5bd1_e995, now)),
     }
 }
@@ -444,6 +446,19 @@ async fn main() {
                 }
                 Box::new(sc)
             }
+            "singback" | "singback-input" | "singback-miss" | "singback-reward" => {
+                use games::singback::CaptureState;
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let idle = Pointer::default();
+                let ctx0 = Ctx { dt: 0.016, time: 0.4, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                let cap = match which {
+                    "singback-input" => CaptureState::Input,
+                    "singback-miss" => CaptureState::Miss,
+                    "singback-reward" => CaptureState::Reward,
+                    _ => CaptureState::Show, // "singback"
+                };
+                Box::new(SingbackScene::capture(db.clone(), 99, now, cap, &ctx0))
+            }
             _ => {
                 let mut sc = PhonicsScene::new(db.clone(), 7, now);
                 sc.stars = 3; // mid-session for a representative shot
@@ -454,6 +469,7 @@ async fn main() {
             "parent-patterns" => Some(ParentPanel::open(db.clone(), "patterns", now, 99)),
             "parent-phonics" => Some(ParentPanel::open(db.clone(), "phonics", now, 99)),
             "parent-tracing" => Some(ParentPanel::open(db.clone(), "tracing", now, 99)),
+            "parent-singback" => Some(ParentPanel::open(db.clone(), "singback", now, 99)),
             _ => None,
         };
 
@@ -975,6 +991,118 @@ async fn main() {
                     sc.current_letter(),
                     sc.in_watch()
                 );
+                fails += 1;
+            }
+        }
+        // singback: tapping back the WHOLE sequence completes a round — the best
+        // span records, the sequence GROWS by one (Simon-style, never shortens),
+        // and across rounds best_span is MONOTONIC and equals the longest round
+        // completed. Play two full rounds and check the whole chain.
+        {
+            let mut sc = SingbackScene::new(Db::mem(), 99, now);
+            let idle = Pointer::default();
+            let mut ok = true;
+            let mut best_prev = sc.best_span(); // starts at 0 on a fresh Db::mem()
+            let mut longest = 0u32;
+            for round in 0..2u32 {
+                sc.skip_to_input(); // skip the watch playback
+                let seq: Vec<u8> = sc.sequence().to_vec();
+                let len = seq.len();
+                for &p in &seq {
+                    let ptr = tap(sc.pad_center(&frame, p as usize));
+                    let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                let rewarded = sc.in_reward();
+                let best = sc.best_span();
+                longest = longest.max(len as u32);
+                // Monotonic: best never drops, and equals the longest completed.
+                ok &= rewarded && best >= best_prev && best == longest;
+                best_prev = best;
+                // Settle past the reward beat: the next round appends + replays.
+                for _ in 0..40 {
+                    let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                    sc.update(&ctx);
+                }
+                // Growth is monotonic up: the sequence is exactly one longer now.
+                ok &= sc.sequence().len() == len + 1;
+                if round == 0 && (!rewarded || best != len as u32) {
+                    ok = false; // first round must set best to its own length
+                }
+            }
+            if ok && sc.best_span() == longest {
+                println!("PASS singback-round");
+            } else {
+                println!("FAIL singback-round (best={}, longest={longest}, len={})", sc.best_span(), sc.sequence().len());
+                fails += 1;
+            }
+        }
+        // singback: a parent "start over" resets best_span back to 0. Earn a best,
+        // then apply core::singback::start_over and reload — a freshly-mounted
+        // scene must read best_span 0 (the reset out-versions the earned blob).
+        {
+            let db = Db::mem();
+            // Earn a best by completing one round.
+            let mut sc = SingbackScene::new(db.clone(), 99, now);
+            sc.skip_to_input();
+            let seq: Vec<u8> = sc.sequence().to_vec();
+            for &p in &seq {
+                let ptr = tap(sc.pad_center(&frame, p as usize));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            let earned = sc.best_span();
+            // Parent start-over: reset + persist (mirrors parent.rs's singback arm).
+            {
+                let mut kv = db.borrow_kv_mut();
+                let cur = fountouki_core::singback::load(&**kv, now);
+                fountouki_core::singback::save(&mut **kv, &fountouki_core::singback::start_over(&cur, now));
+            }
+            let fresh = SingbackScene::new(db.clone(), 7, now);
+            if earned > 0 && fresh.best_span() == 0 {
+                println!("PASS singback-start-over");
+            } else {
+                println!("FAIL singback-start-over (earned={earned}, after_reset={})", fresh.best_span());
+                fails += 1;
+            }
+        }
+        // singback: a wrong tap is errorless — it enters Miss (the correct pad
+        // teaches), never scores, and the sequence keeps the SAME length after
+        // the teaching beat replays. Then the replay button re-shows from Input.
+        {
+            let mut sc = SingbackScene::new(Db::mem(), 99, now);
+            let idle = Pointer::default();
+            sc.skip_to_input();
+            let seq: Vec<u8> = sc.sequence().to_vec();
+            let len0 = seq.len();
+            // Tap a pad that is NOT the first step.
+            let wrong = (0..4u8).find(|&p| p != seq[0]).unwrap();
+            let ptr = tap(sc.pad_center(&frame, wrong as usize));
+            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let missed = sc.in_miss();
+            // Settle past the Miss beat → it replays the same sequence.
+            for _ in 0..20 {
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            let same_len = sc.sequence().len() == len0;
+            let never_scored = sc.best_span() == 0;
+            // Replay button: advance got>0 first, then hit replay — it must reset
+            // got to 0 and re-Show WITHOUT shortening the sequence (length held).
+            sc.skip_to_input();
+            let ptr = tap(sc.pad_center(&frame, seq[0] as usize)); // one correct tap
+            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let progressed = sc.got() == 1;
+            let ptr = tap(sc.replay_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let replayed = !sc.in_input() && sc.got() == 0 && sc.sequence().len() == len0;
+            if missed && same_len && never_scored && progressed && replayed {
+                println!("PASS singback-errorless");
+            } else {
+                println!("FAIL singback-errorless (missed={missed}, same_len={same_len}, never_scored={never_scored}, progressed={progressed}, replayed={replayed})");
                 fails += 1;
             }
         }

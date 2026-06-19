@@ -6,7 +6,7 @@
 use crate::{draw, input, kb, palette, scene::Ctx, store::Db, text};
 use fountouki_core::{
     rng::Mulberry32,
-    settings::{self, PatternsSettings},
+    settings::{self, PatternsSettings, SingbackSettings},
     srs,
     themes::ThemeChoice,
 };
@@ -41,6 +41,7 @@ const THEME_CYCLE: [ThemeChoice; 10] = [
 ];
 const DIFFS: [&str; 3] = ["auto", "easy", "hard"];
 const MODES: [&str; 2] = ["next", "unit"];
+const SB_DIFFS: [&str; 3] = ["gentle", "normal", "speedy"];
 
 pub struct ParentPanel {
     db: Db,
@@ -50,6 +51,10 @@ pub struct ParentPanel {
     focus: Focus,
     ptn: PatternsSettings,
     ptn_dirty: bool,
+    sb: SingbackSettings,
+    sb_dirty: bool,
+    /// Read-only longest-sequence record (sing back); `None` for other games.
+    sb_best: Option<u32>,
     start_over: bool,
     /// Read-only Leitner mastery summary (phonics + tracing).
     mastery: Option<Mastery>,
@@ -79,6 +84,16 @@ impl ParentPanel {
             let kv = db.borrow_kv();
             settings::load_patterns(&**kv)
         };
+        let sb = {
+            let kv = db.borrow_kv();
+            settings::load_singback(&**kv)
+        };
+        let sb_best = if game == "singback" {
+            let kv = db.borrow_kv();
+            Some(fountouki_core::singback::load(&**kv, now).best_span)
+        } else {
+            None
+        };
         let mastery = if game == "phonics" || game == "tracing" {
             Some(compute_mastery(&db, game, now))
         } else {
@@ -92,6 +107,9 @@ impl ParentPanel {
             focus: Focus::None,
             ptn,
             ptn_dirty: false,
+            sb,
+            sb_dirty: false,
+            sb_best,
             start_over: false,
             mastery,
             seed,
@@ -112,6 +130,9 @@ impl ParentPanel {
             settings::save_shared(&mut **kv, &s);
             if self.game == "patterns" {
                 settings::save_patterns(&mut **kv, &self.ptn);
+            }
+            if self.game == "singback" {
+                settings::save_singback(&mut **kv, &self.sb);
             }
         }
     }
@@ -186,7 +207,7 @@ impl ParentPanel {
         // Outside the card → close.
         if !hit(pt.pos, l.card) {
             self.apply();
-            return PanelResult::Close { rebuild: self.ptn_dirty };
+            return PanelResult::Close { rebuild: self.ptn_dirty || self.sb_dirty };
         }
         // Body controls are only tappable where they're actually visible (inside
         // the scroll viewport); the pinned `done` button is always live.
@@ -253,9 +274,28 @@ impl ParentPanel {
             self.apply();
             return PanelResult::Close { rebuild: true };
         }
+        if self.game == "singback" && in_body {
+            if hit(pt.pos, l.diff) {
+                self.sb.difficulty = cycle(&SB_DIFFS, &self.sb.difficulty);
+                self.sb_dirty = true;
+            }
+            if hit(pt.pos, l.start_over) {
+                // Start over = best span back to 0; start_over bumps generation
+                // + lastSeen so the reset wins the generation-first sync merge.
+                {
+                    use fountouki_core::singback as sb;
+                    let mut kv = self.db.borrow_kv_mut();
+                    let cur = sb::load(&**kv, ctx.now);
+                    sb::save(&mut **kv, &sb::start_over(&cur, ctx.now));
+                }
+                self.start_over = true;
+                self.apply();
+                return PanelResult::Close { rebuild: true };
+            }
+        }
         if hit(pt.pos, l.done) {
             self.apply();
-            return PanelResult::Close { rebuild: self.ptn_dirty };
+            return PanelResult::Close { rebuild: self.ptn_dirty || self.sb_dirty };
         }
         PanelResult::Stay
     }
@@ -281,6 +321,11 @@ impl ParentPanel {
             draw_mastery(l.mastery, m);
         }
         if self.game == "tracing" {
+            button(l.start_over, "start over", palette::ACCENT, palette::WHITE);
+        }
+        if self.game == "singback" {
+            chip(l.diff, "tempo", sb_diff_label(&self.sb.difficulty));
+            draw_best_span(l.mastery, self.sb_best.unwrap_or(0));
             button(l.start_over, "start over", palette::ACCENT, palette::WHITE);
         }
         // Sync section.
@@ -405,6 +450,13 @@ fn theme_label(cur: &str) -> &'static str {
         .map(fountouki_core::themes::label)
         .unwrap_or("mix")
 }
+fn sb_diff_label(cur: &str) -> &'static str {
+    match cur {
+        "gentle" => "Gentle",
+        "speedy" => "Speedy",
+        _ => "Normal",
+    }
+}
 
 // --- layout + control drawing ----------------------------------------------
 
@@ -475,6 +527,10 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
     } else if game == "tracing" {
         mastery_l = block(&mut ly, 78.0); // Leitner mastery grid, like phonics
         start_l = block(&mut ly, BTN_H);
+    } else if game == "singback" {
+        diff_l = labeled(&mut ly); // tempo cycler
+        mastery_l = block(&mut ly, 60.0); // best-span readout + star row
+        start_l = block(&mut ly, BTN_H);
     }
     let token_l = labeled(&mut ly);
     let gen_l = block(&mut ly, BTN_H);
@@ -505,6 +561,8 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
         (row(theme_l, rw), row(diff_l, rw), row(mode_l, rw), row(hint_l, rw), row(start_l, rw))
     } else if game == "tracing" {
         (off, off, off, off, row(start_l, rw))
+    } else if game == "singback" {
+        (off, row(diff_l, rw), off, off, row(start_l, rw))
     } else {
         (off, off, off, off, off)
     };
@@ -564,6 +622,26 @@ fn button(r: Rect, t: &str, fill: Color, fg: Color) {
     text::ui_centered(t, r.x + r.w / 2.0, r.y + r.h / 2.0, 18, fg);
 }
 
+/// Read-only longest-sequence record: a scalar best span (not a Leitner grid),
+/// shown as a label + a capped row of gold stars (one per remembered step).
+fn draw_best_span(r: Rect, best: u32) {
+    let x = r.x;
+    let head = if best == 0 {
+        "Best sequence: not yet".to_string()
+    } else {
+        format!("Best sequence: {best}")
+    };
+    text::ui_left(&head, x, r.y + 11.0, 15, palette::MUTED);
+    let n = best.min(8);
+    let r0 = 9.0;
+    let gap = 8.0;
+    let y0 = r.y + 40.0;
+    for i in 0..n {
+        let cx = x + r0 + i as f32 * (2.0 * r0 + gap);
+        draw::star(cx, y0, r0, palette::GOLD);
+    }
+}
+
 fn draw_mastery(r: Rect, m: &Mastery) {
     let x = r.x;
     text::ui_left(
@@ -603,7 +681,7 @@ mod tests {
     /// generate/clear/start-over controls on short phones.
     #[test]
     fn done_is_pinned_below_the_body() {
-        for game in ["patterns", "phonics"] {
+        for game in ["patterns", "phonics", "tracing", "singback"] {
             for (w, h) in SIZES {
                 let l = layout(&frame(w, h), game, 0.0);
                 let view_bottom = l.view.y + l.view.h;
@@ -647,7 +725,7 @@ mod tests {
     /// inside the padded column.
     #[test]
     fn sync_pause_shares_the_generate_row() {
-        for game in ["patterns", "phonics", "tracing"] {
+        for game in ["patterns", "phonics", "tracing", "singback"] {
             for (w, h) in SIZES {
                 let l = layout(&frame(w, h), game, 0.0);
                 assert_eq!(l.sync_pause.y, l.gen.y, "{game} {w}x{h}: not on the gen row");
@@ -684,7 +762,7 @@ mod tests {
     /// and never scrolls.
     #[test]
     fn tablets_fit_without_scrolling() {
-        for game in ["patterns", "phonics"] {
+        for game in ["patterns", "phonics", "tracing", "singback"] {
             for (w, h) in [(1194.0, 834.0), (834.0, 1194.0)] {
                 let l = layout(&frame(w, h), game, 0.0);
                 assert_eq!(l.max_scroll, 0.0, "{game} {w}x{h} should fit without scroll");
