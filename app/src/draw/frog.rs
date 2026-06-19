@@ -117,9 +117,12 @@ pub fn frog(cx: f32, cy: f32, r: f32, color: Color, pose: FrogPose) {
         let t = tf(0.0, (0.28 + 0.26 * tongue) * r);
         disc(t.x, t.y, 0.15 * r * rs, palette::hex(0xf0566e));
     } else {
-        let mut smile = [Vec2::ZERO; 9];
+        // A smooth closed smile: 17 points (16 segments) so the curve reads
+        // round, not faceted — the 9-point version looked angular on-device.
+        let mut smile = [Vec2::ZERO; 17];
+        let n = (smile.len() - 1) as f32;
         for (i, sp) in smile.iter_mut().enumerate() {
-            let a = 0.30 + (pi - 0.60) * (i as f32 / 8.0);
+            let a = 0.30 + (pi - 0.60) * (i as f32 / n);
             *sp = tf(0.5 * r * a.cos(), 0.06 * r + 0.46 * r * a.sin());
         }
         stroke_path(&smile, (0.085 * r * rs).max(2.0), palette::INK);

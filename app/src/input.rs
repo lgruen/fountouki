@@ -69,3 +69,83 @@ pub fn hit_circle(p: Vec2, cx: f32, cy: f32, r: f32) -> bool {
 pub fn hit_rect(p: Vec2, x: f32, y: f32, w: f32, h: f32) -> bool {
     p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h
 }
+
+/// Minimum spacing between two accepted taps. A single physical press can stutter
+/// into two `tapped()` edges on some touch stacks; below this gap they collapse
+/// into one. ~150ms is far under a deliberate double-tap yet above any jitter.
+pub const TAP_DEBOUNCE_S: f32 = 0.15;
+
+/// A reusable PER-TARGET tap debounce: gate every consumed tap through
+/// [`accept`] so one physical press never double-registers as two taps on the
+/// SAME target — while a fast tap on a *different* target lands immediately
+/// (it's not a bounce). Driven off `ctx.time`, which in interactive play is the
+/// wall clock (`get_time()` in `main.rs`), exactly what a stutter/bounce filter
+/// wants; captures/play-tests inject `time` explicitly, so it's deterministic
+/// there. Hold one per logical tap region (e.g. the whole Sing Back choir +
+/// replay + finale corners share one, keyed by a distinct id per target).
+///
+/// [`accept`]: TapDebounce::accept
+#[derive(Clone, Copy)]
+pub struct TapDebounce {
+    /// Time of the last accepted tap (`-∞` until the first accept, so the very
+    /// first tap always passes regardless of the starting clock).
+    last: f32,
+    /// Which target id the last accepted tap hit (only meaningful once `last`
+    /// is finite). A different target this frame is never a bounce.
+    last_target: u32,
+}
+
+impl TapDebounce {
+    pub fn new() -> Self {
+        TapDebounce { last: f32::NEG_INFINITY, last_target: u32::MAX }
+    }
+
+    /// Accept a tap on `target` at time `now`: returns true (and records
+    /// `now`+`target`) unless it's a near-instant re-fire of the SAME target
+    /// within [`TAP_DEBOUNCE_S`] — i.e. the spurious second edge of one physical
+    /// press. A tap on a *different* target always lands (it can't be a bounce
+    /// of the previous one), so a fast distinct-pad tap is never swallowed.
+    pub fn accept(&mut self, target: u32, now: f32) -> bool {
+        if target != self.last_target || now - self.last >= TAP_DEBOUNCE_S {
+            self.last = now;
+            self.last_target = target;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Default for TapDebounce {
+    fn default() -> Self {
+        TapDebounce::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tap_debounce_swallows_double_press() {
+        let mut d = TapDebounce::new();
+        // First tap always accepts.
+        assert!(d.accept(0, 10.0));
+        // An immediate second edge of the SAME target is a bounce → swallowed.
+        assert!(!d.accept(0, 10.0 + TAP_DEBOUNCE_S * 0.5));
+        // A genuine later tap on the same target, past the window, accepts again.
+        assert!(d.accept(0, 10.0 + TAP_DEBOUNCE_S + 0.01));
+    }
+
+    #[test]
+    fn tap_debounce_allows_immediate_different_target() {
+        let mut d = TapDebounce::new();
+        // First tap on target 0 accepts.
+        assert!(d.accept(0, 10.0));
+        // A near-instant tap on a DIFFERENT target is NOT a bounce → accepts,
+        // even well inside the debounce window (a fast distinct-pad tap).
+        assert!(d.accept(1, 10.0 + TAP_DEBOUNCE_S * 0.1));
+        // But an immediate re-fire of that new target IS swallowed.
+        assert!(!d.accept(1, 10.0 + TAP_DEBOUNCE_S * 0.2));
+    }
+}

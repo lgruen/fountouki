@@ -38,15 +38,17 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
   Scenes: `picker phonics phonics-miss phonics-miss-igloo phonics-done patterns
   patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done
   tracing tracing-watch tracing-two-stroke tracing-reward tracing-build
-  tracing-grade tracing-done tracing-housewarming singback singback-input
-  singback-miss singback-reward parent-patterns parent-phonics parent-tracing
-  parent-singback`.
+  tracing-grade tracing-done tracing-housewarming singback singback-ready
+  singback-input singback-miss singback-reward singback-finale parent-patterns
+  parent-phonics parent-tracing parent-singback`.
 - `--playtest` — scripted taps drive the real scenes + assert invariants; exits
   non-zero on failure.
 
 ## Workflow
 - Develop on a branch off `main`; open a PR at the end of a code-changing task.
   Never push to `main`.
+- **Rebase on fresh `origin/main` right before opening the PR** (`git fetch` +
+  `git rebase origin/main`, then re-run the gate) so the PR isn't stale.
 - Before pushing: `cargo clippy --workspace --all-targets -- -D warnings` (also
   enforced by a PreToolUse hook in `.claude/settings.json` on every `git
   commit`/`git push`), `cargo test --workspace` (core unit tests), `cargo run -p
@@ -86,6 +88,8 @@ Before claiming a game is done: if you were a 4yo with a short attention span,
 would you push to come back? "Tolerates" fails; "wants more" is the bar. Big
 animated rewards, vibrant color, characters that respond — over restrained/
 minimal. The constraints below remove *noise around the target*, not the joy.
+A game needs a real **end/finale scene** (closure + a big payoff), not just
+endless rounds — a ~5-min session should *land* somewhere, then offer replay.
 
 ## Audience & pedagogy baseline
 - Preschoolers; big tap targets, minimal text, visual-first navigation.
@@ -101,11 +105,30 @@ minimal. The constraints below remove *noise around the target*, not the joy.
   no competing elements near the target; generous repetition + SRS; pictures
   *with* words (never picture-only or text-only); predictable layout across
   sessions; short direct prompts (no idioms); grading is parent-mediated.
+- **No in-game written instructions/prompts** ("Watch!", "Your turn!") — kids
+  can't read procedural text; it just clutters. Signal phases/turns with
+  visuals, character behaviour and audio. (Distinct from the pictures-*with*-
+  words rule above, which is about the learning stimulus, not instructions.)
+- **Freeze ambient motion during a recall/attention task**: while the child
+  watches or reproduces a to-be-remembered sequence, idle character animation
+  (blink/bob/breathe/random flashing) must stop — only the current stimulus
+  animates. Competing motion wrecks recall.
+- **Lead into a to-remember sequence; never start it instantly**: a clear
+  non-text "ready → now" cue with a deliberate pause precedes the sequence (on
+  first play *and* after a retry) so the child knows when to start watching.
+  Err on the slow side for the reveal pace.
 
 ## Brand
 - 🌰 is the PWA launcher icon **only** — never in-app. In-app glyphs are neutral
   vectors (← chevron, speaker). The **frog is a drawn vector character** (not an
   emoji); the rainbow is the phonics progress meter.
+
+## Rendering + input
+- **Round shapes need many segments** to read as truly round — use `draw::disc`
+  (128-gon) / high-seg arcs, never macroquad's faceted `draw_circle`/
+  `draw_ellipse` (~20-gon), even for small circles (e.g. a character's mouth).
+- **Debounce taps**: ignore a second tap within ~150 ms (or require a pointer
+  release between taps) so a single press never double-registers.
 
 ## Parent menu (long-press ←)
 - Long-press the in-game ← (500 ms) opens the parent settings overlay
