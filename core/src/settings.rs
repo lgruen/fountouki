@@ -160,6 +160,59 @@ pub fn save_patterns<S: KeyValueStore + ?Sized>(store: &mut S, settings: &Patter
 }
 
 // ---------------------------------------------------------------------------
+// Sing Back settings
+// ---------------------------------------------------------------------------
+
+/// Per-game "Sing Back" memory prefs. Stored at `fountouki.singback.settings.v1`.
+///
+/// `difficulty` is a pacing choice stored as a string (mirroring
+/// [`PatternsSettings`]' string choice fields so nanoserde serializes it the
+/// same way): `gentle` (slow playback, generous reproduce window) | `normal` |
+/// `speedy` (faster playback, tighter window). Default `normal`.
+#[derive(Debug, Clone, PartialEq, Eq, SerJson, DeJson)]
+pub struct SingbackSettings {
+    #[nserde(rename = "difficulty")]
+    pub difficulty: String,
+}
+
+impl Default for SingbackSettings {
+    fn default() -> Self {
+        Self {
+            difficulty: "normal".to_string(),
+        }
+    }
+}
+
+/// Fully-optional parse view of [`SingbackSettings`]; load only overrides a
+/// default when the field is present (nanoserde enforces the type on parse).
+#[derive(DeJson)]
+struct SingbackSettingsPatch {
+    #[nserde(rename = "difficulty")]
+    difficulty: Option<String>,
+}
+
+/// Load Sing Back settings: defaults overridden only by fields present in the
+/// stored blob. Absent blob / parse error → all defaults.
+pub fn load_singback<S: KeyValueStore + ?Sized>(store: &S) -> SingbackSettings {
+    let mut s = SingbackSettings::default();
+    let key = ns_key("singback", "settings");
+    if let Some(raw) = store.get(&key) {
+        if let Ok(patch) = SingbackSettingsPatch::deserialize_json(&raw) {
+            if let Some(v) = patch.difficulty {
+                s.difficulty = v;
+            }
+        }
+    }
+    s
+}
+
+/// Persist the whole Sing Back-settings object.
+pub fn save_singback<S: KeyValueStore + ?Sized>(store: &mut S, settings: &SingbackSettings) {
+    let key = ns_key("singback", "settings");
+    store.set(&key, &settings.serialize_json());
+}
+
+// ---------------------------------------------------------------------------
 // Token generation
 // ---------------------------------------------------------------------------
 
@@ -312,6 +365,42 @@ mod tests {
         assert!(json.contains("\"showHint\""), "json: {json}");
         assert!(!json.contains("theme_choice"), "json: {json}");
         assert!(!json.contains("show_hint"), "json: {json}");
+    }
+
+    #[test]
+    fn singback_defaults() {
+        assert_eq!(SingbackSettings::default().difficulty, "normal");
+    }
+
+    #[test]
+    fn singback_load_empty_is_defaults() {
+        let store = MemStore::new();
+        assert_eq!(load_singback(&store), SingbackSettings::default());
+    }
+
+    #[test]
+    fn singback_partial_blob_only_overrides_present_fields() {
+        let mut store = MemStore::new();
+        store.set(&ns_key("singback", "settings"), "{}"); // no keys
+        assert_eq!(load_singback(&store).difficulty, "normal"); // default kept
+        store.set(&ns_key("singback", "settings"), "{\"difficulty\":\"speedy\"}");
+        assert_eq!(load_singback(&store).difficulty, "speedy"); // overridden
+    }
+
+    #[test]
+    fn singback_roundtrip() {
+        let mut store = MemStore::new();
+        let s = SingbackSettings {
+            difficulty: "gentle".to_string(),
+        };
+        save_singback(&mut store, &s);
+        assert_eq!(load_singback(&store), s);
+    }
+
+    #[test]
+    fn singback_serializes_with_exact_keys() {
+        let json = SingbackSettings::default().serialize_json();
+        assert!(json.contains("\"difficulty\""), "json: {json}");
     }
 
     #[test]

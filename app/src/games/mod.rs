@@ -2,4 +2,5 @@
 pub mod patterns;
 pub mod phonics;
 pub mod picker;
+pub mod singback;
 pub mod tracing;

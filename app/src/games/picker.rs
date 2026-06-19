@@ -10,8 +10,12 @@ use macroquad::prelude::*;
 
 /// (route id, label). Order = display order. Adding a game = add an entry +
 /// a match arm in `draw_icon` and `main::build_game`.
-pub const GAMES: &[(&str, &str)] =
-    &[("patterns", "patterns"), ("phonics", "phonics"), ("tracing", "tracing")];
+pub const GAMES: &[(&str, &str)] = &[
+    ("patterns", "patterns"),
+    ("phonics", "phonics"),
+    ("tracing", "tracing"),
+    ("singback", "sing back"),
+];
 
 pub struct PickerScene {
     db: crate::store::Db,
@@ -68,9 +72,13 @@ fn mute_pos(f: &crate::layout::Frame) -> (Vec2, f32) {
 
 fn tile_rect(f: &crate::layout::Frame, i: usize) -> Rect {
     let n = GAMES.len() as f32;
-    let tw = (f.w * 0.24).clamp(170.0, 260.0);
-    let th = tw * 1.12;
+    let content = f.content();
     let gap = (f.w * 0.04).clamp(20.0, 60.0);
+    // Shrink the tile so all N fit across the safe content width on one row
+    // (never wrap, never clip the edge tiles) — mirrors patterns' choice-fit.
+    let fit_w = (content.w - (n - 1.0) * gap) / n;
+    let tw = (f.w * 0.24).clamp(120.0, 260.0).min(fit_w);
+    let th = tw * 1.12;
     let total = n * tw + (n - 1.0) * gap;
     let x0 = f.w / 2.0 - total / 2.0;
     let y = f.h / 2.0 - th / 2.0;
@@ -137,6 +145,26 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
             }
             let pose = draw::HousePose { parts: 4, site: true, ..Default::default() };
             draw::house(r.x + r.w * 0.71, r.y + r.h * 0.70, r.w * 0.235, &pose);
+        }
+        "singback" => {
+            // A choir preview: a row of four pad-colored dots, the 2nd "singing"
+            // (a glow halo behind a popped, brighter dot) — the memory mechanic.
+            // Colors match the game's pitch→color map (warm→cool).
+            let cols = [palette::RAINBOW[0], palette::RAINBOW[2], palette::RAINBOW[3], palette::RAINBOW[6]];
+            let s = r.w * 0.10;
+            let gap = s * 1.6;
+            let total = 3.0 * gap;
+            let x0 = cx - total / 2.0;
+            let lit = 1; // the glowing member
+            for (i, &col) in cols.iter().enumerate() {
+                let x = x0 + i as f32 * gap;
+                if i == lit {
+                    draw::disc(x, cy - s * 0.18, s * 1.7, Color::new(col.r, col.g, col.b, 0.4));
+                    draw::disc(x, cy - s * 0.18, s * 1.15, col);
+                } else {
+                    draw::disc(x, cy, s, col);
+                }
+            }
         }
         _ => {}
     }

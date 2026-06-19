@@ -19,6 +19,7 @@ pub struct Audio {
     doorbell: Option<Sound>,
     twinkle: Option<Sound>,
     trace_ticks: Vec<Sound>, // index = pentatonic step
+    memory_tones: Vec<Sound>, // index = Sing Back step (rising pitch)
     muted: Cell<bool>,
     silent: bool,
 }
@@ -40,6 +41,7 @@ impl Audio {
             doorbell: None,
             twinkle: None,
             trace_ticks: Vec::new(),
+            memory_tones: Vec::new(),
             muted: Cell::new(true),
             silent: true,
         }
@@ -55,6 +57,10 @@ impl Audio {
         for s in 0..synth::TRACE_TICK_STEPS {
             trace_ticks.push(load_pcm(&synth::trace_tick(s)).await);
         }
+        let mut memory_tones = Vec::with_capacity(synth::MEMORY_TONES as usize);
+        for s in 0..synth::MEMORY_TONES {
+            memory_tones.push(load_pcm(&synth::memory_tone(s)).await);
+        }
         Audio {
             correct,
             incorrect: Some(load_pcm(&synth::incorrect()).await),
@@ -69,6 +75,7 @@ impl Audio {
             doorbell: Some(load_pcm(&synth::doorbell()).await),
             twinkle: Some(load_pcm(&synth::twinkle()).await),
             trace_ticks,
+            memory_tones,
             muted: Cell::new(muted),
             silent: false,
         }
@@ -137,6 +144,15 @@ impl Audio {
         }
         let i = (step as usize).min(self.trace_ticks.len().saturating_sub(1));
         if let Some(s) = self.trace_ticks.get(i) {
+            play_sound(s, PlaySoundParams { looped: false, volume: 1.0 });
+        }
+    }
+    pub fn memory_tone(&self, step: u32) {
+        if self.silent || self.muted.get() {
+            return;
+        }
+        let i = (step as usize).min(self.memory_tones.len().saturating_sub(1));
+        if let Some(s) = self.memory_tones.get(i) {
             play_sound(s, PlaySoundParams { looped: false, volume: 1.0 });
         }
     }
