@@ -1238,6 +1238,16 @@ async fn main() {
             let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             let nav = sc.update(&ctx);
             let topbar_dead = matches!(nav, Nav::Stay) && sc.in_finale();
+            // The dance party is INTERACTIVE: tapping a dancer is accepted (it
+            // sings + dances + bursts confetti) and keeps us in the Finale — no
+            // crash, debounced. Proven via the dancer_taps reaction counter.
+            clk += 0.3;
+            let dancer = sc.finale_dancer_center(&frame, 1);
+            let ptr = tap(dancer);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let dnav = sc.update(&ctx);
+            let dancer_reacted =
+                matches!(dnav, Nav::Stay) && sc.in_finale() && sc.dancer_taps() == 1;
             // Corner replay restarts the session. Find the corner replay center.
             let (rc, _home, _br) = chrome::corner_buttons(&frame);
             clk += 0.3;
@@ -1248,10 +1258,10 @@ async fn main() {
             let restarted_short = sc.sequence().len() <= 3; // normal start_len = 2
             let best_kept = sc.best_span() == best_at_finale && best_at_finale >= 6;
             let restarted_ready = sc.in_ready();
-            if reached_finale && topbar_dead && restarted_short && best_kept && restarted_ready {
+            if reached_finale && topbar_dead && dancer_reacted && restarted_short && best_kept && restarted_ready {
                 println!("PASS singback-finale");
             } else {
-                println!("FAIL singback-finale (reached={reached_finale}, topbar_dead={topbar_dead}, short={restarted_short}, best_kept={best_kept} (best={}), ready={restarted_ready})", sc.best_span());
+                println!("FAIL singback-finale (reached={reached_finale}, topbar_dead={topbar_dead}, dancer_reacted={dancer_reacted}, short={restarted_short}, best_kept={best_kept} (best={}), ready={restarted_ready})", sc.best_span());
                 fails += 1;
             }
         }

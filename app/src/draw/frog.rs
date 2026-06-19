@@ -145,6 +145,40 @@ pub fn frog_party_hat(cx: f32, cy: f32, r: f32, pose: FrogPose, color: Color) {
     disc(apex.x, apex.y, 0.11 * r * rs, mix(color, palette::WHITE, 0.55));
 }
 
+/// DJ headphones for the frog: two ear cups on the sides of the head plus a band
+/// arcing over the top, so the frog visibly "runs the music" (a hat alone reads
+/// as just another party-goer). Draw AFTER [`frog`] with the same anchor + pose
+/// so it rides every hop, squash and tilt. `accent` tints the cup faces.
+pub fn frog_headphones(cx: f32, cy: f32, r: f32, pose: FrogPose, accent: Color) {
+    let rs = (pose.sx * pose.sy).sqrt();
+    let tf = |lx: f32, ly: f32| frog_point(cx, cy, r, pose, lx, ly);
+    let band = palette::INK;
+    // The headband: an arc from the left cup, OVER the crown (well above the eye
+    // bulges, which top out ~ -1.08r), to the right cup. Sampled as a poly-line so
+    // it reads round through any rotation/squash.
+    let cup_x = 1.04; // ear-cup centre, in units of r, at the widest temple
+    let cup_y = -0.18; // dropped to the side of the head (clear of the eyes)
+    let n = 11usize;
+    let mut arc = Vec::with_capacity(n);
+    for i in 0..n {
+        let u = i as f32 / (n - 1) as f32;
+        let a = std::f32::consts::PI * u; // 0 (right cup) .. PI (left cup)
+        // Ellipse from cup to cup, bowing high over the crown.
+        let lx = cup_x * r * a.cos();
+        let ly = cup_y * r - (1.34 * r - cup_y.abs() * r) * a.sin();
+        arc.push(tf(lx, ly));
+    }
+    stroke_path(&arc, (0.11 * r * rs).max(3.0), band);
+    // The two ear cups: a dark outer shell with an accent-tinted face, clamped on
+    // the SIDES of the head (clear of the eyes so it reads as cans, not goggles).
+    for s in [-1.0_f32, 1.0] {
+        let p = tf(s * cup_x * r, cup_y * r);
+        disc(p.x, p.y, 0.30 * r * rs, band);
+        disc(p.x, p.y, 0.18 * r * rs, accent);
+        disc(p.x, p.y, 0.07 * r * rs, mix(accent, palette::WHITE, 0.5));
+    }
+}
+
 /// A builder's hard hat perched on the frog's eye bulges — draw AFTER [`frog`]
 /// with the same anchor + pose so it rides every hop, squash and tilt.
 pub fn frog_hard_hat(cx: f32, cy: f32, r: f32, pose: FrogPose) {
