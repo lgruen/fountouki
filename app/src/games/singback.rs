@@ -1129,17 +1129,33 @@ impl SingbackScene {
         chrome::draw_corner_buttons(replay, home, br);
     }
 
-    /// The pose for dancer `i`: a continuous idle sway (so the party never goes
-    /// static), its melody-driven SING pop, and — when tapped — a `dance_kind`
-    /// move layered on top via a half-sine impulse.
+    /// The pose for dancer `i`: a continuous BEAT-SYNCED groove so the whole floor
+    /// dances in time with the tune (not just the one critter singing its note),
+    /// its melody-driven SING pop, and — when tapped — a `dance_kind` move layered
+    /// on top via a half-sine impulse.
     fn dancer_pose(&self, i: usize, rr: f32, t: f32) -> draw::CritterPose {
-        // Idle sway: a gentle staggered bob + lean so even untouched dancers move.
-        let sway = (t * 2.2 - i as f32 * 0.7).sin();
+        let pi = std::f32::consts::PI;
+        // The groove rides the shared melody clock so every dancer bounces in TIME
+        // with the music (the old idle sway half-rectified a slow sine, so each
+        // dancer sat flat at rest half its cycle and the floor read as static).
+        // A small per-dancer phase offset staggers the four into a little wave
+        // rather than a robotic unison. `bob` is one smooth hop per beat: 0 = knees
+        // bent on the downbeat, 1 = airborne between beats.
+        let beat = self.melody_t / BEAT_S - i as f32 * 0.16;
+        let bob = 0.5 - 0.5 * (beat * 2.0 * pi).cos();
+        // A slow side-to-side lean (staggered) so they sway as they bounce.
+        let sway = (t * 1.8 - i as f32 * 0.6).sin();
+        // A recurring happy squint (narrow spikes, staggered) so the dancers look
+        // gleeful rather than blank while they groove.
+        let squint = (t * 1.6 + i as f32 * 1.3).sin().max(0.0).powi(4) * 0.5;
         let mut pose = draw::CritterPose {
-            dy: -sway.max(0.0) * rr * 0.10,
-            rot: (t * 1.6 + i as f32).sin() * 0.05,
-            sy: 1.0 + 0.04 * sway,
-            sx: 1.0 - 0.02 * sway,
+            dy: -bob * rr * 0.14,
+            rot: sway * 0.12,
+            // Anticipation squash-and-stretch: stretch tall when airborne, squash
+            // wide when grounded, so the hop reads springy instead of a flat slide.
+            sy: 1.0 + 0.08 * bob - 0.04 * (1.0 - bob),
+            sx: 1.0 - 0.05 * bob + 0.03 * (1.0 - bob),
+            blink: squint,
             ..Default::default()
         };
         // Melody / tap sing pop (mouth open + a little lift).
@@ -1181,14 +1197,18 @@ impl SingbackScene {
         pose
     }
 
-    /// The frog DJ's pose: an idle host bob + a tap-triggered hop/spin flourish.
+    /// The frog DJ's pose: a BEAT-SYNCED host bob (grooving in time with the
+    /// dancers) + a tap-triggered hop/spin flourish.
     fn frog_dj_pose(&self, r: f32, t: f32) -> draw::FrogPose {
-        let bob = (t * 2.6).sin();
+        let pi = std::f32::consts::PI;
+        // One smooth hop per beat, on the shared melody clock, so the host nods in
+        // time with the floor instead of on its own loose timer.
+        let bob = 0.5 - 0.5 * (self.melody_t / BEAT_S * 2.0 * pi).cos();
         let mut pose = draw::FrogPose {
-            dy: -bob.max(0.0) * r * 0.08,
-            rot: (t * 1.4).sin() * 0.05,
-            sy: 1.0 + 0.04 * bob,
-            sx: 1.0 - 0.02 * bob,
+            dy: -bob * r * 0.10,
+            rot: (t * 1.4).sin() * 0.06,
+            sy: 1.0 + 0.05 * bob,
+            sx: 1.0 - 0.03 * bob,
             ..Default::default()
         };
         if self.frog_t < FROG_FLOURISH_S {
@@ -1635,6 +1655,10 @@ impl SingbackScene {
                 // dancers mid-move, the frog DJ mid-flourish, balloons up, confetti
                 // falling. Driving ~0.5s lands the entrance pops + some rain.
                 drive(&mut sc, ctx0, 16);
+                // Pin a representative groove phase so the still frame clearly shows
+                // the beat-synced bounce mid-hop (the per-dancer stagger spans the
+                // four across the bounce, reading as a little wave).
+                sc.melody_t = BEAT_S * 0.5;
                 // Force two distinct dance moves + the DJ flourish at fixed phases so
                 // the single captured frame clearly shows the party in motion.
                 sc.dance_t[0] = DANCE_MOVE_S * 0.4;
