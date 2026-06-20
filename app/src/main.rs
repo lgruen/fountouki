@@ -1121,33 +1121,37 @@ async fn main() {
             }
         }
         // singback: the sequence NEVER starts cold — a fresh scene opens in the
-        // Ready count-in lead-in, and only reaches Show after the lead-in, then
-        // Input after the whole sequence plays. Advance frames and confirm the
-        // phase order Ready → Show → Input.
+        // one-time Intro settle, then the Ready get-ready cue, and only reaches
+        // Show after the lead-in, then Input after the whole sequence plays.
+        // Advance frames and confirm the order Intro → Ready → Show → Input.
         {
             let mut sc = SingbackScene::new(Db::mem(), 99, now);
             let idle = Pointer::default();
-            let starts_ready = sc.in_ready();
-            // Run a couple seconds of frames; we should pass through Show and end
-            // in Input (nobody tapping). Track that Show was actually entered
-            // before Input (no instant cold start into the sequence).
+            let starts_intro = sc.in_intro();
+            // Run a few seconds of frames; we should pass through Ready then Show
+            // and end in Input (nobody tapping). Track each was actually entered
+            // (no instant cold start into the sequence).
+            let mut saw_ready = false;
             let mut saw_show = false;
             let mut clk = 0.0f32;
-            for _ in 0..200 {
+            for _ in 0..400 {
                 clk += 0.03;
                 let ctx = Ctx { dt: 0.03, time: clk, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
-                if !sc.in_ready() && !sc.in_input() {
-                    saw_show = true; // the only remaining reachable phase here
+                if sc.in_ready() {
+                    saw_ready = true;
+                }
+                if sc.in_show() {
+                    saw_show = true;
                 }
                 if sc.in_input() {
                     break;
                 }
             }
-            if starts_ready && saw_show && sc.in_input() {
+            if starts_intro && saw_ready && saw_show && sc.in_input() {
                 println!("PASS singback-lead-in");
             } else {
-                println!("FAIL singback-lead-in (starts_ready={starts_ready}, saw_show={saw_show}, in_input={})", sc.in_input());
+                println!("FAIL singback-lead-in (starts_intro={starts_intro}, saw_ready={saw_ready}, saw_show={saw_show}, in_input={})", sc.in_input());
                 fails += 1;
             }
         }
@@ -1248,6 +1252,24 @@ async fn main() {
             let dnav = sc.update(&ctx);
             let dancer_reacted =
                 matches!(dnav, Nav::Stay) && sc.in_finale() && sc.dancer_taps() == 1;
+            // Balloons NEVER pop — a tap just nudges one (it bobs away) and it
+            // stays tappable, so two taps on the SAME balloon (clock advanced past
+            // the debounce) both land. Proven via the balloon_bumps counter +
+            // staying in the Finale (a pop would have removed the target).
+            clk += 0.3;
+            let balloon = sc.finale_balloon_center(&frame, 0);
+            let ptr = tap(balloon);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let bnav1 = sc.update(&ctx);
+            clk += 0.3;
+            let balloon = sc.finale_balloon_center(&frame, 0);
+            let ptr = tap(balloon);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let bnav2 = sc.update(&ctx);
+            let balloon_reacted = matches!(bnav1, Nav::Stay)
+                && matches!(bnav2, Nav::Stay)
+                && sc.in_finale()
+                && sc.balloon_bumps() == 2;
             // Corner replay restarts the session. Find the corner replay center.
             let (rc, _home, _br) = chrome::corner_buttons(&frame);
             clk += 0.3;
@@ -1258,10 +1280,10 @@ async fn main() {
             let restarted_short = sc.sequence().len() <= 3; // normal start_len = 2
             let best_kept = sc.best_span() == best_at_finale && best_at_finale >= 6;
             let restarted_ready = sc.in_ready();
-            if reached_finale && topbar_dead && dancer_reacted && restarted_short && best_kept && restarted_ready {
+            if reached_finale && topbar_dead && dancer_reacted && balloon_reacted && restarted_short && best_kept && restarted_ready {
                 println!("PASS singback-finale");
             } else {
-                println!("FAIL singback-finale (reached={reached_finale}, topbar_dead={topbar_dead}, dancer_reacted={dancer_reacted}, short={restarted_short}, best_kept={best_kept} (best={}), ready={restarted_ready})", sc.best_span());
+                println!("FAIL singback-finale (reached={reached_finale}, topbar_dead={topbar_dead}, dancer_reacted={dancer_reacted}, balloon_reacted={balloon_reacted}, short={restarted_short}, best_kept={best_kept} (best={}), ready={restarted_ready})", sc.best_span());
                 fails += 1;
             }
         }
