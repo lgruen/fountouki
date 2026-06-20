@@ -68,7 +68,11 @@ fn tuning(difficulty: &str) -> Tuning {
 /// Curve, in fractions of `READY_TOTAL_S`: alpha eases 0 → `READY_DIM_PEAK` over
 /// `[0, READY_DIM_IN]` (dim-in), holds across `[READY_DIM_IN, READY_HOLD_END]`,
 /// then eases back to 0 over `[READY_HOLD_END, 1]` (bloom-out / reveal).
-const READY_TOTAL_S: f32 = 1.15;
+///
+/// Lengthened from 1.15 — the old fade resolved a touch too quickly to read as a
+/// deliberate "settle → now" (err on the slow side for the reveal, per the
+/// pedagogy notes).
+const READY_TOTAL_S: f32 = 1.55;
 /// Peak overlay alpha at the dim — "lights down to settle". Tuned by eye (A/B'd
 /// against 0.5): 0.65 + a deep cool indigo tint reads as a deliberate theatre
 /// "lights down → settle", where 0.5 navy-over-cream read as a flat beige-grey
@@ -79,11 +83,23 @@ const READY_DIM_IN: f32 = 0.42;
 /// End of the dim hold, where the bloom-out (reveal) ramp begins (fraction of
 /// `READY_TOTAL_S`).
 const READY_HOLD_END: f32 = 0.58;
-/// Overlay color: a deep, cool theatre indigo. Chosen over a cream/white bloom
-/// (white-on-cream is near-invisible) AND over the old near-INK navy 0x2b2c34
-/// (which, half-opaque over cream, flattened to a muddy beige-grey "disabled"
-/// wash). A deeper, cooler indigo reads as a deliberate "lights down → settle".
-const READY_OVERLAY: u32 = 0x1e1b3a;
+/// Overlay color: a deep, warm theatre plum-violet. Chosen over a cream/white
+/// bloom (white-on-cream is near-invisible), over the old near-INK navy 0x2b2c34
+/// (which flattened to a muddy beige-grey "disabled" wash), and over the prior
+/// cool indigo 0x1e1b3a (which half-opaque over cream read a little cold + dull).
+/// A deep plum-violet ties the get-ready dim to the finale's party violet and
+/// reads as a richer, warmer "lights down → settle".
+const READY_OVERLAY: u32 = 0x2a1b47;
+/// The one-time scene-entry lead-in (FIRST play only — retries go straight to the
+/// `Ready` cue): the choir eases in from the dim `READY_OVERLAY` wash over
+/// `INTRO_FADE_S` (a soft non-abrupt entrance), then holds fully revealed + still
+/// for `INTRO_HOLD_S` so the child can ORIENT in the scene before the get-ready
+/// cue and the first note. Calm throughout — no character motion (the choir is a
+/// neutral still pose), matching the "freeze ambient motion / lead into the
+/// sequence" rules. After it, the normal `Ready` dim-and-bloom + `Show` run.
+const INTRO_FADE_S: f32 = 0.65;
+const INTRO_HOLD_S: f32 = 0.7;
+const INTRO_TOTAL_S: f32 = INTRO_FADE_S + INTRO_HOLD_S;
 /// Sequence lengths UNDER which (or whenever `gentle`) a freshly-appended pad
 /// is rerolled so it never equals the immediately-preceding pad — same-critter-
 /// twice-in-a-row confuses beginners. At/beyond this length, repeats are allowed
@@ -161,9 +177,12 @@ const FLOOR_TILE_A: Color = palette::hexa(0xff8fb3, 0.55); // pink
 const FLOOR_TILE_B: Color = palette::hexa(0x8fd0ff, 0.55); // sky-blue
 /// How many triangular pennants the bunting swag strings across the top.
 const BUNTING_FLAGS: usize = 12;
-/// A warm-amber spotlight glow (NOT near-white) for the DJ's spot — near-white
-/// glows merged into a flat pale wash over the violet floor.
-const SPOTLIGHT_AMBER: u32 = 0xfff0b8;
+/// A warm-amber spotlight glow for the DJ's spot. Pulled off the old near-white
+/// 0xfff0b8: that pale fill, drawn as one hard-edged translucent disc, read as a
+/// bright "splotch" on the floor — and blew out further under a device's
+/// gamma-correct blending (vs. the softer software renders). A warmer amber, drawn
+/// through `soft_glow` (a radial falloff, lower alpha), reads as a glow not a blob.
+const SPOTLIGHT_AMBER: u32 = 0xffd98a;
 /// Per-dancer spotlight radius as a multiple of the dancer's body radius (idle).
 /// Kept tight so adjacent dancers' halos don't merge into one centre-stage blob;
 /// it widens a touch on the beat (see the draw).
@@ -187,9 +206,9 @@ const DJ_TAP_BURST_SPREAD: f32 = 0.6; // × `dj_r`
 /// A dancer's tap burst.
 const DANCER_TAP_BURST_N: usize = 16;
 const DANCER_TAP_BURST_SPREAD: f32 = 0.5; // × the dancer's body radius
-/// A balloon's pop burst.
-const BALLOON_POP_BURST_N: usize = 14;
-const BALLOON_POP_BURST_SPREAD: f32 = 0.8; // × the balloon radius
+/// How long a tapped balloon's swing-and-bob wobble animates. Balloons never pop
+/// (errorless + endlessly re-tappable) — a tap just nudges them around.
+const BALLOON_BUMP_S: f32 = 0.7;
 
 /// Confetti-rain pump cadence: one piece every `RAIN_INTERVAL_S` of accumulated
 /// time, shared by the Reward (new-best) escalation and the Finale.
@@ -228,6 +247,11 @@ const REWARD_STAR_PEAK_SCALE: f32 = STAR_POP_CAP * NEW_BEST_SCALE;
 
 #[derive(PartialEq, Clone, Copy)]
 enum Phase {
+    /// The one-time scene-entry lead-in (FIRST play only): `t` = seconds in. The
+    /// choir eases in from the dim wash then holds fully revealed + still so the
+    /// child can orient before the get-ready cue. At `INTRO_TOTAL_S` the normal
+    /// `Ready` cue begins. Never re-entered (a retry/restart goes to `Ready`).
+    Intro { t: f32 },
     /// The get-ready cue before Show: `t` = seconds in. A fullscreen overlay
     /// dims the still choir (lights down → settle), holds, then blooms back to a
     /// full reveal (lights up → now), reaching alpha 0 at `READY_TOTAL_S` — when
@@ -309,10 +333,17 @@ pub struct SingbackScene {
     sing_t: [f32; 4],
     /// Count of dancer taps accepted this finale (a --playtest reaction hook).
     dancer_taps: u32,
+    /// Count of balloon nudges accepted this finale (a --playtest reaction hook;
+    /// balloons never pop, so the count can grow without bound on re-taps).
+    balloon_bumps: u32,
     /// The frog DJ's flourish timer (seconds in, or `DANCE_IDLE` when idle).
     frog_t: f32,
-    /// Per-balloon "popped" flag; a popped balloon stops drawing + isn't tappable.
-    balloon_popped: [bool; FINALE_BALLOONS],
+    /// Per-balloon bump timer: seconds into the current tapped wobble, or
+    /// `DANCE_IDLE` when idle. Balloons NEVER pop — a tap just makes them swing +
+    /// bob (errorless, infinitely re-tappable). `balloon_kick` is the swing
+    /// direction of the current bump (set from which side of the balloon was hit).
+    balloon_t: [f32; FINALE_BALLOONS],
+    balloon_kick: [f32; FINALE_BALLOONS],
 }
 
 /// How many festive balloons bob over the dance floor (tappable → pop).
@@ -345,7 +376,7 @@ impl SingbackScene {
             gentle,
             sequence,
             streak: 0,
-            phase: Phase::Ready { t: 0.0 },
+            phase: Phase::Intro { t: 0.0 },
             flash_t: FLASH_IDLE,
             flash_pad: None,
             new_best: false,
@@ -361,8 +392,10 @@ impl SingbackScene {
             dance_kind: [0; 4],
             sing_t: [DANCE_IDLE; 4],
             dancer_taps: 0,
+            balloon_bumps: 0,
             frog_t: DANCE_IDLE,
-            balloon_popped: [false; FINALE_BALLOONS],
+            balloon_t: [DANCE_IDLE; FINALE_BALLOONS],
+            balloon_kick: [0.0; FINALE_BALLOONS],
         };
         // Apply the easy-stage no-repeat rule to the initial sequence too.
         sc.dedupe_initial();
@@ -498,8 +531,10 @@ impl SingbackScene {
         self.dance_kind = [0; 4];
         self.sing_t = [DANCE_IDLE; 4];
         self.dancer_taps = 0;
+        self.balloon_bumps = 0;
         self.frog_t = DANCE_IDLE;
-        self.balloon_popped = [false; FINALE_BALLOONS];
+        self.balloon_t = [DANCE_IDLE; FINALE_BALLOONS];
+        self.balloon_kick = [0.0; FINALE_BALLOONS];
         self.rain_acc = 0.0;
         ctx.audio.finale();
         self.save();
@@ -566,8 +601,14 @@ impl SingbackScene {
     pub(crate) fn best_span(&self) -> u32 {
         self.state.best_span
     }
+    pub(crate) fn in_intro(&self) -> bool {
+        matches!(self.phase, Phase::Intro { .. })
+    }
     pub(crate) fn in_ready(&self) -> bool {
         matches!(self.phase, Phase::Ready { .. })
+    }
+    pub(crate) fn in_show(&self) -> bool {
+        matches!(self.phase, Phase::Show { .. })
     }
     pub(crate) fn in_input(&self) -> bool {
         matches!(self.phase, Phase::Input { .. })
@@ -603,6 +644,14 @@ impl SingbackScene {
     /// How many dancer taps have been accepted this finale (a reaction proof).
     pub(crate) fn dancer_taps(&self) -> u32 {
         self.dancer_taps
+    }
+    /// The center of balloon `i` (its tap target) for the current frame.
+    pub(crate) fn finale_balloon_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        finale_layout(f).balloons[i.min(FINALE_BALLOONS - 1)].0
+    }
+    /// How many balloon nudges have been accepted this finale (a reaction proof).
+    pub(crate) fn balloon_bumps(&self) -> u32 {
+        self.balloon_bumps
     }
 }
 
@@ -652,6 +701,16 @@ impl Scene for SingbackScene {
         }
 
         match self.phase {
+            Phase::Intro { t } => {
+                // The one-time scene-entry settle: ease in, then a still hold, then
+                // hand off to the normal get-ready cue. No motion, no taps consumed.
+                let t = t + ctx.dt;
+                if t >= INTRO_TOTAL_S {
+                    self.enter_ready();
+                } else {
+                    self.phase = Phase::Intro { t };
+                }
+            }
             Phase::Ready { t } => {
                 // The dim-and-bloom get-ready cue: the choir stays still while a
                 // fullscreen overlay dims (settle) then blooms back (reveal). One
@@ -777,6 +836,17 @@ impl Scene for SingbackScene {
         // The choir: four pads, each a glow ring + the critter in its pad color.
         for i in 0..4 {
             self.draw_pad(&lay, i);
+        }
+
+        // The one-time scene-entry settle: the choir eases in from the dim wash,
+        // then the overlay holds clear (a still, fully-revealed beat to orient)
+        // before the get-ready cue takes over. Same wash as Ready so the entrance
+        // and the get-ready dim read as one continuous environment.
+        if let Phase::Intro { t } = self.phase {
+            let a = intro_overlay_alpha(t);
+            if a > 0.001 {
+                draw_rectangle(0.0, 0.0, f.w, f.h, palette::hexa(READY_OVERLAY, a));
+            }
         }
 
         // The get-ready cue: a fullscreen dim-and-bloom overlay OVER the still
@@ -938,6 +1008,13 @@ impl SingbackScene {
         } else {
             self.frog_t = DANCE_IDLE;
         }
+        for i in 0..FINALE_BALLOONS {
+            if self.balloon_t[i] < BALLOON_BUMP_S {
+                self.balloon_t[i] += dt;
+            } else {
+                self.balloon_t[i] = DANCE_IDLE;
+            }
+        }
 
         // Advance the looping melody clock. Each beat the clock CROSSES fires its
         // note + lights that critter exactly once; the trailing rest gives the
@@ -1030,18 +1107,18 @@ impl SingbackScene {
                     return Nav::Stay;
                 }
             }
-            // A balloon: pop it (confetti + twinkle); it stops drawing afterwards.
+            // A balloon: nudge it (swing + bob + twinkle). It NEVER pops — a tap
+            // just bumps it so it bobs away from the finger; endlessly re-tappable.
             for i in 0..FINALE_BALLOONS {
-                if self.balloon_popped[i] {
-                    continue;
-                }
                 let (bc, brad) = fl.balloons[i];
                 if input::hit_circle(pt.pos, bc.x, bc.y, brad * 1.2)
                     && self.tap_debounce.accept(TGT_BALLOON_BASE + i as u32, ctx.time)
                 {
-                    self.balloon_popped[i] = true;
+                    self.balloon_t[i] = 0.0;
+                    // Swing away from where it was hit (right tap → swing left).
+                    self.balloon_kick[i] = if pt.pos.x >= bc.x { -1.0 } else { 1.0 };
+                    self.balloon_bumps += 1;
                     ctx.audio.twinkle();
-                    self.confetti.burst(bc, BALLOON_POP_BURST_N, brad * BALLOON_POP_BURST_SPREAD);
                     return Nav::Stay;
                 }
             }
@@ -1069,7 +1146,9 @@ impl SingbackScene {
 
         // The dance floor: a glowing ellipse pool under a band of alternating
         // rounded tiles, so the critters clearly stand ON a floor (not a row).
-        let floor_glow = palette::hexa(0xffe9a8, 0.35);
+        // A soft warm pool under the floor — kept gentle (was 0.35) so it lifts the
+        // tiles without piling onto the amber base into a bright bottom band.
+        let floor_glow = palette::hexa(0xffe9a8, 0.22);
         draw::fill_ellipse(f.w / 2.0, fl.floor_y, fl.floor_rx, fl.floor_ry, 0.0, floor_glow);
         draw_dance_floor(&fl, t);
 
@@ -1083,14 +1162,13 @@ impl SingbackScene {
         let r = fl.star_r * pop * throb;
         draw_star_spotlight(fl.trophy.x, fl.trophy.y, r, t);
 
-        // Bobbing balloons (festive RAINBOW colours), behind the dancers so a tap
-        // burst reads in front. Each bobs on its own phase off the party clock.
+        // Bobbing balloons (festive RAINBOW colours), behind the dancers. Each
+        // bobs on its own phase off the party clock; a tap adds a decaying swing +
+        // bob (`balloon_bump`) so a touched balloon swings around rather than pops.
         for (i, (&(bc, brad), &ci)) in fl.balloons.iter().zip(BALLOON_COLOR_IDX.iter()).enumerate() {
-            if self.balloon_popped[i] {
-                continue;
-            }
             let bob = (t * 1.3 + i as f32 * 1.7).sin() * brad * 0.18;
-            draw_balloon(bc.x, bc.y + bob, brad, fl.floor_y, palette::RAINBOW[ci]);
+            let (kx, ky) = self.balloon_bump(i, brad);
+            draw_balloon(bc.x + kx, bc.y + bob + ky, brad, fl.floor_y, palette::RAINBOW[ci], i, t);
         }
 
         // The dancers: the four critters scattered across the floor at varied
@@ -1103,9 +1181,16 @@ impl SingbackScene {
             // A tight per-dancer spotlight under each, brightening on the beat. Kept
             // SMALL (was rr*1.2 — adjacent halos merged into one washed-out blob at
             // centre stage) so each dancer reads as separately spotlit, not a wash.
+            // Drawn through `soft_glow` (radial falloff, lower peak) so it never hard-
+            // edges into a bright splotch on the floor.
             let lift = (-pose.dy / (rr * 0.5)).clamp(0.0, 1.0);
-            let glow = Color::new(color.r, color.g, color.b, 0.24 + 0.20 * lift);
-            draw::disc(c.x, c.y + rr * 0.55, rr * (DANCER_GLOW_SCALE + 0.10 * lift), glow);
+            soft_glow(
+                c.x,
+                c.y + rr * 0.55,
+                rr * (DANCER_GLOW_SCALE + 0.10 * lift),
+                color,
+                0.20 + 0.12 * lift,
+            );
             draw::critter(CRITTERS[i], c.x, c.y, rr, color, &pose);
         }
 
@@ -1115,8 +1200,13 @@ impl SingbackScene {
         // host's own discrete spot). Headphones + a party hat make it visibly RUN
         // THE MUSIC (a green frog with a hat alone read as a 5th choir frog).
         let djp = self.frog_dj_pose(fl.dj_r, t);
-        let dj_glow = palette::hexa(SPOTLIGHT_AMBER, 0.34 + 0.16 * (t * 2.0).sin().abs());
-        draw::disc(fl.dj.x, fl.dj.y + fl.dj_r * 0.55, fl.dj_r * DJ_GLOW_SCALE, dj_glow);
+        soft_glow(
+            fl.dj.x,
+            fl.dj.y + fl.dj_r * 0.55,
+            fl.dj_r * DJ_GLOW_SCALE,
+            palette::hex(SPOTLIGHT_AMBER),
+            0.22 + 0.10 * (t * 2.0).sin().abs(),
+        );
         draw::frog(fl.dj.x, fl.dj.y, fl.dj_r, palette::RAINBOW[3], djp);
         draw::frog_party_hat(fl.dj.x, fl.dj.y, fl.dj_r, djp, palette::RAINBOW[0]);
         draw::frog_headphones(fl.dj.x, fl.dj.y, fl.dj_r, djp, palette::RAINBOW[5]);
@@ -1220,6 +1310,22 @@ impl SingbackScene {
             pose.blink = (imp * 0.5).min(0.5);
         }
         pose
+    }
+
+    /// The tapped-balloon nudge offset `(dx, dy)` for balloon `i`: a decaying
+    /// swing (in `balloon_kick[i]`'s direction) with a little upward bob, so a
+    /// touched balloon swings around and settles — it never pops. `(0, 0)` idle.
+    fn balloon_bump(&self, i: usize, brad: f32) -> (f32, f32) {
+        if self.balloon_t[i] >= BALLOON_BUMP_S {
+            return (0.0, 0.0);
+        }
+        let p = self.balloon_t[i] / BALLOON_BUMP_S;
+        let env = 1.0 - p; // linear decay to rest
+        // A couple of side swings that damp out, plus a single soft upward kick.
+        let swing = (p * std::f32::consts::PI * 3.0).sin() * env;
+        let dx = self.balloon_kick[i] * brad * 0.55 * swing;
+        let dy = -brad * 0.3 * (p * std::f32::consts::PI).sin() * env;
+        (dx, dy)
     }
 }
 
@@ -1471,22 +1577,60 @@ fn finale_layout(f: &crate::layout::Frame) -> FinaleLayout {
 
 /// A festive balloon: a teardrop body + a tiny knot + a thin curving string down
 /// toward the floor. Local to the finale (not reused elsewhere). RAINBOW-coloured.
-fn draw_balloon(cx: f32, cy: f32, r: f32, floor_y: f32, color: Color) {
-    // The string: a gentle S-curve from the knot down toward the floor.
+/// `i` (the balloon index) + `t` (the party clock) give each string a DISTINCT
+/// curve that gently SWAYS as the balloon floats — no two hang alike, and none
+/// reads as the old straight two-segment line.
+fn draw_balloon(cx: f32, cy: f32, r: f32, floor_y: f32, color: Color, i: usize, t: f32) {
+    use std::f32::consts::PI;
+    // The string: a smooth curved ribbon from the knot down toward the floor,
+    // sampled finely (a sine bow, not two straight segments). Each balloon bows a
+    // different way + amount (off `i`) and the whole curve sways slowly (off `t`),
+    // with the free tip drifting most, so the strings drift like real ribbons.
     let knot_y = cy + r * 1.08;
     let end_y = (cy + r * 4.0).min(floor_y);
-    let mid = vec2(cx + r * 0.35, (knot_y + end_y) / 2.0);
-    draw::stroke_path(
-        &[vec2(cx, knot_y), mid, vec2(cx - r * 0.12, end_y)],
-        (r * 0.06).max(1.5),
-        palette::hexa(0x6f6e77, 0.7),
-    );
+    let span = (end_y - knot_y).max(1.0);
+    let fi = i as f32;
+    // Per-balloon curve: alternating bow direction + a size that varies per index,
+    // so the five strings clearly differ in shape (not one repeated curve).
+    let dir = if i.is_multiple_of(2) { 1.0 } else { -1.0 };
+    let bow_amp = r * (0.42 + 0.22 * (fi * 1.7).sin().abs());
+    // A slow sway of the whole curve + a larger drift of the free tip.
+    let sway = (t * 1.05 + fi * 1.7).sin();
+    let twist = (t * 0.8 + fi * 2.3).cos();
+    const N: usize = 18;
+    let mut pts = Vec::with_capacity(N + 1);
+    for k in 0..=N {
+        let u = k as f32 / N as f32; // 0 at knot → 1 at tip
+        let y = knot_y + span * u;
+        // A single sine bow (peaks mid-string) that breathes with `twist`, plus a
+        // tip drift that grows toward the free end so the bottom swings most.
+        let bow = (u * PI).sin() * bow_amp * dir * (0.7 + 0.3 * twist);
+        let drift = sway * r * 0.22 * u * u;
+        pts.push(vec2(cx + bow + drift, y));
+    }
+    draw::stroke_path(&pts, (r * 0.06).max(1.5), palette::hexa(0x6f6e77, 0.7));
     // The body: a slightly tall ellipse, with a soft highlight + a darker base.
     draw::fill_ellipse(cx, cy, r * 0.86, r * 1.04, 0.0, color);
     let hi = palette::hexa(0xffffff, 0.35);
     draw::fill_ellipse(cx - r * 0.28, cy - r * 0.34, r * 0.24, r * 0.34, 0.0, hi);
     // The knot: a tiny triangle/disc at the base.
     draw::disc(cx, knot_y, r * 0.12, color);
+}
+
+/// A soft radial glow with NO hard disc edge: a few concentric discs from `r`
+/// down, each at a fraction of `peak` alpha, so opacity builds smoothly toward the
+/// centre and fades to nothing at the rim. Replaces a single translucent disc,
+/// whose hard edge + pale fill read as a bright "splotch" on the floor (and blew
+/// out further under a device's gamma-correct blending vs. the software renders).
+fn soft_glow(x: f32, y: f32, r: f32, color: Color, peak: f32) {
+    const RINGS: usize = 5;
+    let per = peak / RINGS as f32;
+    for k in 0..RINGS {
+        // Outer (largest) first, smaller discs stacked on top → the centre
+        // accumulates `per` RINGS times (≈ `peak`) while the rim keeps just one.
+        let f = k as f32 / RINGS as f32;
+        draw::disc(x, y, r * (1.0 - 0.78 * f), Color { a: per, ..color });
+    }
 }
 
 /// The dance floor's checker tiles: a band of alternating rounded-rect tiles
@@ -1569,6 +1713,17 @@ fn draw_star_spotlight(x: f32, y: f32, r: f32, t: f32) {
 /// settle), holds at the peak, then eases back to 0 (lights up to reveal),
 /// reaching exactly 0 at `READY_TOTAL_S` so the first note lands on the full
 /// reveal ("now"). Cubic ease both directions for a soft, non-mechanical feel.
+/// The scene-entry overlay alpha at `t` seconds into Intro: the dim wash eases
+/// from `READY_DIM_PEAK` back to 0 over `INTRO_FADE_S` (the soft entrance), then
+/// stays clear through the still orientation hold. Cubic ease for a soft feel.
+fn intro_overlay_alpha(t: f32) -> f32 {
+    if t >= INTRO_FADE_S {
+        return 0.0;
+    }
+    let u = anim::clamp01(t / INTRO_FADE_S);
+    READY_DIM_PEAK * (1.0 - anim::ease_out_cubic(u))
+}
+
 fn ready_overlay_alpha(t: f32) -> f32 {
     let f = anim::clamp01(t / READY_TOTAL_S); // fraction of the cue
     if f < READY_DIM_IN {
