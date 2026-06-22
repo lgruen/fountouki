@@ -15,6 +15,7 @@ pub const GAMES: &[(&str, &str)] = &[
     ("phonics", "phonics"),
     ("tracing", "tracing"),
     ("singback", "sing back"),
+    ("clock", "clock"),
 ];
 
 pub struct PickerScene {
@@ -165,6 +166,23 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
                     draw::disc(x, cy, s, col);
                 }
             }
+        }
+        "clock" => {
+            // A friendly clock face reading 3 o'clock: honey rim, cream face,
+            // a short warm little hand + a long cool big hand from the hub.
+            let cr = r.w * 0.26;
+            draw::disc(cx, cy, cr, palette::hex(0xe3b96a));
+            draw::disc(cx, cy, cr * 0.9, palette::CARD);
+            for h in 0..12 {
+                let a = -std::f32::consts::FRAC_PI_2 + h as f32 / 12.0 * std::f32::consts::TAU;
+                let o = vec2(cx + a.cos() * cr * 0.84, cy + a.sin() * cr * 0.84);
+                let i = vec2(cx + a.cos() * cr * 0.74, cy + a.sin() * cr * 0.74);
+                draw::stroke_path(&[i, o], (cr * 0.04).max(1.5), palette::MUTED);
+            }
+            // Big hand up (12), little hand right (3) — reads "3 o'clock".
+            draw::stroke_path(&[vec2(cx, cy), vec2(cx, cy - cr * 0.78)], (cr * 0.05).max(2.0), palette::RAINBOW[4]);
+            draw::stroke_path(&[vec2(cx, cy), vec2(cx + cr * 0.5, cy)], (cr * 0.08).max(3.0), palette::hex(0xe85c6b));
+            draw::disc(cx, cy, (cr * 0.07).max(2.5), palette::INK);
         }
         _ => {}
     }

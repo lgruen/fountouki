@@ -213,6 +213,60 @@ pub fn save_singback<S: KeyValueStore + ?Sized>(store: &mut S, settings: &Singba
 }
 
 // ---------------------------------------------------------------------------
+// Clock ("Frog's Day") settings
+// ---------------------------------------------------------------------------
+
+/// Per-game "Frog's Day" analog-clock prefs. Stored at
+/// `fountouki.clock.settings.v1`.
+///
+/// `difficulty` is the parent-chosen level, stored as a string (mirroring the
+/// other games' string choice fields): `match` (the target number glows on the
+/// dial — drag the little hand onto it; big hand pinned) | `routine` (no dial
+/// highlight; still little-hand only) | `clock` (set BOTH hands for o'clock) |
+/// `halfpast` (adds half-past targets — set the big hand up OR down). Default
+/// `match`, the gentlest.
+#[derive(Debug, Clone, PartialEq, Eq, SerJson, DeJson)]
+pub struct ClockSettings {
+    #[nserde(rename = "difficulty")]
+    pub difficulty: String,
+}
+
+impl Default for ClockSettings {
+    fn default() -> Self {
+        Self { difficulty: "match".to_string() }
+    }
+}
+
+/// Fully-optional parse view of [`ClockSettings`]; load only overrides a default
+/// when the field is present (nanoserde enforces the type on parse).
+#[derive(DeJson)]
+struct ClockSettingsPatch {
+    #[nserde(rename = "difficulty")]
+    difficulty: Option<String>,
+}
+
+/// Load clock settings: defaults overridden only by fields present in the stored
+/// blob. Absent blob / parse error → all defaults.
+pub fn load_clock<S: KeyValueStore + ?Sized>(store: &S) -> ClockSettings {
+    let mut s = ClockSettings::default();
+    let key = ns_key("clock", "settings");
+    if let Some(raw) = store.get(&key) {
+        if let Ok(patch) = ClockSettingsPatch::deserialize_json(&raw) {
+            if let Some(v) = patch.difficulty {
+                s.difficulty = v;
+            }
+        }
+    }
+    s
+}
+
+/// Persist the whole clock-settings object.
+pub fn save_clock<S: KeyValueStore + ?Sized>(store: &mut S, settings: &ClockSettings) {
+    let key = ns_key("clock", "settings");
+    store.set(&key, &settings.serialize_json());
+}
+
+// ---------------------------------------------------------------------------
 // Token generation
 // ---------------------------------------------------------------------------
 
@@ -400,6 +454,40 @@ mod tests {
     #[test]
     fn singback_serializes_with_exact_keys() {
         let json = SingbackSettings::default().serialize_json();
+        assert!(json.contains("\"difficulty\""), "json: {json}");
+    }
+
+    #[test]
+    fn clock_defaults() {
+        assert_eq!(ClockSettings::default().difficulty, "match");
+    }
+
+    #[test]
+    fn clock_load_empty_is_defaults() {
+        let store = MemStore::new();
+        assert_eq!(load_clock(&store), ClockSettings::default());
+    }
+
+    #[test]
+    fn clock_partial_blob_only_overrides_present_fields() {
+        let mut store = MemStore::new();
+        store.set(&ns_key("clock", "settings"), "{}"); // no keys
+        assert_eq!(load_clock(&store).difficulty, "match"); // default kept
+        store.set(&ns_key("clock", "settings"), "{\"difficulty\":\"halfpast\"}");
+        assert_eq!(load_clock(&store).difficulty, "halfpast"); // overridden
+    }
+
+    #[test]
+    fn clock_roundtrip() {
+        let mut store = MemStore::new();
+        let s = ClockSettings { difficulty: "clock".to_string() };
+        save_clock(&mut store, &s);
+        assert_eq!(load_clock(&store), s);
+    }
+
+    #[test]
+    fn clock_serializes_with_exact_keys() {
+        let json = ClockSettings::default().serialize_json();
         assert!(json.contains("\"difficulty\""), "json: {json}");
     }
 
