@@ -6,7 +6,7 @@
 use crate::{draw, input, kb, palette, scene::Ctx, store::Db, text};
 use fountouki_core::{
     rng::Mulberry32,
-    settings::{self, PatternsSettings, SingbackSettings},
+    settings::{self, ClockSettings, PatternsSettings, SingbackSettings},
     srs,
     themes::ThemeChoice,
 };
@@ -42,6 +42,7 @@ const THEME_CYCLE: [ThemeChoice; 10] = [
 const DIFFS: [&str; 3] = ["auto", "easy", "hard"];
 const MODES: [&str; 2] = ["next", "unit"];
 const SB_DIFFS: [&str; 3] = ["gentle", "normal", "speedy"];
+const CL_DIFFS: [&str; 4] = ["match", "routine", "clock", "halfpast"];
 
 pub struct ParentPanel {
     db: Db,
@@ -55,6 +56,10 @@ pub struct ParentPanel {
     sb_dirty: bool,
     /// Read-only longest-sequence record (sing back); `None` for other games.
     sb_best: Option<u32>,
+    cl: ClockSettings,
+    cl_dirty: bool,
+    /// Read-only furthest difficulty completed (clock); `None` for other games.
+    cl_best: Option<u32>,
     start_over: bool,
     /// Read-only Leitner mastery summary (phonics + tracing).
     mastery: Option<Mastery>,
@@ -94,6 +99,16 @@ impl ParentPanel {
         } else {
             None
         };
+        let cl = {
+            let kv = db.borrow_kv();
+            settings::load_clock(&**kv)
+        };
+        let cl_best = if game == "clock" {
+            let kv = db.borrow_kv();
+            Some(fountouki_core::clock::load(&**kv, now).best_level)
+        } else {
+            None
+        };
         let mastery = if game == "phonics" || game == "tracing" {
             Some(compute_mastery(&db, game, now))
         } else {
@@ -110,6 +125,9 @@ impl ParentPanel {
             sb,
             sb_dirty: false,
             sb_best,
+            cl,
+            cl_dirty: false,
+            cl_best,
             start_over: false,
             mastery,
             seed,
@@ -133,6 +151,9 @@ impl ParentPanel {
             }
             if self.game == "singback" {
                 settings::save_singback(&mut **kv, &self.sb);
+            }
+            if self.game == "clock" {
+                settings::save_clock(&mut **kv, &self.cl);
             }
         }
     }
@@ -207,7 +228,7 @@ impl ParentPanel {
         // Outside the card → close.
         if !hit(pt.pos, l.card) {
             self.apply();
-            return PanelResult::Close { rebuild: self.ptn_dirty || self.sb_dirty };
+            return PanelResult::Close { rebuild: self.ptn_dirty || self.sb_dirty || self.cl_dirty };
         }
         // Body controls are only tappable where they're actually visible (inside
         // the scroll viewport); the pinned `done` button is always live.
@@ -293,9 +314,28 @@ impl ParentPanel {
                 return PanelResult::Close { rebuild: true };
             }
         }
+        if self.game == "clock" && in_body {
+            if hit(pt.pos, l.diff) {
+                self.cl.difficulty = cycle(&CL_DIFFS, &self.cl.difficulty);
+                self.cl_dirty = true;
+            }
+            if hit(pt.pos, l.start_over) {
+                // Start over = furthest level back to 0; start_over bumps
+                // generation + lastSeen so the reset wins the merge.
+                {
+                    use fountouki_core::clock as ck;
+                    let mut kv = self.db.borrow_kv_mut();
+                    let cur = ck::load(&**kv, ctx.now);
+                    ck::save(&mut **kv, &ck::start_over(&cur, ctx.now));
+                }
+                self.start_over = true;
+                self.apply();
+                return PanelResult::Close { rebuild: true };
+            }
+        }
         if hit(pt.pos, l.done) {
             self.apply();
-            return PanelResult::Close { rebuild: self.ptn_dirty || self.sb_dirty };
+            return PanelResult::Close { rebuild: self.ptn_dirty || self.sb_dirty || self.cl_dirty };
         }
         PanelResult::Stay
     }
@@ -326,6 +366,11 @@ impl ParentPanel {
         if self.game == "singback" {
             chip(l.diff, "tempo", sb_diff_label(&self.sb.difficulty));
             draw_best_span(l.mastery, self.sb_best.unwrap_or(0));
+            button(l.start_over, "start over", palette::ACCENT, palette::WHITE);
+        }
+        if self.game == "clock" {
+            chip(l.diff, "level", cl_diff_label(&self.cl.difficulty));
+            draw_best_level(l.mastery, self.cl_best.unwrap_or(0));
             button(l.start_over, "start over", palette::ACCENT, palette::WHITE);
         }
         // Sync section.
@@ -457,6 +502,14 @@ fn sb_diff_label(cur: &str) -> &'static str {
         _ => "Normal",
     }
 }
+fn cl_diff_label(cur: &str) -> &'static str {
+    match cur {
+        "routine" => "Find the number",
+        "clock" => "Set both hands",
+        "halfpast" => "Half past",
+        _ => "Match the number",
+    }
+}
 
 // --- layout + control drawing ----------------------------------------------
 
@@ -531,6 +584,10 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
         diff_l = labeled(&mut ly); // tempo cycler
         mastery_l = block(&mut ly, 60.0); // best-span readout + star row
         start_l = block(&mut ly, BTN_H);
+    } else if game == "clock" {
+        diff_l = labeled(&mut ly); // level cycler
+        mastery_l = block(&mut ly, 60.0); // furthest-level readout + star row
+        start_l = block(&mut ly, BTN_H);
     }
     let token_l = labeled(&mut ly);
     let gen_l = block(&mut ly, BTN_H);
@@ -561,7 +618,7 @@ fn layout(f: &crate::layout::Frame, game: &str, scroll: f32) -> Layout {
         (row(theme_l, rw), row(diff_l, rw), row(mode_l, rw), row(hint_l, rw), row(start_l, rw))
     } else if game == "tracing" {
         (off, off, off, off, row(start_l, rw))
-    } else if game == "singback" {
+    } else if game == "singback" || game == "clock" {
         (off, row(diff_l, rw), off, off, row(start_l, rw))
     } else {
         (off, off, off, off, off)
@@ -642,6 +699,26 @@ fn draw_best_span(r: Rect, best: u32) {
     }
 }
 
+/// Read-only "furthest difficulty completed" readout for the clock game: a
+/// label + a small row of gold stars (one per completed level, 0..=4).
+fn draw_best_level(r: Rect, best: u32) {
+    let label = match best {
+        0 => "Furthest: not yet".to_string(),
+        1 => "Furthest: match the number".to_string(),
+        2 => "Furthest: find the number".to_string(),
+        3 => "Furthest: set both hands".to_string(),
+        _ => "Furthest: half past".to_string(),
+    };
+    text::ui_left(&label, r.x, r.y + 11.0, 15, palette::MUTED);
+    let r0 = 9.0;
+    let gap = 8.0;
+    let y0 = r.y + 40.0;
+    for i in 0..best.min(4) {
+        let cx = r.x + r0 + i as f32 * (2.0 * r0 + gap);
+        draw::star(cx, y0, r0, palette::GOLD);
+    }
+}
+
 fn draw_mastery(r: Rect, m: &Mastery) {
     let x = r.x;
     text::ui_left(
@@ -681,7 +758,7 @@ mod tests {
     /// generate/clear/start-over controls on short phones.
     #[test]
     fn done_is_pinned_below_the_body() {
-        for game in ["patterns", "phonics", "tracing", "singback"] {
+        for game in ["patterns", "phonics", "tracing", "singback", "clock"] {
             for (w, h) in SIZES {
                 let l = layout(&frame(w, h), game, 0.0);
                 let view_bottom = l.view.y + l.view.h;
@@ -725,7 +802,7 @@ mod tests {
     /// inside the padded column.
     #[test]
     fn sync_pause_shares_the_generate_row() {
-        for game in ["patterns", "phonics", "tracing", "singback"] {
+        for game in ["patterns", "phonics", "tracing", "singback", "clock"] {
             for (w, h) in SIZES {
                 let l = layout(&frame(w, h), game, 0.0);
                 assert_eq!(l.sync_pause.y, l.gen.y, "{game} {w}x{h}: not on the gen row");
@@ -762,7 +839,7 @@ mod tests {
     /// and never scrolls.
     #[test]
     fn tablets_fit_without_scrolling() {
-        for game in ["patterns", "phonics", "tracing", "singback"] {
+        for game in ["patterns", "phonics", "tracing", "singback", "clock"] {
             for (w, h) in [(1194.0, 834.0), (834.0, 1194.0)] {
                 let l = layout(&frame(w, h), game, 0.0);
                 assert_eq!(l.max_scroll, 0.0, "{game} {w}x{h} should fit without scroll");

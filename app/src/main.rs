@@ -22,6 +22,7 @@ mod sound;
 mod store;
 mod text;
 
+use games::clock::ClockScene;
 use games::patterns::PatternsScene;
 use games::phonics::PhonicsScene;
 use games::picker::PickerScene;
@@ -74,6 +75,7 @@ fn build_game(id: &str, db: &Db, now: i64) -> Box<dyn Scene> {
         "patterns" => Box::new(PatternsScene::new(db.clone(), now as u32 ^ 0x1234_5678, now)),
         "tracing" => Box::new(TracingScene::new(db.clone(), now as u32 ^ 0x7e11_e77a, now)),
         "singback" => Box::new(SingbackScene::new(db.clone(), now as u32 ^ 0x5126_acc0, now)),
+        "clock" => Box::new(ClockScene::new(db.clone(), now as u32 ^ 0xc10c_c10c, now)),
         _ => Box::new(PhonicsScene::new(db.clone(), now as u32 ^ 0x5bd1_e995, now)),
     }
 }
@@ -462,6 +464,32 @@ async fn main() {
                 };
                 Box::new(SingbackScene::capture(db.clone(), 99, now, cap, &ctx0))
             }
+            "clock" | "clock-clock" | "clock-halfpast" | "clock-reward" | "clock-finale" => {
+                use games::clock::CaptureState;
+                // Each clock golden pins a difficulty so the scaffold (glow/ghost
+                // vs. model clock) renders for its level.
+                let diff = match which {
+                    "clock-clock" => "clock",
+                    "clock-halfpast" => "halfpast",
+                    _ => "match", // "clock", "clock-reward", "clock-finale"
+                };
+                {
+                    let mut kv = db.borrow_kv_mut();
+                    let cs = fountouki_core::settings::ClockSettings { difficulty: diff.to_string() };
+                    fountouki_core::settings::save_clock(&mut **kv, &cs);
+                }
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let idle = Pointer::default();
+                let ctx0 = Ctx { dt: 0.016, time: 0.4, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                let cap = match which {
+                    "clock-clock" => CaptureState::SetClock,
+                    "clock-halfpast" => CaptureState::SetHalfpast,
+                    "clock-reward" => CaptureState::Reward,
+                    "clock-finale" => CaptureState::Finale,
+                    _ => CaptureState::SetMatch, // "clock"
+                };
+                Box::new(ClockScene::capture(db.clone(), 99, now, cap, &ctx0))
+            }
             _ => {
                 let mut sc = PhonicsScene::new(db.clone(), 7, now);
                 sc.stars = 3; // mid-session for a representative shot
@@ -473,6 +501,7 @@ async fn main() {
             "parent-phonics" => Some(ParentPanel::open(db.clone(), "phonics", now, 99)),
             "parent-tracing" => Some(ParentPanel::open(db.clone(), "tracing", now, 99)),
             "parent-singback" => Some(ParentPanel::open(db.clone(), "singback", now, 99)),
+            "parent-clock" => Some(ParentPanel::open(db.clone(), "clock", now, 99)),
             _ => None,
         };
 
@@ -1342,6 +1371,197 @@ async fn main() {
                 println!("PASS singback-debounce-distinct");
             } else {
                 println!("FAIL singback-debounce-distinct (p0={p0}, p1={p1}, after_first={after_first}, in_reward={}, in_input={})", sc.in_reward(), sc.in_input());
+                fails += 1;
+            }
+        }
+        // clock: solve ONE event of the current scene by dragging the hands
+        // through the REAL input path — sets the big hand (if interactive) then
+        // the little hand onto the target number; the auto-check then advances.
+        // Settles past the reward beat so the next event presents.
+        let solve_event = |sc: &mut ClockScene| {
+            let idle = Pointer::default();
+            // A clean release first, so any still-held grab from a prior step is
+            // dropped and the drags below grab fresh.
+            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let mut guard = 0;
+            while !sc.in_set() && !sc.in_finale() && guard < 60 {
+                let ctx = Ctx { dt: 0.2, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                guard += 1;
+            }
+            if !sc.in_set() {
+                return;
+            }
+            let (th, tm) = sc.target_hms();
+            if sc.level_id() >= 3 {
+                // Grab the big hand at its tip, drag it to the target minute.
+                let ptr = drag(sc.minute_tip_px(&frame));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let ptr = drag(sc.minute_px(&frame, tm));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                // Release between hands so the next press grabs fresh.
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if sc.in_set() {
+                let ptr = drag(sc.hour_tip_px(&frame));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let ptr = drag(sc.number_px(&frame, th));
+                let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            let mut g2 = 0;
+            while sc.in_reward() && g2 < 40 {
+                let ctx = Ctx { dt: 0.2, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                g2 += 1;
+            }
+        };
+
+        // clock (level 1 "match"): play the WHOLE day — each event auto-checks on
+        // a correct little-hand set; stars climb monotonically to the day length;
+        // finishing the day reaches the Finale and records best_level = 1.
+        {
+            let db = Db::mem(); // default settings → level 1 "match"
+            let mut sc = ClockScene::new(db, 7, now);
+            let len = sc.day_len() as u32;
+            let mut monotonic = true;
+            let mut prev = sc.stars();
+            let mut guard = 0;
+            while !sc.in_finale() && guard < (len + 4) {
+                solve_event(&mut sc);
+                monotonic &= sc.stars() >= prev;
+                prev = sc.stars();
+                guard += 1;
+            }
+            if sc.in_finale() && monotonic && sc.stars() == len && sc.best_level() == 1 {
+                println!("PASS clock-match-day");
+            } else {
+                println!(
+                    "FAIL clock-match-day (finale={}, monotonic={monotonic}, stars={}/{len}, best={})",
+                    sc.in_finale(),
+                    sc.stars(),
+                    sc.best_level()
+                );
+                fails += 1;
+            }
+        }
+        // clock (level 3 "clock"): a single event needs BOTH hands set (the big
+        // hand to o'clock + the little hand to the number). Setting only one must
+        // NOT auto-advance; setting both does. Proves two-hand setting + the
+        // errorless auto-check via the real drag path.
+        {
+            let db = Db::mem();
+            {
+                let mut kv = db.borrow_kv_mut();
+                let cs = fountouki_core::settings::ClockSettings { difficulty: "clock".to_string() };
+                fountouki_core::settings::save_clock(&mut **kv, &cs);
+            }
+            let mut sc = ClockScene::new(db, 7, now);
+            let level3 = sc.level_id() == 3;
+            // Reach Set.
+            let idle = Pointer::default();
+            let mut guard = 0;
+            while !sc.in_set() && guard < 30 {
+                let ctx = Ctx { dt: 0.2, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                guard += 1;
+            }
+            let (th, _tm) = sc.target_hms();
+            // Set ONLY the little hand correctly; the big hand starts wrong, so
+            // this must not score (errorless, no premature advance).
+            let ptr = drag(sc.hour_tip_px(&frame));
+            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let ptr = drag(sc.number_px(&frame, th));
+            let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let held = sc.in_set() && sc.stars() == 0;
+            // Now finish the big hand → both match → it scores.
+            solve_event(&mut sc);
+            if level3 && held && sc.stars() == 1 {
+                println!("PASS clock-two-hand");
+            } else {
+                println!("FAIL clock-two-hand (level3={level3}, held={held}, stars={})", sc.stars());
+                fails += 1;
+            }
+        }
+        // clock: a parent "start over" resets best_level back to 0. Earn a best by
+        // completing the day, then apply core::clock::start_over and reload — a
+        // freshly-mounted scene reads best_level 0 (the reset out-generations the
+        // earned blob).
+        {
+            let db = Db::mem();
+            let mut sc = ClockScene::new(db.clone(), 7, now);
+            let mut guard = 0;
+            while !sc.in_finale() && guard < 12 {
+                solve_event(&mut sc);
+                guard += 1;
+            }
+            let earned = sc.best_level();
+            {
+                use fountouki_core::clock as ck;
+                let mut kv = db.borrow_kv_mut();
+                let cur = ck::load(&**kv, now);
+                ck::save(&mut **kv, &ck::start_over(&cur, now));
+            }
+            let fresh = ClockScene::new(db, 11, now);
+            if earned >= 1 && fresh.best_level() == 0 {
+                println!("PASS clock-start-over");
+            } else {
+                println!("FAIL clock-start-over (earned={earned}, after_reset={})", fresh.best_level());
+                fails += 1;
+            }
+        }
+        // clock: the bedtime Finale is interactive + its (invisible) topbar is
+        // dead. Reach it, then: tapping a star twinkles (star_taps++), tapping the
+        // sleeping frog stirs it (frog_taps++), a top-left tap does NOT navigate,
+        // and the corner Replay restarts the day (best_level kept — monotonic).
+        {
+            let mut sc = ClockScene::new(Db::mem(), 7, now);
+            let mut guard = 0;
+            while !sc.in_finale() && guard < 12 {
+                solve_event(&mut sc);
+                guard += 1;
+            }
+            let reached = sc.in_finale();
+            let best_at_finale = sc.best_level();
+            let mut clk = 0.0f32;
+            // Top-left (where ← / parent live in other scenes) must be dead here.
+            let tb = chrome::topbar(&frame);
+            clk += 0.3;
+            let ptr = tap(tb.home.0);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let nav = sc.update(&ctx);
+            let topbar_dead = matches!(nav, Nav::Stay) && sc.in_finale();
+            // Tap a star.
+            clk += 0.3;
+            let ptr = tap(sc.finale_star_center(&frame, 2));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let snav = sc.update(&ctx);
+            let star_ok = matches!(snav, Nav::Stay) && sc.in_finale() && sc.star_taps() == 1;
+            // Tap the sleeping frog.
+            clk += 0.3;
+            let ptr = tap(sc.finale_frog_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let fnav = sc.update(&ctx);
+            let frog_ok = matches!(fnav, Nav::Stay) && sc.in_finale() && sc.frog_taps() == 1;
+            // Corner replay restarts the day.
+            clk += 0.3;
+            let ptr = tap(sc.replay_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let restarted = !sc.in_finale() && sc.stars() == 0 && sc.best_level() == best_at_finale;
+            if reached && topbar_dead && star_ok && frog_ok && restarted {
+                println!("PASS clock-finale");
+            } else {
+                println!(
+                    "FAIL clock-finale (reached={reached}, topbar_dead={topbar_dead}, star_ok={star_ok}, frog_ok={frog_ok}, restarted={restarted})"
+                );
                 fails += 1;
             }
         }

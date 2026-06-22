@@ -17,13 +17,13 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 ## Project shape
 - Cargo workspace. **`core/`** = pure logic + data + protocol, NO macroquad
   (`fountouki-core`): srs, patterns, themes, deck, audio synth, settings, sync,
-  storage, route, rng, tracing (stroke data baked by
+  storage, route, rng, tracing, singback, clock (stroke data baked by
   `tools/trace_extract/extract.py`). Fast to compile, unit-tested
   (`cargo test -p fountouki-core`).
 - **`app/`** = the macroquad binary `fountouki`: rendering, scenes, input,
   audio playback, the engine. Depends on `core`.
   - `palette` `text` `draw` `anim` `input` `layout` `scene` `sound` `confetti`
-    `store` `parent` `emoji`; `games/{picker,phonics,patterns,tracing,singback}.rs`.
+    `store` `parent` `emoji`; `games/{picker,phonics,patterns,tracing,singback,clock}.rs`.
   - `layout.rs` computes every region from viewport size + safe-area insets +
     form factor — this is the consistency cure; keep layout ours.
   - Fonts (VicModernCursive) + Twemoji emoji sprites are `include_bytes!`-baked.
@@ -39,8 +39,9 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
   patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done
   tracing tracing-watch tracing-two-stroke tracing-reward tracing-build
   tracing-grade tracing-done tracing-housewarming singback singback-ready
-  singback-input singback-miss singback-reward singback-finale parent-patterns
-  parent-phonics parent-tracing parent-singback`.
+  singback-input singback-miss singback-reward singback-finale clock clock-clock
+  clock-halfpast clock-reward clock-finale parent-patterns
+  parent-phonics parent-tracing parent-singback parent-clock`.
 - `--playtest` — scripted taps drive the real scenes + assert invariants; exits
   non-zero on failure.
 
