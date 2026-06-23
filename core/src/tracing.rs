@@ -79,6 +79,56 @@ pub fn point_at(pts: &[(f32, f32)], s: f32) -> (f32, f32) {
     *pts.last().unwrap()
 }
 
+/// Smooth a stroke polyline into a denser curve with `subdiv` interpolated
+/// points per source segment, using a centripetal-ish Catmull-Rom spline
+/// (uniform parameterisation). The baked stroke points sit ~16 font units
+/// apart; drawn as raw line segments they read faceted at iPad sizes, so the
+/// renderer resamples here with `subdiv` scaled to the on-screen segment length
+/// — the curve then stays truly round however big the card.
+///
+/// Endpoints are preserved exactly (the start/end dots must still land on the
+/// path). A degenerate input (0/1 points) is returned unchanged.
+pub fn smooth(pts: &[(f32, f32)], subdiv: usize) -> Vec<(f32, f32)> {
+    let n = pts.len();
+    if n < 2 || subdiv <= 1 {
+        return pts.to_vec();
+    }
+    let mut out = Vec::with_capacity((n - 1) * subdiv + 1);
+    out.push(pts[0]);
+    for i in 0..n - 1 {
+        // Catmull-Rom control points: clamp at the ends (duplicate endpoints).
+        let p0 = pts[i.saturating_sub(1)];
+        let p1 = pts[i];
+        let p2 = pts[i + 1];
+        let p3 = pts[(i + 2).min(n - 1)];
+        for j in 1..=subdiv {
+            let t = j as f32 / subdiv as f32;
+            out.push(catmull_rom(p0, p1, p2, p3, t));
+        }
+    }
+    out
+}
+
+/// Uniform Catmull-Rom interpolation between `p1` and `p2` (t in 0..1), using
+/// `p0`/`p3` as the surrounding control points.
+fn catmull_rom(
+    p0: (f32, f32),
+    p1: (f32, f32),
+    p2: (f32, f32),
+    p3: (f32, f32),
+    t: f32,
+) -> (f32, f32) {
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let f = |a: f32, b: f32, c: f32, d: f32| {
+        0.5 * ((2.0 * b)
+            + (-a + c) * t
+            + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2
+            + (-a + 3.0 * b - 3.0 * c + d) * t3)
+    };
+    (f(p0.0, p1.0, p2.0, p3.0), f(p0.1, p1.1, p2.1, p3.1))
+}
+
 /// How far ahead of the current progress the finger may pull the pen, in font
 /// units. Small enough that a path returning near itself (the 'o' loop, the
 /// 'a' retrace) can't be skipped across; big enough for a fast finger.
@@ -270,6 +320,66 @@ mod tests {
         for c in ['f', 't', 'x'] {
             assert_eq!(glyph(c).unwrap().strokes.len(), 2, "{c} should have 2 strokes");
         }
+    }
+
+    /// 'g' (like a/d/q) is a magic-c bowl: the pen starts at the bowl's true
+    /// top-right corner, not below it. Regression for a baked start dot that
+    /// sat ~30 units under the corner (an end-extension hook).
+    #[test]
+    fn g_starts_at_the_bowl_top_right() {
+        let g = glyph('g').unwrap();
+        let start = g.strokes[0][0];
+        let bb = ink_bbox(g);
+        // Within a stroke-width of both the right edge and the top of the ink.
+        assert!(bb.2 - start.0 <= 12.0, "g start not at right edge: {start:?} bbox {bb:?}");
+        assert!(bb.3 - start.1 <= 12.0, "g start not at top: {start:?} bbox {bb:?}");
+    }
+
+    #[test]
+    fn smooth_preserves_endpoints_and_densifies() {
+        let line = [(0.0, 0.0), (100.0, 0.0), (200.0, 50.0), (300.0, 50.0)];
+        let s = smooth(&line, 8);
+        assert_eq!(s.first().copied().unwrap(), line[0], "start moved");
+        assert_eq!(s.last().copied().unwrap(), *line.last().unwrap(), "end moved");
+        assert_eq!(s.len(), (line.len() - 1) * 8 + 1, "wrong density");
+        // A straight run stays on the line (no overshoot wiggle).
+        let mid = point_at(&s, stroke_len(&s) * 0.0); // start
+        assert_eq!(mid, line[0]);
+        // Degenerate inputs pass through untouched.
+        assert_eq!(smooth(&[(1.0, 2.0)], 8), vec![(1.0, 2.0)]);
+        assert_eq!(smooth(&line, 1), line.to_vec());
+    }
+
+    #[test]
+    fn smooth_stays_near_the_original_path() {
+        // The smoothed curve must hug the source polyline (a guide the kid
+        // traces — it can't bulge away from the letter).
+        for g in GLYPHS.iter() {
+            for st in g.strokes {
+                if is_dot(st) {
+                    continue;
+                }
+                let s = smooth(st, 6);
+                for &p in &s {
+                    // Nearest distance from the smoothed point to the source path.
+                    let d = (0..st.len() - 1)
+                        .map(|i| seg_dist(p, st[i], st[i + 1]))
+                        .fold(f32::MAX, f32::min);
+                    assert!(d <= 24.0, "{}: smoothed point {p:?} strays {d} from path", g.ch);
+                }
+            }
+        }
+    }
+
+    /// Distance from point `p` to segment `a`-`b`.
+    fn seg_dist(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+        let (vx, vy) = (b.0 - a.0, b.1 - a.1);
+        let l2 = vx * vx + vy * vy;
+        if l2 <= 0.0 {
+            return dist(p, a);
+        }
+        let t = (((p.0 - a.0) * vx + (p.1 - a.1) * vy) / l2).clamp(0.0, 1.0);
+        dist(p, (a.0 + t * vx, a.1 + t * vy))
     }
 
     #[test]

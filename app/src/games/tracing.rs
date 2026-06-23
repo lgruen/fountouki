@@ -679,18 +679,25 @@ impl TracingScene {
         if upto <= 0.0 {
             return;
         }
-        let mut pts: Vec<Vec2> = Vec::new();
+        // Build the drawn portion of the path in font units, then smooth it
+        // into a dense curve so it reads truly round at iPad sizes (the baked
+        // points are ~16 units apart — raw line segments look faceted on a big
+        // card). Smoothing preserves the exact endpoints (start/end dots).
+        let mut units: Vec<(f32, f32)> = vec![stroke[0]];
         let mut acc = 0.0;
-        pts.push(p.map.to_px(stroke[0]));
         for w in stroke.windows(2) {
             let seg = ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
             if acc + seg >= upto {
-                pts.push(p.map.to_px(tr::point_at(stroke, upto)));
+                units.push(tr::point_at(stroke, upto));
                 break;
             }
             acc += seg;
-            pts.push(p.map.to_px(w[1]));
+            units.push(w[1]);
         }
+        let pts: Vec<Vec2> = tr::smooth(&units, path_subdiv(p.map.scale))
+            .into_iter()
+            .map(|u| p.map.to_px(u))
+            .collect();
         draw::stroke_path(&pts, ink_w, palette::INK);
     }
 
@@ -944,6 +951,17 @@ impl TracingScene {
             );
         }
     }
+}
+
+/// Subdivisions per baked stroke segment for `tr::smooth`, scaled to the
+/// on-screen segment length so the traced curve stays smooth at any card size:
+/// baked points are ~16 font units apart (≈ `16 * scale` px), and we aim for
+/// ~2.5 px per output segment. Capped so a phone stays cheap and an iPad reads
+/// truly round (matching the project's 128-gon discs / high-seg arcs).
+fn path_subdiv(scale: f32) -> usize {
+    const SRC_SPACING: f32 = 16.0; // RESAMPLE_UNITS in the extractor
+    const TARGET_PX: f32 = 2.5;
+    ((SRC_SPACING * scale / TARGET_PX).ceil() as usize).clamp(2, 16)
 }
 
 /// Euclidean distance between two font-unit points.
