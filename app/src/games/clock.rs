@@ -83,13 +83,21 @@ const CONFETTI_SEED_SALT: u32 = 0x9E37_79B9;
 const CONFETTI_RESTART_SALT: u32 = 0x85EB_CA6B;
 
 /// Finale tap targets (distinct ids so the per-target debounce only swallows a
-/// same-target re-fire). Stars use `TGT_STAR_BASE + i`.
+/// same-target re-fire). Stars use `TGT_STAR_BASE + i`; fireflies + friends use
+/// their own bases below.
 const TGT_FINALE_REPLAY: u32 = 1;
 const TGT_FINALE_HOME: u32 = 2;
 const TGT_FINALE_FROG: u32 = 3;
+const TGT_FINALE_MOON: u32 = 4;
 const TGT_STAR_BASE: u32 = 10;
+const TGT_FRIEND_BASE: u32 = 40;
+const TGT_FLY_BASE: u32 = 60;
 /// How many twinkling stars dot the finale sky (tappable, errorless).
 const FINALE_STARS: usize = 12;
+/// Snoozing friend frogs in the meadow (tap → ribbit-hop).
+const FINALE_FRIENDS: usize = 2;
+/// Drifting fireflies (tap → flare + tiny sparkle).
+const FINALE_FLIES: usize = 6;
 
 /// Which hand the finger grabbed this press.
 #[derive(PartialEq, Clone, Copy)]
@@ -148,6 +156,15 @@ pub struct ClockScene {
     /// The sleeping frog's stir timer (seconds since tapped, or IDLE).
     frog_t: f32,
     frog_taps: u32,
+    /// The moon's wink/glow-pulse timer (seconds since tapped, or IDLE).
+    moon_t: f32,
+    moon_taps: u32,
+    /// Per-friend ribbit-hop timer (seconds since tapped, or IDLE).
+    friend_t: [f32; FINALE_FRIENDS],
+    friend_taps: u32,
+    /// Per-firefly flare timer (seconds since tapped, or IDLE).
+    fly_t: [f32; FINALE_FLIES],
+    fly_taps: u32,
 }
 
 /// Parked timer value meaning "idle" (no animation in flight).
@@ -155,6 +172,22 @@ const IDLE: f32 = 99.0;
 /// How long a tapped star twinkles / a tapped frog stirs.
 const STAR_TWINKLE_S: f32 = 0.6;
 const FROG_STIR_S: f32 = 0.8;
+/// How long a tapped moon winks / a friend hops / a firefly flares.
+const MOON_WINK_S: f32 = 0.9;
+const FRIEND_HOP_S: f32 = 0.7;
+const FLY_FLARE_S: f32 = 0.7;
+
+/// Step each in-flight animation timer by `dt`, parking it at [`IDLE`] once it
+/// runs past `dur` (so `>= dur` reads as "ready for the next tap").
+fn advance(timers: &mut [f32], dt: f32, dur: f32) {
+    for s in timers.iter_mut() {
+        if *s < dur {
+            *s += dt;
+        } else {
+            *s = IDLE;
+        }
+    }
+}
 
 fn level_of(difficulty: &str) -> u32 {
     match difficulty {
@@ -199,6 +232,12 @@ impl ClockScene {
             star_taps: 0,
             frog_t: IDLE,
             frog_taps: 0,
+            moon_t: IDLE,
+            moon_taps: 0,
+            friend_t: [IDLE; FINALE_FRIENDS],
+            friend_taps: 0,
+            fly_t: [IDLE; FINALE_FLIES],
+            fly_taps: 0,
         };
         sc.setup_event();
         sc
@@ -273,10 +312,7 @@ impl ClockScene {
         self.phase = Phase::Finale { t: 0.0 };
         self.grabbed = None;
         self.tap_debounce = input::TapDebounce::new();
-        self.star_t = [IDLE; FINALE_STARS];
-        self.star_taps = 0;
-        self.frog_t = IDLE;
-        self.frog_taps = 0;
+        self.reset_finale_taps();
         self.rain_acc = 0.0;
         ctx.audio.finale();
         self.save();
@@ -293,9 +329,24 @@ impl ClockScene {
         self.new_best = false;
         self.rain_acc = 0.0;
         self.first = false;
+        self.reset_finale_taps();
         self.confetti =
             crate::confetti::Confetti::new(self.seed.wrapping_add(CONFETTI_RESTART_SALT));
         self.setup_event();
+    }
+
+    /// Park every finale interaction timer + tap counter back to idle.
+    fn reset_finale_taps(&mut self) {
+        self.star_t = [IDLE; FINALE_STARS];
+        self.star_taps = 0;
+        self.frog_t = IDLE;
+        self.frog_taps = 0;
+        self.moon_t = IDLE;
+        self.moon_taps = 0;
+        self.friend_t = [IDLE; FINALE_FRIENDS];
+        self.friend_taps = 0;
+        self.fly_t = [IDLE; FINALE_FLIES];
+        self.fly_taps = 0;
     }
 
     fn pump_rain(&mut self, dt: f32, w: f32) {
@@ -420,6 +471,24 @@ impl ClockScene {
     }
     pub(crate) fn frog_taps(&self) -> u32 {
         self.frog_taps
+    }
+    pub(crate) fn finale_moon_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        finale_layout(f).moon
+    }
+    pub(crate) fn moon_taps(&self) -> u32 {
+        self.moon_taps
+    }
+    pub(crate) fn finale_friend_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        finale_layout(f).friends[i.min(FINALE_FRIENDS - 1)].0
+    }
+    pub(crate) fn friend_taps(&self) -> u32 {
+        self.friend_taps
+    }
+    pub(crate) fn finale_fly_center(&self, f: &crate::layout::Frame, time: f32, i: usize) -> Vec2 {
+        finale_layout(f).fly_pos(i.min(FINALE_FLIES - 1), time)
+    }
+    pub(crate) fn fly_taps(&self) -> u32 {
+        self.fly_taps
     }
     pub(crate) fn replay_center(&self, f: &crate::layout::Frame) -> Vec2 {
         chrome::corner_buttons(f).0
@@ -578,18 +647,22 @@ impl ClockScene {
         // the big clock then has no scaffold. One object, so they never collide.
         let slot = lay.model;
         if self.level <= 2 {
+            // A bigger card + numeral so the target hour reads clearly from a
+            // co-play distance (kids + the grown-up grading beside them).
+            let cw = lay.badge_r * 2.5;
+            let chh = lay.badge_r * 1.85;
             draw::card(
-                slot.x - lay.badge_r,
-                slot.y - lay.badge_r * 0.7,
-                lay.badge_r * 2.0,
-                lay.badge_r * 1.4,
+                slot.x - cw / 2.0,
+                slot.y - chh * 0.5,
+                cw,
+                chh,
                 palette::CARD,
             );
             text::draw_centered(
                 &th.to_string(),
                 slot.x,
                 slot.y,
-                (lay.badge_r * 1.4) as u16,
+                (lay.badge_r * 1.85) as u16,
                 &ctx.fonts.cursive,
                 palette::INK,
             );
@@ -627,80 +700,182 @@ impl ClockScene {
         }
     }
 
-    /// Drive + draw nothing here — the night Finale's per-frame update.
+    /// The night Finale's per-frame update: advance every interaction timer,
+    /// then route a tap to the first element it lands on. Every element does
+    /// something delightful (errorless); nothing here can be "wrong".
     fn update_finale(&mut self, ctx: &Ctx) -> Nav {
         let Phase::Finale { t } = self.phase else { return Nav::Stay };
         let dt = ctx.dt;
         self.pump_rain(dt, ctx.frame.w);
-        for s in self.star_t.iter_mut() {
-            if *s < STAR_TWINKLE_S {
-                *s += dt;
-            } else {
-                *s = IDLE;
-            }
-        }
-        if self.frog_t < FROG_STIR_S {
-            self.frog_t += dt;
-        } else {
-            self.frog_t = IDLE;
-        }
+        advance(&mut self.star_t, dt, STAR_TWINKLE_S);
+        advance(&mut self.friend_t, dt, FRIEND_HOP_S);
+        advance(&mut self.fly_t, dt, FLY_FLARE_S);
+        advance(std::slice::from_mut(&mut self.frog_t), dt, FROG_STIR_S);
+        advance(std::slice::from_mut(&mut self.moon_t), dt, MOON_WINK_S);
         self.phase = Phase::Finale { t: t + dt };
 
         let pt = ctx.pointer;
-        if pt.tapped() {
-            let fl = finale_layout(&ctx.frame);
-            let (replay, home, br) = chrome::corner_buttons(&ctx.frame);
-            if input::hit_circle(pt.pos, replay.x, replay.y, br) {
-                if self.tap_debounce.accept(TGT_FINALE_REPLAY, ctx.time) {
-                    self.restart();
-                }
-                return Nav::Stay;
+        if !pt.tapped() {
+            return Nav::Stay;
+        }
+        let fl = finale_layout(&ctx.frame);
+        let (replay, home, br) = chrome::corner_buttons(&ctx.frame);
+        if input::hit_circle(pt.pos, replay.x, replay.y, br) {
+            if self.tap_debounce.accept(TGT_FINALE_REPLAY, ctx.time) {
+                self.restart();
             }
-            if input::hit_circle(pt.pos, home.x, home.y, br) {
-                if self.tap_debounce.accept(TGT_FINALE_HOME, ctx.time) {
-                    self.sync.flush();
-                    return Nav::Home;
-                }
-                return Nav::Stay;
+            return Nav::Stay;
+        }
+        if input::hit_circle(pt.pos, home.x, home.y, br) {
+            if self.tap_debounce.accept(TGT_FINALE_HOME, ctx.time) {
+                self.sync.flush();
+                return Nav::Home;
             }
-            if input::hit_circle(pt.pos, fl.frog.x, fl.frog.y, fl.frog_r * 1.2)
-                && self.frog_t >= FROG_STIR_S
-                && self.tap_debounce.accept(TGT_FINALE_FROG, ctx.time)
+            return Nav::Stay;
+        }
+        // The moon: a sleepy wink + a halo bloom and a sprinkle of sparkles.
+        if input::hit_circle(pt.pos, fl.moon.x, fl.moon.y, fl.moon_r * 1.25)
+            && self.moon_t >= MOON_WINK_S
+            && self.tap_debounce.accept(TGT_FINALE_MOON, ctx.time)
+        {
+            self.moon_t = 0.0;
+            self.moon_taps += 1;
+            ctx.audio.twinkle();
+            self.confetti.burst(fl.moon, 16, fl.moon_r * 1.3);
+            return Nav::Stay;
+        }
+        // The sleeping hero frog: stirs + ribbits.
+        if input::hit_circle(pt.pos, fl.frog.x, fl.frog.y, fl.frog_r * 1.2)
+            && self.frog_t >= FROG_STIR_S
+            && self.tap_debounce.accept(TGT_FINALE_FROG, ctx.time)
+        {
+            self.frog_t = 0.0;
+            self.frog_taps += 1;
+            ctx.audio.frog();
+            return Nav::Stay;
+        }
+        // Snoozing friend frogs: a sleepy ribbit-hop.
+        for i in 0..FINALE_FRIENDS {
+            let (c, rr) = fl.friends[i];
+            if input::hit_circle(pt.pos, c.x, c.y, rr * 1.3)
+                && self.friend_t[i] >= FRIEND_HOP_S
+                && self.tap_debounce.accept(TGT_FRIEND_BASE + i as u32, ctx.time)
             {
-                self.frog_t = 0.0;
-                self.frog_taps += 1;
+                self.friend_t[i] = 0.0;
+                self.friend_taps += 1;
                 ctx.audio.frog();
+                self.confetti.burst(vec2(c.x, c.y - rr), 8, rr * 0.6);
                 return Nav::Stay;
             }
-            for i in 0..FINALE_STARS {
-                let (c, rr) = fl.stars[i];
-                if input::hit_circle(pt.pos, c.x, c.y, rr * 2.0)
-                    && self.tap_debounce.accept(TGT_STAR_BASE + i as u32, ctx.time)
-                {
-                    self.star_t[i] = 0.0;
-                    self.star_taps += 1;
-                    ctx.audio.twinkle();
-                    self.confetti.burst(c, 10, rr * 1.5);
-                    return Nav::Stay;
-                }
+        }
+        // Twinkling stars (tap → a brighter pop).
+        for i in 0..FINALE_STARS {
+            let (c, rr) = fl.stars[i];
+            if input::hit_circle(pt.pos, c.x, c.y, rr * 2.0)
+                && self.tap_debounce.accept(TGT_STAR_BASE + i as u32, ctx.time)
+            {
+                self.star_t[i] = 0.0;
+                self.star_taps += 1;
+                ctx.audio.twinkle();
+                self.confetti.burst(c, 10, rr * 1.5);
+                return Nav::Stay;
+            }
+        }
+        // Drifting fireflies (tap → a bright flare + a tiny sparkle).
+        for i in 0..FINALE_FLIES {
+            let c = fl.fly_pos(i, ctx.time);
+            if input::hit_circle(pt.pos, c.x, c.y, fl.fly_r * 2.4)
+                && self.fly_t[i] >= FLY_FLARE_S
+                && self.tap_debounce.accept(TGT_FLY_BASE + i as u32, ctx.time)
+            {
+                self.fly_t[i] = 0.0;
+                self.fly_taps += 1;
+                ctx.audio.twinkle();
+                self.confetti.burst(c, 6, fl.fly_r * 2.0);
+                return Nav::Stay;
             }
         }
         Nav::Stay
     }
 
-    /// The bedtime Finale: a calm night sky, a moon, twinkling stars, the frog
-    /// asleep, a big trophy star, gentle confetti, and corner replay/home.
+    /// The bedtime Finale: a cohesive starry-night meadow celebration. The frog
+    /// snoozes on a pillow under a blanket beside its cosy cottage (one warm lit
+    /// window), two friend frogs snooze nearby in nightcaps, fireflies drift, a
+    /// sleepy moon and a sky of stars twinkle — all tappable, all delightful — and
+    /// a big trophy star crowns the day. Calm motion, gentle confetti, corner
+    /// replay/home.
     fn draw_finale(&self, ctx: &Ctx, t: f32) {
         let f = &ctx.frame;
         let fl = finale_layout(f);
-        draw::vgradient(0.0, 0.0, f.w, f.h, palette::hex(0x1b1c40), palette::hex(0x4a3a6b));
+        // Deep night sky, lightening toward the horizon.
+        draw::vgradient(0.0, 0.0, f.w, fl.ground_y, palette::hex(0x141438), palette::hex(0x4a3a6b));
 
-        // The moon, with a soft halo.
-        draw::disc(fl.moon.x, fl.moon.y, fl.moon_r * 1.5, palette::hexa(0xfff3a8, 0.12));
-        draw::disc(fl.moon.x, fl.moon.y, fl.moon_r, palette::hex(0xfff3c8));
-        draw::disc(fl.moon.x + fl.moon_r * 0.35, fl.moon.y - fl.moon_r * 0.2, fl.moon_r * 0.82, palette::hex(0x4a3a6b));
+        self.draw_moon(&fl, t);
+        self.draw_stars(&fl, t);
 
-        // Twinkling stars (tap → a brighter pop).
+        // The rolling meadow, then the cottage tucked behind the sleepers.
+        self.draw_meadow(f, &fl);
+        self.draw_cottage(&fl, t);
+
+        // The trophy star, high in the sky (the big payoff), drawn before the
+        // ground players so the celebration "rises" behind them.
+        self.draw_trophy(&fl, t);
+
+        // The fireflies drift through the foreground (drawn under the sleepers so
+        // a tapped one flares around them, not over their faces).
+        self.draw_fireflies(&fl, t);
+
+        // The snoozing friends, then the hero frog (front-most), each on a pillow.
+        for i in 0..FINALE_FRIENDS {
+            self.draw_sleeper(ctx, fl.friends[i].0, fl.friends[i].1, t, self.friend_t[i], i + 1);
+        }
+        self.draw_sleeper(ctx, fl.frog, fl.frog_r, t, self.frog_t, 0);
+
+        self.confetti.draw();
+        let (replay, home, br) = chrome::corner_buttons(f);
+        chrome::draw_corner_buttons(replay, home, br);
+    }
+
+    /// The sleepy moon: a soft glowing disc with a crescent-shading bite, a calm
+    /// closed-eye-and-smile face, and (on tap) a brighter halo bloom + a wink.
+    fn draw_moon(&self, fl: &FinaleLayout, t: f32) {
+        let (m, mr) = (fl.moon, fl.moon_r);
+        let wink = if self.moon_t < MOON_WINK_S { 1.0 - self.moon_t / MOON_WINK_S } else { 0.0 };
+        let glow = 0.12 + 0.20 * wink;
+        draw::disc(m.x, m.y, mr * (1.5 + 0.4 * wink), palette::hexa(0xfff3a8, glow));
+        draw::disc(m.x, m.y, mr, palette::hex(0xfff3c8));
+        // A soft crescent bite (a dimmer disc nudged off to one side).
+        draw::disc(m.x + mr * 0.36, m.y - mr * 0.20, mr * 0.80, palette::hexa(0xe7dfb0, 0.55));
+        // The face: two calm closed eyes (a wink on the left when tapped) + a
+        // gentle smile, all on the lit (left) side of the moon.
+        let eye = mr * 0.10;
+        let ey = m.y - mr * 0.10;
+        let lc = palette::hexa(0x6b5a3a, 0.85);
+        // Left eye: arcs to a happy curve normally; on a wink it "shuts" flat.
+        if wink > 0.4 {
+            draw::stroke_path(&[vec2(m.x - mr * 0.42, ey), vec2(m.x - mr * 0.20, ey)], (eye * 0.6).max(1.5), lc);
+        } else {
+            sleepy_eye(m.x - mr * 0.31, ey, eye, lc);
+        }
+        sleepy_eye(m.x - mr * 0.02, ey, eye, lc);
+        // Smile.
+        smile(m.x - mr * 0.17, m.y + mr * 0.22, mr * 0.20, lc);
+        // A little rosy cheek glow + a stronger pulse on tap.
+        let rosy = 0.20 + 0.30 * wink;
+        draw::disc(m.x - mr * 0.40, m.y + mr * 0.16, mr * 0.13, palette::hexa(0xffb3a0, rosy));
+        // Tap sparkles ring out.
+        if wink > 0.0 {
+            for k in 0..6 {
+                let a = t * 1.5 + k as f32 * (TAU / 6.0);
+                let d = mr * (1.2 + 0.9 * (1.0 - wink));
+                let p = m + vec2(a.cos(), a.sin()) * d;
+                draw::star(p.x, p.y, mr * 0.16 * wink, palette::hexa(0xfff3c8, wink));
+            }
+        }
+    }
+
+    /// The starry sky (tap → a brighter pop).
+    fn draw_stars(&self, fl: &FinaleLayout, t: f32) {
         for (i, &(c, rr)) in fl.stars.iter().enumerate() {
             let base = 0.55 + 0.45 * (t * 1.7 + i as f32 * 1.3).sin();
             let pop = if self.star_t[i] < STAR_TWINKLE_S {
@@ -710,32 +885,65 @@ impl ClockScene {
             };
             draw::star(c.x, c.y, rr * pop, palette::hexa(0xfff3c8, (0.5 + 0.5 * base).min(1.0)));
         }
+    }
 
-        // The sleeping frog (eyes shut), with a gentle breathing + a tapped stir.
-        let breathe = 1.0 + 0.04 * anim::pulse(t, 3.4).max(0.0);
-        let mut pose = draw::FrogPose { blink: 1.0, sy: breathe, sx: 2.0 - breathe, ..Default::default() };
-        if self.frog_t < FROG_STIR_S {
-            let imp = (self.frog_t / FROG_STIR_S * PI).sin();
-            pose.rot = (self.frog_t * 18.0).sin() * 0.12 * (1.0 - self.frog_t / FROG_STIR_S);
-            pose.dy = -imp * fl.frog_r * 0.18;
-            pose.tongue = imp * 0.3;
-        }
-        draw::frog(fl.frog.x, fl.frog.y, fl.frog_r, palette::RAINBOW[3], pose);
-        // "zzz" floating up from the frog.
+    /// The rolling moonlit meadow the sleepers rest on.
+    fn draw_meadow(&self, f: &crate::layout::Frame, fl: &FinaleLayout) {
+        let gy = fl.ground_y;
+        draw::vgradient(0.0, gy, f.w, f.h - gy, palette::hex(0x2a3f5a), palette::hex(0x1f2e44));
+        // A pair of gentle hill humps for depth.
+        let hump = |cx: f32, w: f32, h: f32, col: Color| {
+            draw::disc(cx, gy + h, w, col);
+        };
+        hump(f.w * 0.20, f.w * 0.42, f.vmin(0.10), palette::hexa(0x34506e, 0.9));
+        hump(f.w * 0.82, f.w * 0.40, f.vmin(0.08), palette::hexa(0x2e4863, 0.9));
+        // The horizon glow line where the meadow meets the sky.
+        draw_rectangle(0.0, gy - 2.0, f.w, 4.0, palette::hexa(0x6b7fb0, 0.5));
+    }
+
+    /// The cosy cottage behind the sleepers: one warm lit window, a chimney, a
+    /// little smoke curl — home at the end of the day.
+    fn draw_cottage(&self, fl: &FinaleLayout, t: f32) {
+        let (c, s) = (fl.house, fl.house_s);
+        let wall = palette::hex(0x46506b);
+        let roof = palette::hex(0x32384d);
+        let base = c.y;
+        // Walls.
+        let ww = s;
+        let wh = s * 0.72;
+        draw_rectangle(c.x - ww / 2.0, base - wh, ww, wh, wall);
+        // Roof (triangle).
+        draw_triangle(
+            vec2(c.x - ww * 0.62, base - wh),
+            vec2(c.x + ww * 0.62, base - wh),
+            vec2(c.x, base - wh - s * 0.5),
+            roof,
+        );
+        // Chimney + a lazy smoke curl.
+        let cx = c.x + ww * 0.30;
+        draw_rectangle(cx - s * 0.06, base - wh - s * 0.34, s * 0.12, s * 0.30, roof);
         for k in 0..3 {
-            let zt = (t * 0.8 + k as f32 * 0.4) % 1.0;
-            let zx = fl.frog.x + fl.frog_r * (0.7 + zt * 0.5);
-            let zy = fl.frog.y - fl.frog_r * (0.6 + zt * 1.1);
-            text::draw_centered("z", zx, zy, (fl.frog_r * (0.3 + zt * 0.2)) as u16, &ctx.fonts.cursive, palette::hexa(0xffffff, (1.0 - zt) * 0.8));
+            let a = (t * 0.5 + k as f32 * 0.33) % 1.0;
+            let sx = cx + (t * 1.3 + k as f32 * 1.7).sin() * s * 0.05;
+            draw::disc(sx, base - wh - s * 0.40 - a * s * 0.6, s * 0.05 * (1.0 + a), palette::hexa(0xcfd6e6, (1.0 - a) * 0.5));
         }
+        // The warm lit window — a soft glow + golden panes.
+        let wy = base - wh * 0.52;
+        let glow = 0.5 + 0.5 * anim::pulse(t, 0.7).max(0.0);
+        draw::disc(c.x, wy, s * 0.26 * glow.max(0.6), palette::hexa(0xffd98a, 0.22));
+        let wsz = s * 0.22;
+        draw_rectangle(c.x - wsz / 2.0, wy - wsz / 2.0, wsz, wsz, palette::hex(0xffd98a));
+        draw_rectangle(c.x - wsz / 2.0, wy - 1.5, wsz, 3.0, palette::hexa(0x46506b, 0.8));
+        draw_rectangle(c.x - 1.5, wy - wsz / 2.0, 3.0, wsz, palette::hexa(0x46506b, 0.8));
+    }
 
-        // The trophy star, bottom-anchored, throbbing.
+    /// The bottom-anchored trophy star — the day's payoff. Springy pop-in, a slow
+    /// throb, and radiating opaque sparkles (a translucent disc browns out on the
+    /// dark sky, so the radiance is carried by bright points).
+    fn draw_trophy(&self, fl: &FinaleLayout, t: f32) {
         let pop = anim::back_out((t / STAR_POP_DUR).clamp(0.0, 1.0)).min(STAR_POP_CAP);
         let throb = 1.0 + 0.06 * anim::pulse(t, 0.9).max(0.0);
         let r = fl.r * pop * throb;
-        // Radiating sparkle points (a slow twinkle) instead of a backing disc —
-        // a half-opaque gold disc over the dark sky browns out to a dull ring, so
-        // the radiance is carried by bright opaque sparkles (per the finale notes).
         for i in 0..8 {
             let a = t * 0.6 + i as f32 * (TAU / 8.0);
             let far = if i % 2 == 0 { 1.5 } else { 1.9 };
@@ -747,11 +955,90 @@ impl ClockScene {
         }
         draw::star(fl.trophy.x, fl.trophy.y, r, palette::GOLD);
         draw::star(fl.trophy.x, fl.trophy.y, r * 0.62, palette::hexa(0xffe066, 0.9));
-
-        self.confetti.draw();
-        let (replay, home, br) = chrome::corner_buttons(f);
-        chrome::draw_corner_buttons(replay, home, br);
     }
+
+    /// The drifting fireflies — tiny glowing motes; a tapped one flares bright.
+    fn draw_fireflies(&self, fl: &FinaleLayout, t: f32) {
+        for i in 0..FINALE_FLIES {
+            let c = fl.fly_pos(i, t);
+            let twinkle = 0.45 + 0.55 * (t * 2.3 + i as f32 * 1.9).sin();
+            let flare = if self.fly_t[i] < FLY_FLARE_S { 1.0 - self.fly_t[i] / FLY_FLARE_S } else { 0.0 };
+            let rr = fl.fly_r * (1.0 + 1.4 * flare);
+            let a = (0.45 + 0.55 * twinkle).min(1.0);
+            draw::disc(c.x, c.y, rr * 2.6, palette::hexa(0xd8ff8a, 0.18 * a + 0.30 * flare));
+            draw::disc(c.x, c.y, rr, palette::hexa(0xeaff9c, a));
+            draw::disc(c.x, c.y, rr * 0.5, palette::hexa(0xffffff, a));
+        }
+    }
+
+    /// A sleeping frog on a pillow under a blanket, in a nightcap, with floating
+    /// "zzz". `kind` selects its body colour + nightcap colour; `kind == 0` is the
+    /// hero (no blanket so its body reads). `stir` is the tap timer (IDLE = calm).
+    fn draw_sleeper(&self, ctx: &Ctx, c: Vec2, r: f32, t: f32, stir: f32, kind: usize) {
+        let hero = kind == 0;
+        // Pillow under the head.
+        draw::disc(c.x, c.y + r * 1.02, r * 1.05, palette::hexa(0xeae3f2, 0.18));
+        draw::fill_ellipse(c.x, c.y + r * 0.94, r * 1.0, r * 0.42, 0.0, palette::hex(0xf2ecf7));
+        draw::fill_ellipse(c.x, c.y + r * 0.94, r * 0.9, r * 0.36, 0.0, palette::hex(0xe2d9ee));
+
+        let body = if hero { palette::RAINBOW[3] } else { palette::RAINBOW[(kind * 2 + 1) % 7] };
+        let breathe = 1.0 + 0.04 * anim::pulse(t + kind as f32 * 0.7, 3.4).max(0.0);
+        let mut pose = draw::FrogPose { blink: 1.0, sy: breathe, sx: 2.0 - breathe, ..Default::default() };
+        let dur = if hero { FROG_STIR_S } else { FRIEND_HOP_S };
+        if stir < dur {
+            let imp = (stir / dur * PI).sin();
+            pose.rot = (stir * 18.0).sin() * 0.12 * (1.0 - stir / dur);
+            pose.dy = -imp * r * (if hero { 0.22 } else { 0.7 });
+            pose.tongue = imp * 0.3;
+        }
+        draw::frog(c.x, c.y, r, body, pose);
+        // A pointy nightcap, in a warm contrasting colour.
+        let cap = if hero { palette::RAINBOW[0] } else { palette::RAINBOW[(kind * 3) % 7] };
+        draw::frog_party_hat(c.x, c.y, r, pose, cap);
+        // A cosy blanket for the friends (a soft mound over the lower body).
+        if !hero {
+            draw::fill_ellipse(c.x, c.y + r * 0.55, r * 0.95, r * 0.5, 0.0, palette::hexa(0x8a6fb0, 0.85));
+        }
+
+        // Floating "zzz" — bigger for the hero.
+        let zscale = if hero { 1.0 } else { 0.7 };
+        for k in 0..3 {
+            let zt = (t * 0.8 + kind as f32 * 0.5 + k as f32 * 0.4) % 1.0;
+            let zx = c.x + r * (0.7 + zt * 0.5);
+            let zy = c.y - r * (0.6 + zt * 1.1);
+            text::draw_centered(
+                "z",
+                zx,
+                zy,
+                (r * (0.3 + zt * 0.2) * zscale).max(1.0) as u16,
+                &ctx.fonts.cursive,
+                palette::hexa(0xffffff, (1.0 - zt) * 0.8),
+            );
+        }
+    }
+}
+
+/// A small downward sleepy-eye arc (a closed, content eye) centered on (x,y).
+fn sleepy_eye(x: f32, y: f32, r: f32, col: Color) {
+    let mut p = Vec::with_capacity(9);
+    for i in 0..9 {
+        let u = i as f32 / 8.0;
+        let a = PI * (0.15 + 0.70 * u); // a shallow downward arc
+        p.push(vec2(x + (a.cos()) * r, y + (a.sin()) * r * 0.7));
+    }
+    draw::stroke_path(&p, (r * 0.45).max(1.5), col);
+}
+
+/// A small happy smile arc centered on (x,y) — the curve bulges downward (y is
+/// screen-down) so the mouth turns up at the corners.
+fn smile(x: f32, y: f32, r: f32, col: Color) {
+    let mut p = Vec::with_capacity(9);
+    for i in 0..9 {
+        let u = i as f32 / 8.0;
+        let a = PI * (0.18 + 0.64 * u); // a shallow downward-bulging arc
+        p.push(vec2(x + (a.cos()) * r, y + (a.sin()) * r * 0.7));
+    }
+    draw::stroke_path(&p, (r * 0.30).max(1.5), col);
 }
 
 // --- geometry helpers -------------------------------------------------------
@@ -821,25 +1108,27 @@ fn draw_face(c: Vec2, r: f32, ctx: &Ctx, numerals: bool, glow_num: u8) {
     draw::disc(c.x, c.y, r, palette::hex(0xe3b96a)); // honey rim
     draw::disc(c.x, c.y, r * 0.93, palette::CARD); // face
 
-    // Hour ticks.
+    // Hour ticks, hugged close to the rim so the bigger numerals have room.
     for h in 1..=12u8 {
         let a = hour_angle(h);
-        let o = point_at(c, a, r * 0.88);
-        let i = point_at(c, a, r * 0.80);
+        let o = point_at(c, a, r * 0.91);
+        let i = point_at(c, a, r * 0.84);
         draw::stroke_path(&[i, o], (r * 0.02).max(2.0), palette::MUTED);
     }
     if numerals {
         for h in 1..=12u8 {
             let a = hour_angle(h);
-            let p = point_at(c, a, r * 0.70);
+            // Big-but-uncrowded: a touch inside the ticks so the two-digit hours
+            // (10/11/12) don't collide with their neighbours or the tick ring.
+            let p = point_at(c, a, r * 0.68);
             if glow_num == h {
-                draw::disc(p.x, p.y, r * 0.15, palette::hexa(0xffd166, 0.85));
+                draw::disc(p.x, p.y, r * 0.20, palette::hexa(0xffd166, 0.85));
             }
             text::draw_centered(
                 &h.to_string(),
                 p.x,
                 p.y,
-                (r * 0.22).max(10.0) as u16,
+                (r * 0.28).max(14.0) as u16,
                 &ctx.fonts.cursive,
                 palette::INK,
             );
@@ -983,45 +1272,94 @@ fn clock_layout(f: &crate::layout::Frame, _level: u32) -> CLayout {
 }
 
 struct FinaleLayout {
+    /// The meadow horizon (sky above, ground below).
+    ground_y: f32,
     moon: Vec2,
     moon_r: f32,
     stars: [(Vec2, f32); FINALE_STARS],
+    /// The hero frog (its body center) + radius.
     frog: Vec2,
     frog_r: f32,
+    /// Snoozing friend frogs (center, radius).
+    friends: [(Vec2, f32); FINALE_FRIENDS],
+    /// The cottage footprint center (x) + ground line (y), and its width.
+    house: Vec2,
+    house_s: f32,
+    /// Firefly drift anchors (center) + their base radius.
+    flies: [Vec2; FINALE_FLIES],
+    fly_r: f32,
     trophy: Vec2,
     r: f32,
 }
 
+impl FinaleLayout {
+    /// A firefly's live position at time `t`: a slow lissajous drift around its
+    /// anchor, so they wander but stay near their (deterministic) home.
+    fn fly_pos(&self, i: usize, t: f32) -> Vec2 {
+        let a = self.flies[i];
+        let span = self.fly_r * 5.0;
+        let ph = i as f32 * 1.7;
+        a + vec2((t * 0.55 + ph).sin() * span, (t * 0.43 + ph * 1.3).cos() * span * 0.7)
+    }
+}
+
 fn finale_layout(f: &crate::layout::Frame) -> FinaleLayout {
     let vmin = f.vmin(1.0);
+    let ground_y = f.h * 0.66;
     let moon_r = (vmin * 0.10).clamp(36.0, 110.0);
-    let moon = vec2(f.w * 0.80, f.h * 0.22 + f.safe.top);
-    let frog_r = (vmin * 0.16).clamp(60.0, 170.0);
-    let frog = vec2(f.w * 0.5, f.h * 0.62);
+    let moon = vec2(f.w * 0.82, f.h * 0.20 + f.safe.top);
+    // The sleepers rest on the meadow. The hero sits center; friends flank it.
+    let frog_r = (vmin * 0.15).clamp(56.0, 160.0);
+    let frog = vec2(f.w * 0.5, ground_y + frog_r * 0.55);
+    let fr_r = frog_r * 0.7;
+    let friends = [
+        (vec2(f.w * 0.5 - frog_r * 2.1, ground_y + fr_r * 0.65), fr_r),
+        (vec2(f.w * 0.5 + frog_r * 2.1, ground_y + fr_r * 0.65), fr_r),
+    ];
+    // The cottage tucked behind, between the moon and the hero.
+    let house_s = (vmin * 0.22).clamp(70.0, 220.0);
+    let house = vec2(f.w * 0.5, ground_y + house_s * 0.04);
     let r = (vmin * 0.11).clamp(40.0, 120.0);
-    let trophy = vec2(f.w * 0.5, f.h * 0.30);
+    let trophy = vec2(f.w * 0.5, f.h * 0.26);
 
-    // Scattered stars on a fixed pseudo-random spread (deterministic for goldens).
+    // Scattered stars on a fixed pseudo-random spread (deterministic for goldens),
+    // all kept up in the sky (above the meadow).
     let specs: [(f32, f32, f32); FINALE_STARS] = [
         (0.10, 0.16, 0.9),
         (0.22, 0.40, 0.6),
         (0.31, 0.12, 1.1),
-        (0.43, 0.28, 0.7),
+        (0.43, 0.30, 0.7),
         (0.58, 0.14, 0.8),
-        (0.66, 0.36, 1.0),
+        (0.66, 0.38, 1.0),
         (0.74, 0.10, 0.6),
-        (0.88, 0.30, 0.9),
-        (0.16, 0.62, 0.7),
-        (0.36, 0.70, 0.6),
-        (0.84, 0.58, 0.8),
-        (0.92, 0.46, 0.6),
+        (0.90, 0.34, 0.9),
+        (0.16, 0.52, 0.7),
+        (0.36, 0.55, 0.6),
+        (0.70, 0.52, 0.8),
+        (0.94, 0.48, 0.6),
     ];
-    let base = (vmin * 0.02).clamp(7.0, 18.0);
+    let base = (vmin * 0.022).clamp(8.0, 20.0);
     let mut stars = [(Vec2::ZERO, base); FINALE_STARS];
     for (i, &(fx, fy, sz)) in specs.iter().enumerate() {
         stars[i] = (vec2(f.w * fx, f.h * fy), base * sz);
     }
-    FinaleLayout { moon, moon_r, stars, frog, frog_r, trophy, r }
+
+    // Fireflies hover in the foreground around the sleepers.
+    let fly_specs: [(f32, f32); FINALE_FLIES] = [
+        (0.20, 0.78),
+        (0.34, 0.88),
+        (0.62, 0.84),
+        (0.78, 0.76),
+        (0.46, 0.92),
+        (0.88, 0.90),
+    ];
+    let fly_r = (vmin * 0.012).clamp(4.0, 11.0);
+    let mut flies = [Vec2::ZERO; FINALE_FLIES];
+    for (i, &(fx, fy)) in fly_specs.iter().enumerate() {
+        flies[i] = vec2(f.w * fx, f.h * fy);
+    }
+
+    FinaleLayout { ground_y, moon, moon_r, stars, frog, frog_r, friends, house, house_s, flies, fly_r, trophy, r }
 }
 
 // --- capture construction (goldens) -----------------------------------------

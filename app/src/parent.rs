@@ -737,7 +737,7 @@ fn draw_mastery(r: Rect, m: &Mastery) {
         let rrow = i / per_row;
         let cx = x + col as f32 * (dot + gap) + dot / 2.0;
         let cy = y0 + rrow as f32 * (dot + gap) + dot / 2.0;
-        draw_circle(cx, cy, dot / 2.0, palette::MASTERY[(*b as usize).min(4)]);
+        crate::draw::disc(cx, cy, dot / 2.0, palette::MASTERY[(*b as usize).min(4)]);
     }
 }
 

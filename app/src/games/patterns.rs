@@ -749,7 +749,7 @@ fn draw_shape(cx: f32, cy: f32, sz: f32, shape: &Shape) {
     let color = palette::hex(shape.color);
     let r = sz / 2.0;
     if shape.radius == Some("50%") {
-        draw_circle(cx, cy, r, color);
+        draw::disc(cx, cy, r, color);
     } else if shape.clip.is_some() {
         // upward triangle
         draw_triangle(
@@ -775,7 +775,7 @@ fn draw_hud(p: &PLayout, stars: u32, level: u32) {
     for i in 0..MAX_LEVEL as usize {
         let on = (i as u32) < level;
         let c = if on { palette::PIPS[i] } else { palette::PIP_EMPTY };
-        draw_circle(px0 + i as f32 * 20.0, py, 7.0, c);
+        draw::disc(px0 + i as f32 * 20.0, py, 7.0, c);
     }
 }
 

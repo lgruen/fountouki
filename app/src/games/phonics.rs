@@ -415,7 +415,7 @@ impl Scene for PhonicsScene {
                             DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() },
                         );
                     } else {
-                        draw_circle(cx, ecy, p.card.h * 0.12, palette::ACCENT_SOFT);
+                        draw::disc(cx, ecy, p.card.h * 0.12, palette::ACCENT_SOFT);
                     }
                 }
             }
