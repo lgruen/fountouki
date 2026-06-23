@@ -1550,17 +1550,35 @@ async fn main() {
             let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             let fnav = sc.update(&ctx);
             let frog_ok = matches!(fnav, Nav::Stay) && sc.in_finale() && sc.frog_taps() == 1;
+            // Tap the sleepy moon.
+            clk += 0.3;
+            let ptr = tap(sc.finale_moon_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let mnav = sc.update(&ctx);
+            let moon_ok = matches!(mnav, Nav::Stay) && sc.in_finale() && sc.moon_taps() == 1;
+            // Tap a snoozing friend frog.
+            clk += 0.3;
+            let ptr = tap(sc.finale_friend_center(&frame, 0));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let frnav = sc.update(&ctx);
+            let friend_ok = matches!(frnav, Nav::Stay) && sc.in_finale() && sc.friend_taps() == 1;
+            // Tap a drifting firefly (its position depends on `time`).
+            clk += 0.3;
+            let ptr = tap(sc.finale_fly_center(&frame, clk, 2));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let flnav = sc.update(&ctx);
+            let fly_ok = matches!(flnav, Nav::Stay) && sc.in_finale() && sc.fly_taps() == 1;
             // Corner replay restarts the day.
             clk += 0.3;
             let ptr = tap(sc.replay_center(&frame));
             let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let restarted = !sc.in_finale() && sc.stars() == 0 && sc.best_level() == best_at_finale;
-            if reached && topbar_dead && star_ok && frog_ok && restarted {
+            if reached && topbar_dead && star_ok && frog_ok && moon_ok && friend_ok && fly_ok && restarted {
                 println!("PASS clock-finale");
             } else {
                 println!(
-                    "FAIL clock-finale (reached={reached}, topbar_dead={topbar_dead}, star_ok={star_ok}, frog_ok={frog_ok}, restarted={restarted})"
+                    "FAIL clock-finale (reached={reached}, topbar_dead={topbar_dead}, star_ok={star_ok}, frog_ok={frog_ok}, moon_ok={moon_ok}, friend_ok={friend_ok}, fly_ok={fly_ok}, restarted={restarted})"
                 );
                 fails += 1;
             }
