@@ -71,19 +71,58 @@ fn mute_pos(f: &crate::layout::Frame) -> (Vec2, f32) {
     (vec2(tb.x + tb.w - ir, tb.y + ir), ir)
 }
 
+/// How many columns the grid uses, by form factor. Rows fall out of
+/// `ceil(n / cols)`. Tuned so tiles stay large with generous tap targets:
+/// landscape spreads wide (fewer rows), portrait stacks narrow (more rows).
+/// Derived from `GAMES.len()` — adding a 6th game still lays out sensibly.
+fn grid_cols(f: &crate::layout::Frame) -> usize {
+    let n = GAMES.len().max(1);
+    let cols = if f.is_portrait() {
+        // Narrow: 2-wide. (1 game → 1 col.)
+        n.min(2)
+    } else {
+        // Wide: aim for a near-square grid, capped so tiles don't get tiny.
+        // 5 games → 3 cols (3+2); 6 → 3 (3+3); ≤3 → one row.
+        ((n as f32).sqrt().ceil() as usize).max(1)
+    };
+    cols.clamp(1, n)
+}
+
+/// Single source of truth for tile geometry (hit-testing + drawing). Lays the
+/// N games out in a centered grid below the topbar. The final (possibly short)
+/// row is centered on its own so a 3+2 / 2+2+1 split stays balanced.
 fn tile_rect(f: &crate::layout::Frame, i: usize) -> Rect {
-    let n = GAMES.len() as f32;
+    let n = GAMES.len();
+    let cols = grid_cols(f);
+    let rows = n.div_ceil(cols);
+
+    // Play area: full content box, but start below the topbar so tiles never
+    // collide with the mute button.
     let content = f.content();
-    let gap = (f.w * 0.04).clamp(20.0, 60.0);
-    // Shrink the tile so all N fit across the safe content width on one row
-    // (never wrap, never clip the edge tiles) — mirrors patterns' choice-fit.
-    let fit_w = (content.w - (n - 1.0) * gap) / n;
-    let tw = (f.w * 0.24).clamp(120.0, 260.0).min(fit_w);
+    let tb = f.topbar();
+    let top = (tb.y + tb.h + content.h * 0.03).max(content.y);
+    let area = Rect::new(content.x, top, content.w, content.y + content.h - top);
+
+    let gap = f.vmin(0.04).clamp(16.0, 48.0);
+
+    // Cell size from whichever dimension is the binding constraint, keeping
+    // tiles roughly card-shaped (h ≈ 1.12 w) and centered as a block.
+    let avail_w = (area.w - (cols as f32 - 1.0) * gap) / cols as f32;
+    let avail_h = (area.h - (rows as f32 - 1.0) * gap) / rows as f32;
+    let tw = avail_w.min(avail_h / 1.12);
     let th = tw * 1.12;
-    let total = n * tw + (n - 1.0) * gap;
-    let x0 = f.w / 2.0 - total / 2.0;
-    let y = f.h / 2.0 - th / 2.0;
-    Rect::new(x0 + i as f32 * (tw + gap), y, tw, th)
+
+    let grid_h = rows as f32 * th + (rows as f32 - 1.0) * gap;
+    let y0 = area.y + (area.h - grid_h) / 2.0;
+
+    let row = i / cols;
+    let col = i % cols;
+    // Items in this row (the last row may be short → center it on its own).
+    let row_items = if row == rows - 1 { n - row * cols } else { cols };
+    let row_w = row_items as f32 * tw + (row_items as f32 - 1.0) * gap;
+    let x0 = f.w / 2.0 - row_w / 2.0;
+
+    Rect::new(x0 + col as f32 * (tw + gap), y0 + row as f32 * (th + gap), tw, th)
 }
 
 /// Drawn icon teaser per game (mechanic preview without reading).
@@ -96,7 +135,7 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
             let s = r.w * 0.18;
             let gap = s * 0.5;
             let x0 = cx - (s + gap);
-            draw_circle(x0, cy, s / 2.0, palette::RAINBOW[3]);
+            draw::disc(x0, cy, s / 2.0, palette::RAINBOW[3]);
             draw_triangle(
                 vec2(x0 + s + gap, cy - s / 2.0),
                 vec2(x0 + s + gap - s / 2.0, cy + s / 2.0),
