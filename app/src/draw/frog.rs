@@ -158,7 +158,9 @@ pub fn frog_headphones(cx: f32, cy: f32, r: f32, pose: FrogPose, accent: Color) 
     // it reads round through any rotation/squash.
     let cup_x = 1.04; // ear-cup centre, in units of r, at the widest temple
     let cup_y = -0.18; // dropped to the side of the head (clear of the eyes)
-    let n = 11usize;
+    // Sample densely so the band reads smooth on large (iPad) displays — the
+    // 11-point version looked faceted. Scale with `r` so big frogs get more.
+    let n = ((r * 0.5).ceil() as usize).clamp(33, 128);
     let mut arc = Vec::with_capacity(n);
     for i in 0..n {
         let u = i as f32 / (n - 1) as f32;

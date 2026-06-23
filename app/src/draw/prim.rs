@@ -89,10 +89,12 @@ pub fn stroke_path(pts: &[Vec2], width: f32, color: Color) {
 
 /// Generic stroked arc (a0..a1 radians, 0 = +x, CCW), round-capped.
 pub fn arc(cx: f32, cy: f32, radius: f32, a0: f32, a1: f32, width: f32, color: Color) {
-    const N: usize = 24;
-    let mut pts = Vec::with_capacity(N + 1);
-    for i in 0..=N {
-        let a = a0 + (a1 - a0) * (i as f32 / N as f32);
+    // Adaptive: pick segment count from arc length so big/wide arcs stay smooth
+    // on iPad while small ones are unaffected (the old fixed 24 looked faceted).
+    let n = ((radius * (a1 - a0).abs() / 6.0).ceil() as usize).clamp(24, 256);
+    let mut pts = Vec::with_capacity(n + 1);
+    for i in 0..=n {
+        let a = a0 + (a1 - a0) * (i as f32 / n as f32);
         pts.push(vec2(cx + radius * a.cos(), cy + radius * a.sin()));
     }
     stroke_path(&pts, width, color);

@@ -163,9 +163,9 @@ pub fn plant(cx: f32, ground_y: f32, size: f32) {
     let fy = ground_y - size;
     for k in 0..5 {
         let a = k as f32 / 5.0 * std::f32::consts::TAU;
-        draw_circle(cx + a.cos() * size * 0.3, fy + a.sin() * size * 0.3, size * 0.22, palette::RAINBOW[0]);
+        disc(cx + a.cos() * size * 0.3, fy + a.sin() * size * 0.3, size * 0.22, palette::RAINBOW[0]);
     }
-    draw_circle(cx, fy, size * 0.22, palette::RAINBOW[2]);
+    disc(cx, fy, size * 0.22, palette::RAINBOW[2]);
 }
 
 // ── Garden (phonics rainbow-garden done scene) ──────────────────────────────
