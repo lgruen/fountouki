@@ -109,7 +109,10 @@ fn tile_rect(f: &crate::layout::Frame, i: usize) -> Rect {
     // tiles roughly card-shaped (h ≈ 1.12 w) and centered as a block.
     let avail_w = (area.w - (cols as f32 - 1.0) * gap) / cols as f32;
     let avail_h = (area.h - (rows as f32 - 1.0) * gap) / rows as f32;
-    let tw = avail_w.min(avail_h / 1.12);
+    // 0.92 leaves a little breathing room so the block never hugs an edge when a
+    // dimension is the binding constraint (e.g. height on iPad landscape); the
+    // block is then re-centered below, splitting the slack evenly.
+    let tw = avail_w.min(avail_h / 1.12) * 0.92;
     let th = tw * 1.12;
 
     let grid_h = rows as f32 * th + (rows as f32 - 1.0) * gap;

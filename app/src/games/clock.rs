@@ -1108,27 +1108,27 @@ fn draw_face(c: Vec2, r: f32, ctx: &Ctx, numerals: bool, glow_num: u8) {
     draw::disc(c.x, c.y, r, palette::hex(0xe3b96a)); // honey rim
     draw::disc(c.x, c.y, r * 0.93, palette::CARD); // face
 
-    // Hour ticks.
+    // Hour ticks, hugged close to the rim so the bigger numerals have room.
     for h in 1..=12u8 {
         let a = hour_angle(h);
-        let o = point_at(c, a, r * 0.88);
-        let i = point_at(c, a, r * 0.80);
+        let o = point_at(c, a, r * 0.91);
+        let i = point_at(c, a, r * 0.84);
         draw::stroke_path(&[i, o], (r * 0.02).max(2.0), palette::MUTED);
     }
     if numerals {
         for h in 1..=12u8 {
             let a = hour_angle(h);
-            // Pull the numerals a touch inward so the bigger glyphs still clear
-            // the rim/ticks without clipping.
-            let p = point_at(c, a, r * 0.66);
+            // Big-but-uncrowded: a touch inside the ticks so the two-digit hours
+            // (10/11/12) don't collide with their neighbours or the tick ring.
+            let p = point_at(c, a, r * 0.68);
             if glow_num == h {
-                draw::disc(p.x, p.y, r * 0.21, palette::hexa(0xffd166, 0.85));
+                draw::disc(p.x, p.y, r * 0.20, palette::hexa(0xffd166, 0.85));
             }
             text::draw_centered(
                 &h.to_string(),
                 p.x,
                 p.y,
-                (r * 0.32).max(15.0) as u16,
+                (r * 0.28).max(14.0) as u16,
                 &ctx.fonts.cursive,
                 palette::INK,
             );
