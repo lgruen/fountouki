@@ -1,9 +1,15 @@
 name: CI
 
+# PR-only: the `pull_request` event already covers every branch with an open
+# PR (and tests the merged result). A separate `push` trigger would re-run the
+# identical job on the same branch — two checks per push. Concurrency cancels a
+# superseded run when a PR branch is pushed again.
 on:
   pull_request:
-  push:
-    branches-ignore: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
