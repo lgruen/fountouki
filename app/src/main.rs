@@ -475,7 +475,10 @@ async fn main() {
                 };
                 {
                     let mut kv = db.borrow_kv_mut();
-                    let cs = fountouki_core::settings::ClockSettings { difficulty: diff.to_string() };
+                    let cs = fountouki_core::settings::ClockSettings {
+                        difficulty: diff.to_string(),
+                        ..Default::default()
+                    };
                     fountouki_core::settings::save_clock(&mut **kv, &cs);
                 }
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
@@ -1458,7 +1461,10 @@ async fn main() {
             let db = Db::mem();
             {
                 let mut kv = db.borrow_kv_mut();
-                let cs = fountouki_core::settings::ClockSettings { difficulty: "clock".to_string() };
+                let cs = fountouki_core::settings::ClockSettings {
+                    difficulty: "clock".to_string(),
+                    ..Default::default()
+                };
                 fountouki_core::settings::save_clock(&mut **kv, &cs);
             }
             let mut sc = ClockScene::new(db, 7, now);

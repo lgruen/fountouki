@@ -317,6 +317,9 @@ impl ParentPanel {
         if self.game == "clock" && in_body {
             if hit(pt.pos, l.diff) {
                 self.cl.difficulty = cycle(&CL_DIFFS, &self.cl.difficulty);
+                // Stamp the choice so it wins the cross-device last-write-wins
+                // merge (the clock scene syncs this under `clockcfg`).
+                self.cl.last_seen = ctx.now;
                 self.cl_dirty = true;
             }
             if hit(pt.pos, l.start_over) {
