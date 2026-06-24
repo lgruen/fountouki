@@ -49,6 +49,48 @@ pub fn draw_centered(text: &str, cx: f32, cy: f32, size: u16, font: &Font, color
     );
 }
 
+/// Like [`draw_centered`], but the advance between glyphs is scaled by `tracking`
+/// (1.0 = font default, <1.0 tightens). VicModernCursive's digits carry generous
+/// side bearings, so the clock's two-digit hours (10/11/12) otherwise read as two
+/// separate numbers; this packs the digits into a single numeral. Single-digit
+/// strings are unaffected (the run is centered on the full trailing advance, so a
+/// lone glyph lands exactly where [`draw_centered`] would put it).
+pub fn draw_centered_tracked(text: &str, cx: f32, cy: f32, size: u16, font: &Font, color: Color, tracking: f32) {
+    // Per-glyph advances, then cumulative pen positions with the gaps scaled.
+    let advs: Vec<f32> = text
+        .chars()
+        .map(|ch| measure_text(ch.to_string().as_str(), Some(font), size, 1.0).width)
+        .collect();
+    if advs.is_empty() {
+        return;
+    }
+    let mut pens = Vec::with_capacity(advs.len());
+    let mut pen = 0.0;
+    for &adv in &advs {
+        pens.push(pen);
+        pen += adv * tracking;
+    }
+    // Center on the run's full extent (last pen + last *unscaled* advance), so a
+    // single glyph matches draw_centered exactly.
+    let total = pens[pens.len() - 1] + advs[advs.len() - 1];
+    let start = cx - total / 2.0;
+    let dim = measure_text(text, Some(font), size, 1.0);
+    let y = cy + dim.offset_y / 2.0;
+    for (ch, &px) in text.chars().zip(pens.iter()) {
+        draw_text_ex(
+            ch.to_string().as_str(),
+            start + px,
+            y,
+            TextParams {
+                font: Some(font),
+                font_size: size,
+                color,
+                ..Default::default()
+            },
+        );
+    }
+}
+
 /// Like [`draw_centered`], but the glyphs are rotated `rot` radians (clockwise,
 /// screen y-down) about their visual center `(cx, cy)` — so the centered text
 /// rides a tilted surface (e.g. a bunting flag) instead of staying upright.
