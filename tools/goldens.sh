@@ -13,7 +13,7 @@ BIN="$ROOT/target/debug/fountouki"
 mkdir -p "$OUT"
 ( cd "$ROOT" && cargo build -q -p fountouki )
 
-scenes=(picker phonics phonics-miss phonics-miss-igloo phonics-done patterns patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done tracing tracing-watch tracing-two-stroke tracing-reward tracing-build tracing-grade tracing-done tracing-housewarming singback singback-ready singback-input singback-miss singback-reward singback-finale clock clock-clock clock-halfpast clock-reward clock-finale parent-patterns parent-phonics parent-tracing parent-singback parent-clock)
+scenes=(picker phonics phonics-miss phonics-miss-igloo phonics-done patterns patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done tracing tracing-watch tracing-two-stroke tracing-reward tracing-build tracing-grade tracing-done tracing-housewarming singback singback-ready singback-input singback-miss singback-reward singback-finale clock clock-routine clock-clock clock-halfpast clock-reward clock-finale parent-patterns parent-phonics parent-tracing parent-singback parent-clock)
 # label width height
 resolutions=(
   "ipad-landscape 1194 834"

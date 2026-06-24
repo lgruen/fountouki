@@ -464,11 +464,13 @@ async fn main() {
                 };
                 Box::new(SingbackScene::capture(db.clone(), 99, now, cap, &ctx0))
             }
-            "clock" | "clock-clock" | "clock-halfpast" | "clock-reward" | "clock-finale" => {
+            "clock" | "clock-routine" | "clock-clock" | "clock-halfpast" | "clock-reward"
+            | "clock-finale" => {
                 use games::clock::CaptureState;
                 // Each clock golden pins a difficulty so the scaffold (glow/ghost
                 // vs. model clock) renders for its level.
                 let diff = match which {
+                    "clock-routine" => "routine",
                     "clock-clock" => "clock",
                     "clock-halfpast" => "halfpast",
                     _ => "match", // "clock", "clock-reward", "clock-finale"
@@ -485,6 +487,7 @@ async fn main() {
                 let idle = Pointer::default();
                 let ctx0 = Ctx { dt: 0.016, time: 0.4, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 let cap = match which {
+                    "clock-routine" => CaptureState::SetRoutine,
                     "clock-clock" => CaptureState::SetClock,
                     "clock-halfpast" => CaptureState::SetHalfpast,
                     "clock-reward" => CaptureState::Reward,
