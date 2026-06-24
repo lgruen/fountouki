@@ -718,8 +718,10 @@ impl ClockScene {
     /// The big interactive clock the child sets.
     fn draw_clock(&self, ctx: &Ctx, lay: &CLayout) {
         let (th, tm) = self.target();
-        // Glow the target number on the dial (scaffold, levels 1–2).
-        let glow_num = if self.level <= 2 { Some(th) } else { None };
+        // Glow the target number on the dial — the level-1 `match` scaffold only.
+        // Level 2 `routine` drops the glow (and the ghost hand below) so the child
+        // FINDS the number themselves; that glow is the sole visual difference.
+        let glow_num = if self.level == 1 { Some(th) } else { None };
         draw_face(lay.face, lay.r, ctx, true, glow_num.unwrap_or(0));
 
         // Ghost target hands (level 1 only) — a faint "where to go" trace.
@@ -888,8 +890,10 @@ impl ClockScene {
         let glow = 0.12 + 0.20 * wink;
         draw::disc(m.x, m.y, mr * (1.5 + 0.4 * wink), palette::hexa(0xfff3a8, glow));
         draw::disc(m.x, m.y, mr, palette::hex(0xfff3c8));
-        // A soft crescent bite (a dimmer disc nudged off to one side).
-        draw::disc(m.x + mr * 0.36, m.y - mr * 0.20, mr * 0.80, palette::hexa(0xe7dfb0, 0.55));
+        // A soft crescent-shading bite on the upper-right — a dimmer disc kept
+        // FULLY inside the rim (offset + radius ≤ 1) so it never spills a stray
+        // disc onto the dark sky.
+        draw::disc(m.x + mr * 0.26, m.y - mr * 0.20, mr * 0.58, palette::hexa(0xe7dfb0, 0.55));
         // The face: two calm closed eyes (a wink on the left when tapped) + a
         // gentle smile, all on the lit (left) side of the moon.
         let eye = mr * 0.10;
@@ -935,12 +939,18 @@ impl ClockScene {
     fn draw_meadow(&self, f: &crate::layout::Frame, fl: &FinaleLayout) {
         let gy = fl.ground_y;
         draw::vgradient(0.0, gy, f.w, f.h - gy, palette::hex(0x2a3f5a), palette::hex(0x1f2e44));
-        // A pair of gentle hill humps for depth.
-        let hump = |cx: f32, w: f32, h: f32, col: Color| {
-            draw::disc(cx, gy + h, w, col);
+        // A pair of gentle hill humps for depth: a wide disc pushed mostly below
+        // the horizon so only a shallow cap shows. Sized off `vmin` (not width) so
+        // landscape doesn't blow them into sky-filling discs that bury the moon.
+        // `half_w` = visible half-width at the horizon, `rise` = cap height above
+        // it; solve the disc radius `r` and depth from those (r − depth = rise,
+        // √(r²−depth²) = half_w  ⇒  r = (half_w² + rise²) / 2·rise).
+        let hump = |cx: f32, half_w: f32, rise: f32, col: Color| {
+            let r = (half_w * half_w + rise * rise) / (2.0 * rise);
+            draw::disc(cx, gy + (r - rise), r, col);
         };
-        hump(f.w * 0.20, f.w * 0.42, f.vmin(0.10), palette::hexa(0x34506e, 0.9));
-        hump(f.w * 0.82, f.w * 0.40, f.vmin(0.08), palette::hexa(0x2e4863, 0.9));
+        hump(f.w * 0.24, f.vmin(0.34), f.vmin(0.11), palette::hexa(0x34506e, 0.9));
+        hump(f.w * 0.78, f.vmin(0.30), f.vmin(0.085), palette::hexa(0x2e4863, 0.9));
         // The horizon glow line where the meadow meets the sky.
         draw_rectangle(0.0, gy - 2.0, f.w, 4.0, palette::hexa(0x6b7fb0, 0.5));
     }
@@ -1412,6 +1422,9 @@ pub(crate) enum CaptureState {
     /// Level-1 "match": the dial target number glows, a ghost hand shows the way,
     /// the little hand mid-set (big hand pinned up).
     SetMatch,
+    /// Level-2 "routine": same little-hand-only set, but NO dial glow / ghost hand
+    /// — the child finds the number from the numeral card alone.
+    SetRoutine,
     /// Level-3 "clock": both hands in play + the mini model clock to copy.
     SetClock,
     /// Level-4 "halfpast": a half-past target (big hand down) + the model clock.
@@ -1429,9 +1442,11 @@ impl ClockScene {
     pub(crate) fn capture(db: Db, seed: u32, now: i64, cap: CaptureState, ctx0: &Ctx) -> ClockScene {
         let mut sc = ClockScene::new(db, seed, now);
         match cap {
-            CaptureState::SetMatch => {
-                // Level 1: open play, little hand one step shy of the glowing
-                // target (clearly mid-set); big hand pinned up.
+            CaptureState::SetMatch | CaptureState::SetRoutine => {
+                // Levels 1–2: open play, little hand one step shy of the target
+                // (clearly mid-set); big hand pinned up. The level (set by the
+                // caller's ClockSettings) decides whether the dial glows + the
+                // ghost hand shows (match) or not (routine).
                 sc.phase = Phase::Set;
                 sc.first = false;
                 let (th, _) = sc.target();
