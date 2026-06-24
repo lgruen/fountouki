@@ -23,10 +23,18 @@
 //!
 //! No in-play instruction text (kids can't read it): phase/turn read from the
 //! frog, the props, motion + audio. Completing the whole day lands on a calm
-//! bedtime FINALE (closure + payoff), then offers replay. The only persisted +
-//! synced thing is the highest difficulty completed (`core::clock::ClockState`);
-//! the per-session day progress is a plain field. Sync wiring mirrors Sing Back
-//! (pull+merge on mount, push on a new best, flush on every leave path).
+//! bedtime FINALE (closure + payoff), then offers replay.
+//!
+//! Two things sync cross-device, under separate keys:
+//! - MASTERY — the highest difficulty completed (`core::clock::ClockState`,
+//!   key `clock`): generation+max merge, pushed on a new best. Wiring mirrors
+//!   Sing Back (pull+merge on mount, flush on every leave path).
+//! - The parent-chosen DIFFICULTY (`core::settings::ClockSettings`, key
+//!   `clockcfg`): last-write-wins so the level a parent picks on one device
+//!   follows the family. Pulled+merged on mount (applied live to `level`),
+//!   pushed when the parent changed it, flushed on leave.
+//!
+//! The per-session day progress is a plain field (not persisted).
 use crate::{
     anim, chrome, draw, input,
     palette,
@@ -34,7 +42,7 @@ use crate::{
     store::Db,
     text,
 };
-use fountouki_core::{clock as ck, rng::Mulberry32, settings::load_clock};
+use fountouki_core::{clock as ck, rng::Mulberry32, settings};
 use macroquad::prelude::*;
 use nanoserde::SerJson;
 use std::f32::consts::{PI, TAU};
@@ -149,6 +157,10 @@ pub struct ClockScene {
     tap_debounce: input::TapDebounce,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
+    /// Parent-chosen difficulty + its last-edit timestamp; synced (last-write-
+    /// wins) under `clockcfg` via `cfg_sync` so the level follows the family.
+    cfg: settings::ClockSettings,
+    cfg_sync: crate::net::SyncClient,
     // --- finale interaction state ---
     /// Per-star twinkle timer (seconds since tapped, or IDLE).
     star_t: [f32; FINALE_STARS],
@@ -200,15 +212,23 @@ fn level_of(difficulty: &str) -> u32 {
 
 impl ClockScene {
     pub fn new(db: Db, seed: u32, now: i64) -> ClockScene {
-        let level = {
+        let cfg = {
             let kv = db.borrow_kv();
-            level_of(&load_clock(&**kv).difficulty)
+            settings::load_clock(&**kv)
         };
+        let level = level_of(&cfg.difficulty);
         let state = {
             let kv = db.borrow_kv();
             ck::load(&**kv, now)
         };
         let sync = crate::net::SyncClient::new(db.clone(), "clock");
+        let mut cfg_sync = crate::net::SyncClient::new(db.clone(), "clockcfg");
+        // Propagate a parent's chosen difficulty to the family. Only once one has
+        // actually been set (last_seen>0) — the default needs no sync, and a
+        // remote value still arrives via cfg_sync's mount pull either way.
+        if cfg.last_seen > 0 {
+            cfg_sync.queue_push(&cfg.serialize_json(), now);
+        }
         let mut sc = ClockScene {
             db,
             seed,
@@ -228,6 +248,8 @@ impl ClockScene {
             tap_debounce: input::TapDebounce::new(),
             confetti: crate::confetti::Confetti::new(seed.wrapping_add(CONFETTI_SEED_SALT)),
             sync,
+            cfg,
+            cfg_sync,
             star_t: [IDLE; FINALE_STARS],
             star_taps: 0,
             frog_t: IDLE,
@@ -508,6 +530,25 @@ impl Scene for ClockScene {
                 }
             }
         }
+        // Parent-chosen difficulty (last-write-wins). A newer remote choice is
+        // adopted live — `level` feeds `target()`/layout each frame, so the new
+        // scaffolding takes effect from the next target check (errorless).
+        self.cfg_sync.drive(ctx.now);
+        if let Some(remote) = self.cfg_sync.poll_pull() {
+            let rcfg = settings::parse_clock(&remote);
+            let merged = settings::merge_clock(&self.cfg, &rcfg);
+            if merged != self.cfg {
+                self.cfg = merged;
+                self.level = level_of(&self.cfg.difficulty);
+                let mut kv = self.db.borrow_kv_mut();
+                settings::save_clock(&mut **kv, &self.cfg);
+            }
+            // Re-push the reconciled value: propagates our choice when the remote
+            // was stale, and (crucially) REPLACES any stale blob still queued by
+            // the mount push above so it can't later clobber a newer remote. A
+            // redundant push when everything already agrees is idempotent.
+            self.cfg_sync.queue_push(&self.cfg.serialize_json(), ctx.now);
+        }
 
         // The Finale draws no topbar (full-screen night scene) — handle it FIRST
         // and return, so the invisible topbar corners never steal a tap.
@@ -518,10 +559,12 @@ impl Scene for ClockScene {
         match chrome::handle_topbar(&chrome::topbar(&ctx.frame), ctx, &self.db) {
             Some(chrome::TopbarAction::OpenParent) => {
                 self.sync.flush();
+                self.cfg_sync.flush();
                 return Nav::OpenParent;
             }
             Some(chrome::TopbarAction::Home) => {
                 self.sync.flush();
+                self.cfg_sync.flush();
                 return Nav::Home;
             }
             Some(chrome::TopbarAction::MuteToggled) => return Nav::Stay,
@@ -729,6 +772,7 @@ impl ClockScene {
         if input::hit_circle(pt.pos, home.x, home.y, br) {
             if self.tap_debounce.accept(TGT_FINALE_HOME, ctx.time) {
                 self.sync.flush();
+                self.cfg_sync.flush();
                 return Nav::Home;
             }
             return Nav::Stay;

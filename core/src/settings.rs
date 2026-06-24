@@ -225,15 +225,26 @@ pub fn save_singback<S: KeyValueStore + ?Sized>(store: &mut S, settings: &Singba
 /// highlight; still little-hand only) | `clock` (set BOTH hands for o'clock) |
 /// `halfpast` (adds half-past targets — set the big hand up OR down). Default
 /// `match`, the gentlest.
+///
+/// Unlike the other games' settings, this one is **cross-device synced** (under
+/// the `clockcfg` key) so a difficulty the parent picks on one device follows
+/// the family: `last_seen` timestamps the parent's choice and drives the
+/// last-write-wins [`merge_clock`]. JSON keys (`difficulty`, `lastSeen`) are
+/// load-bearing for that sync — do not rename.
 #[derive(Debug, Clone, PartialEq, Eq, SerJson, DeJson)]
 pub struct ClockSettings {
     #[nserde(rename = "difficulty")]
     pub difficulty: String,
+    /// epoch ms when the parent last changed `difficulty`; 0 = never. The newer
+    /// timestamp wins [`merge_clock`]; an absent key (older blob) reads as 0.
+    #[nserde(rename = "lastSeen")]
+    #[nserde(default)]
+    pub last_seen: i64,
 }
 
 impl Default for ClockSettings {
     fn default() -> Self {
-        Self { difficulty: "match".to_string() }
+        Self { difficulty: "match".to_string(), last_seen: 0 }
     }
 }
 
@@ -243,21 +254,44 @@ impl Default for ClockSettings {
 struct ClockSettingsPatch {
     #[nserde(rename = "difficulty")]
     difficulty: Option<String>,
+    #[nserde(rename = "lastSeen")]
+    last_seen: Option<i64>,
+}
+
+/// Parse a clock-settings blob (local store value or a remote sync body) onto
+/// the defaults: only fields present in valid JSON override. Garbage → defaults.
+pub fn parse_clock(raw: &str) -> ClockSettings {
+    let mut s = ClockSettings::default();
+    if let Ok(patch) = ClockSettingsPatch::deserialize_json(raw) {
+        if let Some(v) = patch.difficulty {
+            s.difficulty = v;
+        }
+        if let Some(v) = patch.last_seen {
+            s.last_seen = v;
+        }
+    }
+    s
+}
+
+/// Merge a remote clock-settings blob into local (cross-device sync):
+/// **last-write-wins** by `last_seen` — the more-recent parent choice wins. A
+/// tie keeps the lexicographically-greater `difficulty`, so the result is
+/// commutative + idempotent regardless of merge order.
+pub fn merge_clock(local: &ClockSettings, remote: &ClockSettings) -> ClockSettings {
+    use std::cmp::Ordering;
+    match local.last_seen.cmp(&remote.last_seen) {
+        Ordering::Greater => local.clone(),
+        Ordering::Less => remote.clone(),
+        Ordering::Equal if local.difficulty >= remote.difficulty => local.clone(),
+        Ordering::Equal => remote.clone(),
+    }
 }
 
 /// Load clock settings: defaults overridden only by fields present in the stored
 /// blob. Absent blob / parse error → all defaults.
 pub fn load_clock<S: KeyValueStore + ?Sized>(store: &S) -> ClockSettings {
-    let mut s = ClockSettings::default();
     let key = ns_key("clock", "settings");
-    if let Some(raw) = store.get(&key) {
-        if let Ok(patch) = ClockSettingsPatch::deserialize_json(&raw) {
-            if let Some(v) = patch.difficulty {
-                s.difficulty = v;
-            }
-        }
-    }
-    s
+    store.get(&key).map(|raw| parse_clock(&raw)).unwrap_or_default()
 }
 
 /// Persist the whole clock-settings object.
@@ -480,15 +514,53 @@ mod tests {
     #[test]
     fn clock_roundtrip() {
         let mut store = MemStore::new();
-        let s = ClockSettings { difficulty: "clock".to_string() };
+        let s = ClockSettings { difficulty: "clock".to_string(), last_seen: 1748600100000 };
         save_clock(&mut store, &s);
         assert_eq!(load_clock(&store), s);
     }
 
     #[test]
     fn clock_serializes_with_exact_keys() {
-        let json = ClockSettings::default().serialize_json();
+        let json = ClockSettings { difficulty: "clock".to_string(), last_seen: 42 }.serialize_json();
         assert!(json.contains("\"difficulty\""), "json: {json}");
+        assert!(json.contains("\"lastSeen\":42"), "json: {json}");
+        assert!(!json.contains("last_seen"), "json: {json}");
+    }
+
+    #[test]
+    fn clock_load_tolerates_absent_last_seen() {
+        let mut store = MemStore::new();
+        store.set(&ns_key("clock", "settings"), "{\"difficulty\":\"clock\"}");
+        let s = load_clock(&store);
+        assert_eq!((s.difficulty.as_str(), s.last_seen), ("clock", 0));
+    }
+
+    #[test]
+    fn clock_merge_is_last_write_wins_by_timestamp() {
+        let local = ClockSettings { difficulty: "match".to_string(), last_seen: 100 };
+        let remote = ClockSettings { difficulty: "halfpast".to_string(), last_seen: 200 };
+        // The newer timestamp wins, either merge order.
+        assert_eq!(merge_clock(&local, &remote), remote);
+        assert_eq!(merge_clock(&remote, &local), remote);
+    }
+
+    #[test]
+    fn clock_merge_tie_break_is_commutative_and_idempotent() {
+        let a = ClockSettings { difficulty: "clock".to_string(), last_seen: 50 };
+        let b = ClockSettings { difficulty: "routine".to_string(), last_seen: 50 };
+        // Equal timestamps → deterministic, order-independent pick.
+        assert_eq!(merge_clock(&a, &b), merge_clock(&b, &a));
+        // Idempotent.
+        assert_eq!(merge_clock(&a, &a), a);
+        let m = merge_clock(&a, &b);
+        assert_eq!(merge_clock(&m, &a), m);
+        assert_eq!(merge_clock(&m, &b), m);
+    }
+
+    #[test]
+    fn clock_parse_garbage_is_defaults() {
+        assert_eq!(parse_clock("not json"), ClockSettings::default());
+        assert_eq!(parse_clock("{}"), ClockSettings::default());
     }
 
     #[test]
