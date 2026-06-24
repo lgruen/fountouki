@@ -1178,13 +1178,14 @@ fn draw_face(c: Vec2, r: f32, ctx: &Ctx, numerals: bool, glow_num: u8) {
             if glow_num == h {
                 draw::disc(p.x, p.y, r * 0.20, palette::hexa(0xffd166, 0.85));
             }
-            text::draw_centered(
+            text::draw_centered_tracked(
                 &h.to_string(),
                 p.x,
                 p.y,
                 (r * 0.28).max(14.0) as u16,
                 &ctx.fonts.cursive,
                 palette::INK,
+                0.72,
             );
         }
     }
