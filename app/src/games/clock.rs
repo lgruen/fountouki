@@ -85,6 +85,11 @@ const RAIN_INTERVAL_S: f32 = 0.12;
 const STAR_POP_DUR: f32 = 0.42;
 const STAR_POP_CAP: f32 = 1.25;
 
+/// Glyph tracking for the hour numerals (the dial face AND the card under the
+/// frog). VicModernCursive's digits carry wide side bearings, so two-digit hours
+/// (10/11/12) otherwise read as two separate numbers; this packs them into one.
+const NUMERAL_TRACKING: f32 = 0.72;
+
 /// Confetti seed salts (kept independent of the gameplay RNG so goldens stay
 /// reproducible — same scheme as Sing Back).
 const CONFETTI_SEED_SALT: u32 = 0x9E37_79B9;
@@ -701,13 +706,14 @@ impl ClockScene {
                 chh,
                 palette::CARD,
             );
-            text::draw_centered(
+            text::draw_centered_tracked(
                 &th.to_string(),
                 slot.x,
                 slot.y,
                 (lay.badge_r * 1.85) as u16,
                 &ctx.fonts.cursive,
                 palette::INK,
+                NUMERAL_TRACKING,
             );
         } else {
             draw_face(slot, lay.model_r, ctx, true, 0);
@@ -1049,9 +1055,13 @@ impl ClockScene {
         // A pointy nightcap, in a warm contrasting colour.
         let cap = if hero { palette::RAINBOW[0] } else { palette::RAINBOW[(kind * 3) % 7] };
         draw::frog_party_hat(c.x, c.y, r, pose, cap);
-        // A cosy blanket for the friends (a soft mound over the lower body).
+        // A cosy blanket for the friends, tucked LOW over the lap (below the
+        // smile) so the sleepy face still reads — an opaque mound with a lighter
+        // folded-over top edge so it reads as bedding, not a blob over the mouth.
         if !hero {
-            draw::fill_ellipse(c.x, c.y + r * 0.55, r * 0.95, r * 0.5, 0.0, palette::hexa(0x8a6fb0, 0.85));
+            let by = c.y + r * 0.88;
+            draw::fill_ellipse(c.x, by, r * 0.98, r * 0.34, 0.0, palette::hex(0x8a6fb0));
+            draw::fill_ellipse(c.x, by - r * 0.22, r * 0.9, r * 0.12, 0.0, palette::hex(0xb6a0d8));
         }
 
         // Floating "zzz" — bigger for the hero.
@@ -1185,7 +1195,7 @@ fn draw_face(c: Vec2, r: f32, ctx: &Ctx, numerals: bool, glow_num: u8) {
                 (r * 0.28).max(14.0) as u16,
                 &ctx.fonts.cursive,
                 palette::INK,
-                0.72,
+                NUMERAL_TRACKING,
             );
         }
     }
