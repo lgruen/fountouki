@@ -31,10 +31,22 @@ details (see `CLAUDE.md`).
 - Session arc: open → ~5-minute soft cap → "session done" celebration;
   stars feed an external reward (parent-set, off-app).
 
-## Math (future)
-- Counting, subitizing, cardinality, one-to-one correspondence before
-  any arithmetic. Pedagogy research needed before designing — early
-  numeracy has a wide research base.
+## Math
+- **Number Scales (compare) shipped as the `compare` game**: symbolic magnitude
+  comparison ("which is more, 3 or 7?") on a balance scale, parent-graded like
+  phonics, difficulty ladder (far→near→read→teens→fewer) in `core::compare`.
+- **Pond wrapper + Froggy shipped**: the scale lives on a lily-pad pond —
+  **Froggy** (the series' teal hero, `RAINBOW[3]`) stands at the base and *holds
+  the balance up from below* (calm while the child reads, a slight lean while the
+  grown-up grades, a tongue-out hop when a correct answer tips the scale). Sky +
+  calm water + cattails + a drifting dragonfly dress the play scene without
+  crowding the number cards. New pond primitives live in `draw::scenery`
+  (`lily_pad`, `cattail`, `dragonfly`, `pond`). The finale is a pond party:
+  Froggy hoists a golden trophy on a big pad, friend frogs party on their own
+  pads (party hats), numbered flag-bunting counts the compares won, balloons bob
+  and blossoms bloom when poked — matching the tracing/clock finale bar.
+- Still future: counting, subitizing, cardinality, one-to-one correspondence
+  before any arithmetic. Early numeracy has a wide research base.
 
 ## Construction writing (tracing v1 shipped; wrapper + SRS future)
 - **Shipped as the `tracing` game (lowercase a–z)**: per-letter pen strokes

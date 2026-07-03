@@ -1,6 +1,6 @@
 //! Scene dressing: the phonics rainbow, sky elements (cloud/sun), the drawn
 //! igloo exemplar, and the rainbow-garden plant pool.
-use super::prim::{disc, fill_ellipse, mix, shade, stroke_path};
+use super::prim::{arc, disc, fill_ellipse, mix, shade, stroke_path, vgradient};
 use crate::palette;
 use macroquad::prelude::*;
 
@@ -366,5 +366,110 @@ pub fn grass_tuft(cx: f32, ground_y: f32, size: f32, color: Color, sway: f32) {
     for s in [-1.0_f32, -0.4, 0.3, 1.0] {
         let tip = vec2(cx + (s + sway * 0.4) * size * 0.5, ground_y - size * (1.0 - 0.18 * s.abs()));
         stroke_path(&[vec2(cx + s * size * 0.12, ground_y), tip], (size * 0.10).max(1.5), color);
+    }
+}
+
+// ── Pond (the compare "Number Scales" world) ────────────────────────────────
+// A frog's pond: a lily-pad seesaw of a balance scale sits on the bank. These
+// vector pieces dress the play + finale scenes — all drawn by us so they read
+// identically on every device.
+
+/// A lily pad seen in gentle perspective: an elliptical green disc with the
+/// classic pie-slice notch cut at the front (toward the viewer, +y), a darker
+/// rim and a couple of lighter veins. `bloom` (0..1) opens a little flower at the
+/// pad's back for the finale — 0 leaves a plain pad.
+pub fn lily_pad(cx: f32, cy: f32, r: f32, color: Color, bloom: f32) {
+    use std::f32::consts::{FRAC_PI_2, TAU};
+    let ry = r * 0.62; // perspective squash
+    let notch = 0.42; // half-angle of the front wedge
+    let front = FRAC_PI_2; // screen y is down, so +FRAC_PI_2 points toward the viewer
+    let rim = shade(color, 0.84);
+    let n = ((r * 0.6).ceil() as usize).clamp(48, 128);
+    // Fan the pad from center over the full sweep except the notch wedge.
+    let a0 = front + notch;
+    let a1 = front - notch + TAU;
+    let pt = |a: f32, k: f32| vec2(cx + r * k * a.cos(), cy + ry * k * a.sin());
+    let mut prev_rim = pt(a0, 1.0);
+    let mut prev = pt(a0, 0.9);
+    for i in 1..=n {
+        let a = a0 + (a1 - a0) * (i as f32 / n as f32);
+        let (pr, pc) = (pt(a, 1.0), pt(a, 0.9));
+        draw_triangle(vec2(cx, cy), prev_rim, pr, rim);
+        draw_triangle(vec2(cx, cy), prev, pc, color);
+        prev_rim = pr;
+        prev = pc;
+    }
+    // A soft top highlight + two veins fanning from the notch.
+    fill_ellipse(cx, cy - ry * 0.35, r * 0.5, ry * 0.34, 0.0, mix(color, palette::WHITE, 0.16));
+    for s in [-0.55_f32, 0.0, 0.55] {
+        let a = front + std::f32::consts::PI + s; // toward the back of the pad
+        stroke_path(&[vec2(cx, cy), pt(a, 0.82)], (r * 0.03).max(1.0), rim);
+    }
+    if bloom > 0.01 {
+        let b = vec2(cx, cy - ry * 0.55);
+        let br = r * 0.30 * bloom;
+        for k in 0..6 {
+            petal(b, k as f32 / 6.0 * TAU - FRAC_PI_2, br, br * 0.5, palette::hexa(0xffd6ec, 0.96));
+        }
+        disc(b.x, b.y, br * 0.42, palette::hex(0xffe37a));
+    }
+}
+
+/// A cattail reed rising from the waterline at `(x, base_y)` to height `h`: a
+/// slim green stalk, a blade, and the signature brown velvet head near the top.
+pub fn cattail(x: f32, base_y: f32, h: f32, sway: f32) {
+    let green = palette::hex(0x4e9d52);
+    let bend = sway * h * 0.06;
+    let top = vec2(x + bend, base_y - h);
+    let mid = vec2(x + bend * 0.5, base_y - h * 0.5);
+    stroke_path(&[vec2(x, base_y), mid, top], (h * 0.028).max(2.0), green);
+    // A single arcing blade.
+    let bl = vec2(x - h * 0.02, base_y - h * 0.16);
+    stroke_path(&[bl, vec2(x - h * 0.20 + bend, base_y - h * 0.62), vec2(x - h * 0.10 + bend, base_y - h * 0.86)], (h * 0.03).max(1.5), shade(green, 0.9));
+    // The brown head sits below the tip; a thin spike pokes above it.
+    let head_h = h * 0.24;
+    let hy = base_y - h * 0.80;
+    fill_ellipse(top.x, hy, h * 0.05, head_h * 0.5, 0.0, palette::hex(0x8a5a2b));
+    fill_ellipse(top.x - h * 0.014, hy, h * 0.02, head_h * 0.42, 0.0, palette::hex(0xa9743c));
+    stroke_path(&[vec2(top.x, hy - head_h * 0.5), vec2(top.x, base_y - h)], (h * 0.018).max(1.2), green);
+}
+
+/// A little dragonfly hovering at `(cx, cy)`: a slim body, bug eyes, and two
+/// pairs of translucent wings that flutter with `wing` (radians of phase).
+pub fn dragonfly(cx: f32, cy: f32, r: f32, wing: f32, body: Color) {
+    let wingc = palette::hexa(0xcdeeff, 0.55);
+    let flutter = wing.sin() * 0.35;
+    for (s, back) in [(-1.0_f32, false), (1.0, false), (-1.0, true), (1.0, true)] {
+        let ang = s * (0.62 + flutter) + if back { s * 0.5 } else { 0.0 };
+        let len = if back { r * 0.85 } else { r * 1.05 };
+        let off = if back { r * 0.18 } else { -r * 0.12 };
+        let base = vec2(cx, cy + off);
+        let tip = base + vec2(ang.sin() * len, -ang.cos() * len * 0.4);
+        let mid = (base + tip) * 0.5;
+        let d = tip - base;
+        fill_ellipse(mid.x, mid.y, d.length() * 0.5, r * 0.16, d.y.atan2(d.x).to_degrees(), wingc);
+    }
+    // Body (tail down) + head with two bright eyes.
+    fill_ellipse(cx, cy + r * 0.35, r * 0.13, r * 0.75, 0.0, body);
+    disc(cx, cy - r * 0.28, r * 0.2, body);
+    for s in [-1.0_f32, 1.0] {
+        disc(cx + s * r * 0.12, cy - r * 0.34, r * 0.09, mix(body, palette::WHITE, 0.5));
+    }
+}
+
+/// Calm pond water filling `(x, y, w, h)`: a teal vertical wash with a few
+/// drifting highlight ripples. `time` drifts the ripples; pass 0 in goldens.
+pub fn pond(x: f32, y: f32, w: f32, h: f32, time: f32) {
+    vgradient(x, y, w, h, palette::hex(0x8ad3d0), palette::hex(0x5cb2b8));
+    // A brighter meniscus at the waterline.
+    draw_rectangle(x, y, w, (h * 0.03).max(2.0), palette::hexa(0xcdeeee, 0.7));
+    // A few small, calm highlight ripples scattered across the surface — subtle,
+    // so they never compete with the number cards above.
+    let rw = (w * 0.035).max(18.0);
+    for &(fx, fy, ph) in &[(0.16f32, 0.30f32, 0.0f32), (0.44, 0.62, 1.9), (0.70, 0.38, 3.4), (0.86, 0.72, 5.1)] {
+        let drift = (time * 0.5 + ph).sin() * w * 0.02;
+        let cx = x + w * fx + drift;
+        let cy = y + h * fy;
+        arc(cx, cy, rw, 0.35, std::f32::consts::PI - 0.35, (h * 0.01).max(1.2), palette::hexa(0xe4f7f4, 0.4));
     }
 }

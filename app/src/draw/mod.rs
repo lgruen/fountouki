@@ -37,8 +37,8 @@ pub use prim::{
     stroke_path, vgradient,
 };
 pub use scenery::{
-    cloud, garden_plant, grass_tuft, igloo, plant, rainbow, rainbow_ghost, sun, sun_rays, Plant,
-    GARDEN_SPECIES,
+    cattail, cloud, dragonfly, garden_plant, grass_tuft, igloo, lily_pad, plant, pond, rainbow,
+    rainbow_ghost, sun, sun_rays, Plant, GARDEN_SPECIES,
 };
 pub use train::{
     bunting, checker_flag, engine_funnel_tip, engine_hit_rect, steam_puff, train_car_chassis,

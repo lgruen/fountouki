@@ -45,7 +45,7 @@ const REVEAL_DUR: f32 = 1.7; // a miss: show the correct side (a touch longer to
 const ENTRY_FADE: f32 = 0.5; // first-round scene-entry dim-bloom (orient before play)
 
 /// Full beam tilt (radians) when a side has fully dropped.
-const FULL_TILT: f32 = 0.17;
+const FULL_TILT: f32 = 0.19;
 /// The small, non-revealing nudge toward the tapped pan during Judge.
 const NUDGE_TILT: f32 = 0.045;
 
@@ -133,8 +133,6 @@ pub struct CompareScene {
     chosen: Option<u8>,
     /// Set on the round that raised `best_level` (escalates the finale push).
     new_best: bool,
-    /// Fulcrum-face blink timer (idle ambient; frozen during Present).
-    blink_t: f32,
     rain_acc: f32,
     tap_debounce: input::TapDebounce,
     confetti: crate::confetti::Confetti,
@@ -194,7 +192,6 @@ impl CompareScene {
             first: true,
             chosen: None,
             new_best: false,
-            blink_t: 0.0,
             rain_acc: 0.0,
             tap_debounce: input::TapDebounce::new(),
             confetti: crate::confetti::Confetti::new(seed.wrapping_add(CONFETTI_SEED_SALT)),
@@ -254,7 +251,8 @@ impl CompareScene {
                 sc.stars = 3;
                 sc.phase = Phase::Reward { t: 0.5 };
                 let lay = lay(&_ctx.frame);
-                sc.confetti.burst(lay.pivot, REWARD_BURST_N, lay.half_beam * 0.5);
+                let wr = card_rect(&lay, 0.0, sc.round.correct_side());
+                sc.confetti.burst(vec2(wr.x + wr.w / 2.0, wr.y + wr.h * 0.35), REWARD_BURST_N, lay.card_w * 0.6);
                 // Step the physics so the burst reads as a spray, not a frozen row
                 // (capture renders a single, un-updated frame).
                 for _ in 0..30 {
@@ -305,7 +303,12 @@ impl CompareScene {
         self.stars += 1;
         self.streak += 1;
         let lay = lay(&ctx.frame);
-        self.confetti.burst(lay.pivot, REWARD_BURST_N, lay.half_beam * 0.9);
+        // Burst over the winning answer (the celebration lands ON the correct
+        // card), plus a ribbit from Froggy as he hops.
+        let win = self.round.correct_side();
+        let wr = card_rect(&lay, 0.0, win);
+        self.confetti.burst(vec2(wr.x + wr.w / 2.0, wr.y + wr.h * 0.35), REWARD_BURST_N, lay.card_w * 0.6);
+        ctx.audio.frog();
         ctx.audio.correct(self.streak.saturating_sub(1));
         if self.stars >= GOAL {
             self.enter_finale(ctx);
@@ -358,7 +361,9 @@ impl CompareScene {
                 None => 0.0,
             },
             Phase::Reward { t } => {
-                let k = anim::ease_out_cubic(anim::clamp01(t / 0.5));
+                // back_out overshoots then settles — the heavier side drops with a
+                // bit of weight, then bobs level, so the tip reads as physical.
+                let k = anim::back_out(anim::clamp01(t / 0.55));
                 drop_dir(self.round.correct_side()) * FULL_TILT * k
             }
             Phase::Reveal { t } => {
@@ -580,11 +585,6 @@ impl Scene for CompareScene {
             None => {}
         }
 
-        // Ambient blink only outside the recall/lead-in beat.
-        if !matches!(self.phase, Phase::Present { .. }) {
-            self.blink_t += ctx.dt;
-        }
-
         match self.phase {
             Phase::Present { t } => {
                 let prev = t;
@@ -626,13 +626,14 @@ impl Scene for CompareScene {
     }
 
     fn draw(&mut self, ctx: &Ctx) {
-        clear_background(palette::BG);
         if matches!(self.phase, Phase::Finale { .. }) {
             self.draw_finale(ctx);
             return;
         }
 
         let l = lay(&ctx.frame);
+        // The pond world behind everything.
+        self.draw_world(&l, ctx);
         // Progress meter + the big/small cue placard.
         draw_meter(&l, self.stars, ctx);
         draw_cue(&l, self.round.want_smaller, ctx);
@@ -668,32 +669,63 @@ impl Scene for CompareScene {
 // ===========================================================================
 
 impl CompareScene {
+    /// The pond world behind the scale: a soft sky, calm water at the bottom, a
+    /// grassy far bank with cattails, and a drifting dragonfly. Calm by design —
+    /// the number cards are the target, so nothing busy sits near them.
+    fn draw_world(&self, l: &Lay, ctx: &Ctx) {
+        let f = &ctx.frame;
+        let present = matches!(self.phase, Phase::Present { .. });
+        let amb = if present { 0.0 } else { ctx.time };
+        // Sky → a warm, pale wash so the cream cards still pop.
+        draw::vgradient(0.0, 0.0, f.w, l.water_y, palette::hex(0xe4f2ff), palette::hex(0xeef8ea));
+        // A hazy sun tucked in the top-right, clear of the meter/cue.
+        draw::sun(f.w * 0.88, l.play.y + f.vmin(0.10), f.vmin(0.055).max(26.0));
+        // Two slow clouds high in the sky.
+        let cr = f.vmin(0.05).max(20.0);
+        for &(hy, sc, spd, ph) in &[(0.30f32, 1.0f32, 6.0f32, 0.2f32), (0.5, 0.72, 9.0, 0.7)] {
+            let span = f.w + cr * 8.0;
+            let x = (amb * spd + ph * span).rem_euclid(span) - cr * 4.0;
+            draw::cloud(x, l.play.y + (l.water_y - l.play.y) * hy, cr * sc);
+        }
+        // The pond, with a green bank strip along its near edge.
+        draw::pond(0.0, l.water_y, f.w, f.h - l.water_y, amb);
+        draw_rectangle(0.0, l.water_y - 5.0, f.w, 8.0, palette::hex(0x7cbf6a));
+        // Cattails rising from the bank at both margins (kept out of the play area).
+        let reed_h = (l.water_y - l.play.y) * 0.5 + l.frog_r;
+        draw::cattail(f.w * 0.06, l.water_y + 6.0, reed_h, 0.15 * (amb * 0.8).sin());
+        draw::cattail(f.w * 0.10, l.water_y + 10.0, reed_h * 0.8, -0.2 * (amb * 0.7).sin());
+        draw::cattail(f.w * 0.95, l.water_y + 6.0, reed_h * 0.92, -0.15 * (amb * 0.8 + 1.0).sin());
+        draw::cattail(f.w * 0.90, l.water_y + 10.0, reed_h * 0.7, 0.2 * (amb * 0.7 + 1.0).sin());
+        // A floating lily pad + a dragonfly skimming just over the water (down in
+        // the corner, well clear of the number cards).
+        draw::lily_pad(f.w * 0.18, l.water_y + (f.h - l.water_y) * 0.55, l.frog_r * 0.7, palette::hex(0x57b061), 0.0);
+        let dfy = l.water_y - (l.water_y - l.play.y) * 0.10 + 6.0 * (amb * 1.3).sin();
+        draw::dragonfly(f.w * (0.82 + 0.03 * (amb * 0.5).sin()), dfy, f.vmin(0.06).max(26.0), amb * 9.0, palette::RAINBOW[5]);
+    }
+
     fn draw_scale(&self, l: &Lay, ctx: &Ctx) {
         let tilt = self.beam_tilt();
         let (s, c) = tilt.sin_cos();
         let left_end = vec2(l.pivot.x - l.half_beam * c, l.pivot.y - l.half_beam * s);
         let right_end = vec2(l.pivot.x + l.half_beam * c, l.pivot.y + l.half_beam * s);
 
-        // --- stand: a rounded trapezoid foot + a post up to the pivot ---
-        // The foot sits just under the hanging pans (a compact stand), NOT at the
-        // grade band — otherwise a tall portrait viewport draws an absurd post.
-        let base_y = (l.pivot.y + l.cord + l.card_h + 22.0).min(l.grade_top - 6.0);
-        let foot_w = l.half_beam * 0.9;
-        let post_w = (l.half_beam * 0.09).max(8.0);
-        // ground shadow
-        draw::fill_ellipse(l.pivot.x, base_y + 4.0, foot_w * 0.6, foot_w * 0.12, 0.0, palette::hexa(0x2b2c34, 0.10));
-        // foot (trapezoid via two triangles)
-        let fl = vec2(l.pivot.x - foot_w / 2.0, base_y);
-        let fr = vec2(l.pivot.x + foot_w / 2.0, base_y);
-        let tl = vec2(l.pivot.x - foot_w * 0.16, base_y - foot_w * 0.28);
-        let tr = vec2(l.pivot.x + foot_w * 0.16, base_y - foot_w * 0.28);
-        draw_triangle(fl, fr, tr, palette::hex(0xe3b96a));
-        draw_triangle(fl, tr, tl, palette::hex(0xe3b96a));
-        draw::rounded_rect(fl.x, base_y - 8.0, foot_w, 12.0, 6.0, palette::hex(0xd6a24f));
-        // post
-        draw::stroke_path(&[vec2(l.pivot.x, base_y - foot_w * 0.24), l.pivot], post_w, palette::hex(0xe3b96a));
+        // --- Froggy the weigh-master, balancing the pole on his head ---
+        let pose = self.froggy_pose(ctx.time, l.frog_r);
+        let r = l.frog_r;
+        // The pole runs from the pivot down to rest in the dip between Froggy's
+        // eyes — he balances the whole scale on his head (it rides his hop).
+        let crown = vec2(l.frog_c.x, l.frog_c.y - r * 0.92 + pose.dy);
+        let post_w = (l.half_beam * 0.08).max(7.0);
+        draw::stroke_path(&[l.pivot, crown], post_w, palette::hex(0xe3b96a));
+        // Lily pad + Froggy.
+        draw::lily_pad(l.frog_c.x, l.frog_c.y + r * 1.24, r * 1.75, palette::hex(0x57b061), 0.0);
+        draw::frog(l.frog_c.x, l.frog_c.y, r, palette::RAINBOW[3], pose);
+        // A little contact cap where the pole meets his head, so it reads as
+        // balanced-on-head, not stuck-through.
+        draw::fill_ellipse(crown.x, crown.y, r * 0.34, r * 0.13, 0.0, palette::hex(0xe3b96a));
+        draw::fill_ellipse(crown.x, crown.y - r * 0.03, r * 0.22, r * 0.08, 0.0, palette::hex(0xf6b73c));
 
-        // --- pans (drawn first so the beam + fulcrum sit on top of the cords) ---
+        // --- pans (drawn first so the beam + hub sit on top of the cords) ---
         self.draw_pan(l, ctx, left_end, 0);
         self.draw_pan(l, ctx, right_end, 1);
 
@@ -702,11 +734,42 @@ impl CompareScene {
         draw::stroke_path(&[left_end, right_end], beam_w + 3.0, palette::hex(0xc8881f));
         draw::stroke_path(&[left_end, right_end], beam_w, palette::hex(0xf6b73c));
 
-        // --- fulcrum face (the scale is a friendly character) ---
-        let face_r = (l.half_beam * 0.17).max(16.0);
-        draw::disc(l.pivot.x, l.pivot.y, face_r, palette::hex(0xf6b73c));
-        draw::disc(l.pivot.x, l.pivot.y, face_r * 0.82, palette::CARD);
-        self.draw_face(l.pivot, face_r * 0.82, false);
+        // --- pivot hub: a simple honey knob (Froggy carries the personality now) ---
+        let hub = (l.half_beam * 0.11).max(11.0);
+        draw::disc(l.pivot.x, l.pivot.y, hub, palette::hex(0xf6b73c));
+        draw::disc(l.pivot.x, l.pivot.y, hub * 0.58, palette::hex(0xc8881f));
+    }
+
+    /// Froggy's pose per phase. He stays CALM and near-still while the child is
+    /// reading/comparing (Choose) or the answer is being shown (Reveal) — no
+    /// competing motion on the axis between the two numerals — and saves his
+    /// liveliness for the reward: a big open-eyed, tongue-out hop when a correct
+    /// answer tips the scale. A slight lean toward the tapped pan during grading.
+    /// He never sulks on a miss (errorless).
+    fn froggy_pose(&self, _time: f32, r: f32) -> draw::FrogPose {
+        match self.phase {
+            Phase::Reward { t } => {
+                let fly = (anim::clamp01(t / 0.55) * std::f32::consts::PI).sin();
+                draw::FrogPose {
+                    dy: -fly * r * 0.7,
+                    sy: 1.0 + fly * 0.16,
+                    sx: 1.0 - fly * 0.08,
+                    tongue: fly,
+                    ..Default::default()
+                }
+            }
+            Phase::Judge { .. } => {
+                let lean = match self.chosen {
+                    Some(1) => 0.05,
+                    Some(_) => -0.05,
+                    None => 0.0,
+                };
+                draw::FrogPose { rot: lean, ..Default::default() }
+            }
+            // Present / Choose / Reveal: hold still (calm smile) so nothing
+            // animates near the numerals while the child reads.
+            _ => draw::FrogPose::default(),
+        }
     }
 
     fn draw_pan(&self, l: &Lay, ctx: &Ctx, end: Vec2, side: u8) {
@@ -758,96 +821,150 @@ impl CompareScene {
         draw_card(cr, value, pop, glow, tint, show_dots, ctx);
     }
 
-    /// Draw the fulcrum's face: two eyes that blink on idle, or happy squints.
-    fn draw_face(&self, c: Vec2, r: f32, _big: bool) {
-        let happy = matches!(self.phase, Phase::Reward { .. }) || self.face_t < FACE_WINK_S;
-        let ex = r * 0.42;
-        let ey = -r * 0.05;
-        // a blink dips the eye height briefly (frozen during Present via blink_t)
-        let blink = {
-            let ph = (self.blink_t * 0.6).fract();
-            if ph > 0.94 {
-                (1.0 - (ph - 0.94) / 0.06 * 2.0).abs()
-            } else {
-                1.0
-            }
-        };
-        for sx in [-1.0f32, 1.0] {
-            let e = vec2(c.x + sx * ex, c.y + ey);
-            if happy {
-                // upward smiling arc
-                draw::arc(e.x, e.y + r * 0.08, r * 0.22, std::f32::consts::PI + 0.4, TAU - 0.4, (r * 0.09).max(2.0), palette::INK);
-            } else {
-                let eh = (r * 0.20 * blink).max(1.5);
-                draw::fill_ellipse(e.x, e.y, r * 0.13, eh, 0.0, palette::INK);
-            }
-        }
-        // little smile
-        draw::arc(c.x, c.y + r * 0.28, r * 0.30, 0.35, std::f32::consts::PI - 0.35, (r * 0.08).max(2.0), palette::INK);
-    }
-
     // --- finale ------------------------------------------------------------
+    /// The pond party: Froggy hoists a golden trophy on a big lily pad, friends
+    /// party on their own pads, balloons bob in the sky, and the child can poke
+    /// blossoms, balloons and Froggy — everything reachable does something.
     fn draw_finale(&self, ctx: &Ctx) {
         let f = &ctx.frame;
         let fl = finale_layout(f);
         let time = self.finale_time();
-        // Warm carnival dusk sky.
-        draw::vgradient(0.0, 0.0, f.w, f.h, palette::hex(0xffd9a0), palette::hex(0xffb37e));
-        // ground band
-        draw::rounded_rect(0.0, f.h - f.h * 0.16, f.w, f.h * 0.2, 0.0, palette::hex(0x7fae6e));
+        // A bright, happy pond-noon sky (same world as play, dialled sunnier).
+        draw::vgradient(0.0, 0.0, f.w, fl.water_y, palette::hex(0xbfe8ff), palette::hex(0xeaf7ea));
+        // Sun + drifting clouds.
+        draw::sun(f.w * 0.90, f.h * 0.15, f.vmin(0.065).max(32.0));
+        let cr = f.vmin(0.05).max(22.0);
+        for &(hy, sc, spd, ph) in &[(0.18f32, 1.05f32, 6.0f32, 0.15f32), (0.30, 0.75, 9.0, 0.6), (0.12, 0.85, 4.5, 0.9)] {
+            let span = f.w + cr * 8.0;
+            let x = (time * spd + ph * span).rem_euclid(span) - cr * 4.0;
+            draw::cloud(x, fl.water_y * hy, cr * sc);
+        }
+        // Number bunting: a flag per correct compare, popping in one by one.
+        self.draw_number_bunting(ctx, &fl);
 
-        // twinkling stars
-        for i in 0..FINALE_STARS {
-            let p = fl.star(i);
-            let tw = if self.star_t[i] < STAR_TWINKLE_S {
-                1.0 + 0.5 * (1.0 - self.star_t[i] / STAR_TWINKLE_S)
+        // The pond, with cattails along the far bank.
+        draw::pond(0.0, fl.water_y, f.w, f.h - fl.water_y, time);
+        draw_rectangle(0.0, fl.water_y - 5.0, f.w, 8.0, palette::hex(0x7cbf6a));
+        let reed_h = fl.face_r * 2.2;
+        draw::cattail(f.w * 0.05, fl.water_y + 6.0, reed_h, 0.15 * (time * 0.8).sin());
+        draw::cattail(f.w * 0.96, fl.water_y + 6.0, reed_h * 0.9, -0.15 * (time * 0.8).sin());
+
+        // Friend frogs, each on a lily pad, hopping on a lazy ambient cadence.
+        for (i, &((fc, fr), (body, hat), phase)) in [
+            (fl.friends[0], (palette::RAINBOW[6], palette::GOLD), 2.0f32),
+            (fl.friends[1], (palette::RAINBOW[1], palette::RAINBOW[4]), 4.2),
+            (fl.friends[2], (palette::RAINBOW[4], palette::RAINBOW[0]), 0.9),
+        ]
+        .iter()
+        .enumerate()
+        {
+            draw::lily_pad(fc.x, fc.y + fr * 1.15, fr * 1.7, palette::hex(0x4fa85a), 0.0);
+            let amb = (time + phase).rem_euclid(5.6);
+            let pose = if amb < 0.7 {
+                let fly = (amb / 0.7 * std::f32::consts::PI).sin();
+                draw::FrogPose { dy: -fly * fr * 0.6, sy: 1.0 + fly * 0.14, sx: 1.0 - fly * 0.07, tongue: if i >= 1 { fly } else { 0.0 }, ..Default::default() }
             } else {
-                1.0 + 0.12 * anim::pulse(time + i as f32, 2.2)
+                let breathe = (time * 1.85 + phase).sin();
+                draw::FrogPose { sx: 1.0 - 0.025 * breathe, sy: 1.0 + 0.03 * breathe, ..Default::default() }
             };
-            draw::star(p.x, p.y, fl.star_r * tw, palette::hexa(0xfff3a8, 0.95));
+            draw::frog(fc.x, fc.y, fr, body, pose);
+            draw::frog_party_hat(fc.x, fc.y, fr, pose, hat);
         }
 
-        // balloons (bob; pop-wobble when tapped)
+        // Blossoms floating on the water (tap → bloom + twinkle).
+        for i in 0..FINALE_STARS {
+            let p = fl.star(i);
+            let bloom = if self.star_t[i] < STAR_TWINKLE_S {
+                0.6 + 0.4 * (1.0 - self.star_t[i] / STAR_TWINKLE_S)
+            } else {
+                0.55 + 0.06 * anim::pulse(time + i as f32, 2.2)
+            };
+            draw::lily_pad(p.x, p.y, fl.star_r, palette::hex(0x53ab5d), bloom);
+        }
+
+        // Balloons bobbing in the sky (tap → pop-wobble).
         for i in 0..FINALE_BALLOONS {
             let p = fl.balloon(i, time);
             let col = palette::RAINBOW[i % palette::RAINBOW.len()];
-            let sc = if self.balloon_t[i] < BALLOON_BOB_S {
-                1.0 + 0.18 * (1.0 - self.balloon_t[i] / BALLOON_BOB_S)
-            } else {
-                1.0
-            };
-            // string
+            let sc = if self.balloon_t[i] < BALLOON_BOB_S { 1.0 + 0.18 * (1.0 - self.balloon_t[i] / BALLOON_BOB_S) } else { 1.0 };
             draw::stroke_path(&[p, vec2(p.x, p.y + fl.balloon_r * 2.4)], 1.6, palette::hexa(0xffffff, 0.7));
             draw::fill_ellipse(p.x, p.y, fl.balloon_r * sc, fl.balloon_r * 1.18 * sc, 0.0, col);
             draw::disc(p.x - fl.balloon_r * 0.32, p.y - fl.balloon_r * 0.42, fl.balloon_r * 0.18, palette::hexa(0xffffff, 0.5));
         }
 
-        // the happy scale, balanced, holding a golden trophy star
-        let l = lay(f);
-        let pivot = fl.face;
-        let hb = l.half_beam * 0.8;
-        let le = vec2(pivot.x - hb, pivot.y);
-        let re = vec2(pivot.x + hb, pivot.y);
-        draw::stroke_path(&[vec2(pivot.x, pivot.y + hb * 0.9), pivot], (hb * 0.09).max(7.0), palette::hex(0xe3b96a));
-        draw::stroke_path(&[le, re], (hb * 0.08).max(8.0), palette::hex(0xf6b73c));
-        let face_r = fl.face_r;
-        draw::disc(pivot.x, pivot.y, face_r, palette::hex(0xf6b73c));
-        draw::disc(pivot.x, pivot.y, face_r * 0.82, palette::CARD);
-        self.draw_face(pivot, face_r * 0.82, true);
-        // trophy star popping above the pivot
+        // The hero: Froggy on his big pad, hoisting the golden trophy star.
+        let hero = fl.face;
+        let hr = fl.face_r;
+        draw::lily_pad(hero.x, hero.y + hr * 1.2, hr * 2.2, palette::hex(0x57b061), 0.0);
+        let hop = if self.face_t < FACE_WINK_S {
+            let fly = (self.face_t / FACE_WINK_S * std::f32::consts::PI).sin();
+            draw::FrogPose { dy: -fly * hr * 0.8, sy: 1.0 + fly * 0.16, sx: 1.0 - fly * 0.08, tongue: fly, blink: 0.7, ..Default::default() }
+        } else {
+            let breathe = (time * 1.7).sin();
+            draw::FrogPose { sx: 1.0 - 0.02 * breathe, sy: 1.0 + 0.025 * breathe, blink: 0.15, ..Default::default() }
+        };
+        draw::frog(hero.x, hero.y, hr, palette::RAINBOW[3], hop);
+        draw::frog_party_hat(hero.x, hero.y, hr, hop, palette::ACCENT);
+
+        // Trophy star popping above Froggy, with an orbiting sparkle ring.
         let pop = anim::back_out(anim::clamp01(time / STAR_POP_DUR)).min(STAR_POP_CAP);
         let throb = 1.0 + 0.05 * anim::pulse(time, 1.6);
-        let tr = vec2(pivot.x, pivot.y - face_r * 2.2);
+        let tr = vec2(hero.x, hero.y - hr * 2.3 + hop.dy);
         for k in 0..8 {
-            let a = k as f32 / 8.0 * TAU + time * 0.4;
-            let rr = face_r * 1.5 * pop;
-            draw::disc(tr.x + a.cos() * rr, tr.y + a.sin() * rr, face_r * 0.09, palette::hexa(0xfff3a8, 0.9));
+            let a = k as f32 / 8.0 * TAU + time * 0.5;
+            let rr = hr * 1.4 * pop;
+            draw::disc(tr.x + a.cos() * rr, tr.y + a.sin() * rr, hr * 0.09, palette::hexa(0xfff3a8, 0.9));
         }
-        draw::star(tr.x, tr.y, face_r * 1.05 * pop * throb, palette::hex(0xf6b800));
+        draw::star(tr.x, tr.y, hr * 1.0 * pop * throb, palette::hex(0xf6b800));
 
         self.confetti.draw();
         let (replay, home, br) = chrome::corner_buttons(f);
         chrome::draw_corner_buttons(replay, home, br);
+    }
+
+    /// A row of numbered flags strung across the top — one per correct compare
+    /// (the session's "trophies"), popping in one by one with a gentle sway.
+    fn draw_number_bunting(&self, ctx: &Ctx, fl: &FinaleLayout) {
+        let f = &ctx.frame;
+        let time = self.finale_time();
+        let (x0, x1) = (f.w * 0.08, f.w * 0.92);
+        let y = f.h * 0.045;
+        let sag = f.h * 0.05;
+        let yat = |t: f32| y + sag * 4.0 * t * (1.0 - t);
+        const SEG: usize = 40;
+        let mut line = Vec::with_capacity(SEG + 1);
+        for i in 0..=SEG {
+            let t = i as f32 / SEG as f32;
+            line.push(vec2(x0 + (x1 - x0) * t, yat(t)));
+        }
+        draw::stroke_path(&line, 3.0, palette::hexa(0x6f5a4a, 0.8));
+        let n = GOAL;
+        let fs = fl.flag_s;
+        for i in 0..n {
+            let t = (i as f32 + 0.5) / n as f32;
+            let popt = anim::clamp01((time - 0.30 - 0.12 * i as f32) / 0.4);
+            if popt <= 0.0 {
+                continue;
+            }
+            let sc = anim::back_out(popt);
+            let fsw = fs * sc;
+            let x = x0 + (x1 - x0) * t + (time * 1.6 + i as f32 * 1.3).sin() * 2.0;
+            let top = yat(t);
+            let rot = (sag * 4.0 * (1.0 - 2.0 * t)).atan2(x1 - x0);
+            let pivot = vec2(x, top);
+            draw::rounded_rect_rot(Rect::new(x - fsw / 2.0, top, fsw, fsw * 1.16), fsw * 0.12, pivot, rot, palette::CARD);
+            draw::rounded_rect_rot(Rect::new(x - fsw / 2.0, top, fsw, fsw * 0.18), fsw * 0.10, pivot, rot, palette::RAINBOW[i as usize % 7]);
+            let (sr, cr) = rot.sin_cos();
+            text::draw_centered_rot(
+                &(i + 1).to_string(),
+                x - fsw * 0.72 * sr,
+                top + fsw * 0.72 * cr,
+                (fsw * 0.6).max(1.0) as u16,
+                &ctx.fonts.cursive,
+                palette::INK,
+                rot,
+            );
+        }
     }
 }
 
@@ -972,6 +1089,12 @@ struct Lay {
     grade_top: f32,
     got: Vec2,
     miss: Vec2,
+    /// Froggy the weigh-master: he stands on a lily pad at the base and holds the
+    /// balance post up. `frog_c` is his body center, `frog_r` his body radius.
+    frog_c: Vec2,
+    frog_r: f32,
+    /// The waterline: the pond fills the screen below this y.
+    water_y: f32,
 }
 
 fn lay(f: &crate::layout::Frame) -> Lay {
@@ -1011,8 +1134,31 @@ fn lay(f: &crate::layout::Frame) -> Lay {
     let pivot_y = (((region_top + region_bot) + face_r - pans_drop) / 2.0)
         .clamp(region_top + face_r + 6.0, (region_bot - pans_drop).max(region_top + face_r + 6.0));
 
+    // Froggy the weigh-master stands at the base (feet on his lily pad), holding
+    // the post. The pond's waterline sits at his lily pad so he floats on it.
+    let base_y = (pivot_y + cord + card_h + 22.0).min(grade_top - 6.0);
+    let frog_r = (half_beam * 0.30).clamp(34.0, 80.0);
+    let frog_c = vec2(cx, base_y - 0.92 * frog_r);
+    let water_y = base_y - frog_r * 0.30;
+
     let play = Rect::new(0.0, top, f.w, f.h - top);
-    Lay { play, pivot: vec2(cx, pivot_y), half_beam, cord, card_w, card_h, cue, meter_y, grade_r, grade_top, got, miss }
+    Lay {
+        play,
+        pivot: vec2(cx, pivot_y),
+        half_beam,
+        cord,
+        card_w,
+        card_h,
+        cue,
+        meter_y,
+        grade_r,
+        grade_top,
+        got,
+        miss,
+        frog_c,
+        frog_r,
+        water_y,
+    }
 }
 
 /// The card rect for one side at a given beam tilt (0 during Choose).
@@ -1030,12 +1176,21 @@ fn card_rect(l: &Lay, tilt: f32, side: u8) -> Rect {
 // --- finale layout ---------------------------------------------------------
 
 struct FinaleLayout {
+    /// Froggy the hero: body center + radius.
     face: Vec2,
     face_r: f32,
     balloon_r: f32,
+    /// Blossom (lily-pad) radius for the tappable water flowers.
     star_r: f32,
     balloon_anchor: [Vec2; FINALE_BALLOONS],
+    /// Blossom positions floating on the pond.
     stars: [Vec2; FINALE_STARS],
+    /// The pond's waterline (water fills the screen below it).
+    water_y: f32,
+    /// Party guests (center, radius): frogs on their own lily pads.
+    friends: [(Vec2, f32); 3],
+    /// Numbered-flag bunting size.
+    flag_s: f32,
 }
 
 impl FinaleLayout {
@@ -1051,24 +1206,42 @@ impl FinaleLayout {
 
 fn finale_layout(f: &crate::layout::Frame) -> FinaleLayout {
     let cx = f.w / 2.0;
-    let face = vec2(cx, f.h * 0.56);
-    let face_r = (f.w * 0.05).clamp(30.0, 64.0);
-    let balloon_r = (f.w * 0.035).clamp(22.0, 42.0);
-    let star_r = (f.w * 0.02).clamp(12.0, 24.0);
+    let water_y = f.h * 0.60;
+    let pondh = f.h - water_y;
+    let face_r = (f.w * 0.058).clamp(36.0, 78.0);
+    // Froggy stands front-and-center, near the top of the pond.
+    let face = vec2(cx, water_y + pondh * 0.34);
+    let balloon_r = (f.w * 0.033).clamp(20.0, 40.0);
+    let star_r = (f.w * 0.030).clamp(16.0, 36.0);
+    let flag_s = f.vmin(0.10).clamp(38.0, 72.0);
 
-    // Hand-placed so none sits behind the centered trophy (the 5th rides high
-    // above it); the rest arc across the upper sky.
-    let spots = [(0.15, 0.28), (0.35, 0.17), (0.65, 0.17), (0.85, 0.28), (0.50, 0.10)];
+    // Balloons drift in the mid-sky band — below the bunting, above the pond, so
+    // they fill the space rather than crowding the flags at the very top.
+    let bspots = [(0.12, 0.60), (0.28, 0.80), (0.72, 0.80), (0.88, 0.60), (0.50, 0.52)];
     let mut balloon_anchor = [Vec2::ZERO; FINALE_BALLOONS];
-    for (b, (fx, fy)) in balloon_anchor.iter_mut().zip(spots.iter()) {
-        *b = vec2(f.w * fx, f.h * fy);
+    for (b, (fx, fy)) in balloon_anchor.iter_mut().zip(bspots.iter()) {
+        *b = vec2(f.w * fx, water_y * fy);
     }
+
+    // Party guests on their own pads, flanking + behind Froggy.
+    let fr = face_r * 0.66;
+    let friends = [
+        (vec2(cx - face_r * 2.5, water_y + pondh * 0.22), fr),
+        (vec2(cx + face_r * 2.6, water_y + pondh * 0.46), fr * 0.9),
+        (vec2(cx - face_r * 1.5, water_y + pondh * 0.66), fr * 0.72),
+    ];
+
+    // Blossoms scattered across the lower pond, clear of the hero + guests.
+    let sspots = [
+        (0.08, 0.56), (0.22, 0.84), (0.36, 0.62), (0.46, 0.90),
+        (0.60, 0.88), (0.72, 0.60), (0.84, 0.84), (0.93, 0.56),
+    ];
     let mut stars = [Vec2::ZERO; FINALE_STARS];
-    for (i, s) in stars.iter_mut().enumerate() {
-        let t = (i as f32 + 0.5) / FINALE_STARS as f32;
-        *s = vec2(f.w * (0.06 + 0.88 * t), f.h * (0.10 + 0.22 * ((i * 3) % 4) as f32 / 3.0));
+    for (s, (fx, fy)) in stars.iter_mut().zip(sspots.iter()) {
+        *s = vec2(f.w * fx, water_y + pondh * fy);
     }
-    FinaleLayout { face, face_r, balloon_r, star_r, balloon_anchor, stars }
+
+    FinaleLayout { face, face_r, balloon_r, star_r, balloon_anchor, stars, water_y, friends, flag_s }
 }
 
 /// Step in-flight timers by `dt`, parking each at [`IDLE`] once past `dur`.
