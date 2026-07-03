@@ -49,9 +49,16 @@ pub fn draw_centered(text: &str, cx: f32, cy: f32, size: u16, font: &Font, color
     );
 }
 
+/// Glyph tracking for multi-digit numerals drawn in the cursive font.
+/// VicModernCursive's digits carry wide side bearings, so a two-digit number
+/// (10/11/12/…/20) otherwise reads as two separate numbers; this tightens the
+/// inter-digit gap so it packs into one numeral. Shared by every game that draws
+/// two-digit numbers (clock hours, compare cards) so the spacing is identical.
+pub const NUMERAL_TRACKING: f32 = 0.72;
+
 /// Like [`draw_centered`], but the advance between glyphs is scaled by `tracking`
-/// (1.0 = font default, <1.0 tightens). VicModernCursive's digits carry generous
-/// side bearings, so the clock's two-digit hours (10/11/12) otherwise read as two
+/// (1.0 = font default, <1.0 tightens; see [`NUMERAL_TRACKING`]). VicModernCursive's
+/// digits carry generous side bearings, so two-digit numbers otherwise read as two
 /// separate numbers; this packs the digits into a single numeral. Single-digit
 /// strings are unaffected (the run is centered on the full trailing advance, so a
 /// lone glyph lands exactly where [`draw_centered`] would put it).

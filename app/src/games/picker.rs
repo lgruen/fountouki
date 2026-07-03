@@ -16,6 +16,7 @@ pub const GAMES: &[(&str, &str)] = &[
     ("tracing", "tracing"),
     ("singback", "sing back"),
     ("clock", "clock"),
+    ("compare", "compare"),
 ];
 
 pub struct PickerScene {
@@ -225,6 +226,30 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
             draw::stroke_path(&[vec2(cx, cy), vec2(cx, cy - cr * 0.78)], (cr * 0.05).max(2.0), palette::RAINBOW[4]);
             draw::stroke_path(&[vec2(cx, cy), vec2(cx + cr * 0.5, cy)], (cr * 0.08).max(3.0), palette::hex(0xe85c6b));
             draw::disc(cx, cy, (cr * 0.07).max(2.5), palette::INK);
+        }
+        "compare" => {
+            // A tipped balance scale: a small "3" card up, a big "7" card down —
+            // the bigger number's pan sinks (the game's whole idea in one glance).
+            let hb = r.w * 0.26;
+            let piv = vec2(cx, cy - r.h * 0.04);
+            let tilt = 0.22_f32;
+            let (s, c) = tilt.sin_cos();
+            let le = vec2(piv.x - hb * c, piv.y - hb * s);
+            let re = vec2(piv.x + hb * c, piv.y + hb * s);
+            // post + foot
+            draw::stroke_path(&[vec2(piv.x, piv.y + hb * 0.9), piv], (hb * 0.12).max(4.0), palette::hex(0xe3b96a));
+            // beam
+            draw::stroke_path(&[le, re], (hb * 0.12).max(4.0), palette::hex(0xf6b73c));
+            // cards on cords
+            let cord = r.h * 0.12;
+            for (end, val, cw) in [(le, "3", r.w * 0.18), (re, "7", r.w * 0.22)] {
+                let pc = vec2(end.x, end.y + cord);
+                draw::stroke_path(&[end, pc], 1.6, palette::hex(0xc8881f));
+                let ch = cw * 1.1;
+                draw::card(pc.x - cw / 2.0, pc.y, cw, ch, palette::CARD);
+                text::draw_centered(val, pc.x, pc.y + ch / 2.0, (ch * 0.7) as u16, &ctx.fonts.cursive, palette::INK);
+            }
+            draw::disc(piv.x, piv.y, hb * 0.16, palette::hex(0xf6b73c));
         }
         _ => {}
     }

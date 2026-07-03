@@ -301,6 +301,87 @@ pub fn save_clock<S: KeyValueStore + ?Sized>(store: &mut S, settings: &ClockSett
 }
 
 // ---------------------------------------------------------------------------
+// Compare ("Number Scales") settings
+// ---------------------------------------------------------------------------
+
+/// Per-game "Number Scales" prefs. Stored at `fountouki.compare.settings.v1`.
+///
+/// `difficulty` is the parent-chosen level, a string (like the other games):
+/// `far` (0–9, big gap, quantity dots) | `near` (0–9, close pairs, dots) |
+/// `read` (0–9, numerals only) | `teens` (up to 20) | `fewer` (up to 20, mixes
+/// in "which is smaller?"). Default `far`, the gentlest.
+///
+/// Cross-device synced (under the `comparecfg` key), exactly like
+/// [`ClockSettings`]: `last_seen` drives the last-write-wins [`merge_compare`]
+/// so a level the parent picks on one device follows the family. JSON keys
+/// (`difficulty`, `lastSeen`) are load-bearing for that sync — do not rename.
+#[derive(Debug, Clone, PartialEq, Eq, SerJson, DeJson)]
+pub struct CompareSettings {
+    #[nserde(rename = "difficulty")]
+    pub difficulty: String,
+    /// epoch ms when the parent last changed `difficulty`; 0 = never.
+    #[nserde(rename = "lastSeen")]
+    #[nserde(default)]
+    pub last_seen: i64,
+}
+
+impl Default for CompareSettings {
+    fn default() -> Self {
+        Self { difficulty: "far".to_string(), last_seen: 0 }
+    }
+}
+
+/// Fully-optional parse view of [`CompareSettings`].
+#[derive(DeJson)]
+struct CompareSettingsPatch {
+    #[nserde(rename = "difficulty")]
+    difficulty: Option<String>,
+    #[nserde(rename = "lastSeen")]
+    last_seen: Option<i64>,
+}
+
+/// Parse a compare-settings blob (local store value or remote sync body) onto
+/// the defaults: only fields present in valid JSON override. Garbage → defaults.
+pub fn parse_compare(raw: &str) -> CompareSettings {
+    let mut s = CompareSettings::default();
+    if let Ok(patch) = CompareSettingsPatch::deserialize_json(raw) {
+        if let Some(v) = patch.difficulty {
+            s.difficulty = v;
+        }
+        if let Some(v) = patch.last_seen {
+            s.last_seen = v;
+        }
+    }
+    s
+}
+
+/// Merge a remote compare-settings blob into local: **last-write-wins** by
+/// `last_seen`, tie-broken by the lexicographically-greater `difficulty`, so
+/// the result is commutative + idempotent regardless of merge order.
+pub fn merge_compare(local: &CompareSettings, remote: &CompareSettings) -> CompareSettings {
+    use std::cmp::Ordering;
+    match local.last_seen.cmp(&remote.last_seen) {
+        Ordering::Greater => local.clone(),
+        Ordering::Less => remote.clone(),
+        Ordering::Equal if local.difficulty >= remote.difficulty => local.clone(),
+        Ordering::Equal => remote.clone(),
+    }
+}
+
+/// Load compare settings: defaults overridden only by fields present in the
+/// stored blob. Absent blob / parse error → all defaults.
+pub fn load_compare<S: KeyValueStore + ?Sized>(store: &S) -> CompareSettings {
+    let key = ns_key("compare", "settings");
+    store.get(&key).map(|raw| parse_compare(&raw)).unwrap_or_default()
+}
+
+/// Persist the whole compare-settings object.
+pub fn save_compare<S: KeyValueStore + ?Sized>(store: &mut S, settings: &CompareSettings) {
+    let key = ns_key("compare", "settings");
+    store.set(&key, &settings.serialize_json());
+}
+
+// ---------------------------------------------------------------------------
 // Token generation
 // ---------------------------------------------------------------------------
 
@@ -561,6 +642,42 @@ mod tests {
     fn clock_parse_garbage_is_defaults() {
         assert_eq!(parse_clock("not json"), ClockSettings::default());
         assert_eq!(parse_clock("{}"), ClockSettings::default());
+    }
+
+    #[test]
+    fn compare_defaults_and_roundtrip() {
+        assert_eq!(CompareSettings::default().difficulty, "far");
+        let store = MemStore::new();
+        assert_eq!(load_compare(&store), CompareSettings::default());
+        let mut store = MemStore::new();
+        let s = CompareSettings { difficulty: "teens".to_string(), last_seen: 1748600100000 };
+        save_compare(&mut store, &s);
+        assert_eq!(load_compare(&store), s);
+    }
+
+    #[test]
+    fn compare_serializes_with_exact_keys_and_tolerates_absent_last_seen() {
+        let json = CompareSettings { difficulty: "read".to_string(), last_seen: 42 }.serialize_json();
+        assert!(json.contains("\"difficulty\""), "json: {json}");
+        assert!(json.contains("\"lastSeen\":42"), "json: {json}");
+        assert!(!json.contains("last_seen"), "json: {json}");
+        let mut store = MemStore::new();
+        store.set(&ns_key("compare", "settings"), "{\"difficulty\":\"read\"}");
+        let s = load_compare(&store);
+        assert_eq!((s.difficulty.as_str(), s.last_seen), ("read", 0));
+    }
+
+    #[test]
+    fn compare_merge_is_last_write_wins_and_commutative() {
+        let local = CompareSettings { difficulty: "far".to_string(), last_seen: 100 };
+        let remote = CompareSettings { difficulty: "fewer".to_string(), last_seen: 200 };
+        assert_eq!(merge_compare(&local, &remote), remote);
+        assert_eq!(merge_compare(&remote, &local), remote);
+        let a = CompareSettings { difficulty: "teens".to_string(), last_seen: 50 };
+        let b = CompareSettings { difficulty: "read".to_string(), last_seen: 50 };
+        assert_eq!(merge_compare(&a, &b), merge_compare(&b, &a));
+        assert_eq!(merge_compare(&a, &a), a);
+        assert_eq!(parse_compare("not json"), CompareSettings::default());
     }
 
     #[test]
