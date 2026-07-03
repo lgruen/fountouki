@@ -86,9 +86,9 @@ const STAR_POP_DUR: f32 = 0.42;
 const STAR_POP_CAP: f32 = 1.25;
 
 /// Glyph tracking for the hour numerals (the dial face AND the card under the
-/// frog). VicModernCursive's digits carry wide side bearings, so two-digit hours
-/// (10/11/12) otherwise read as two separate numbers; this packs them into one.
-const NUMERAL_TRACKING: f32 = 0.72;
+/// frog) — the shared multi-digit tightening ([`text::NUMERAL_TRACKING`]), so
+/// 10/11/12 pack into one numeral.
+use crate::text::NUMERAL_TRACKING;
 
 /// Confetti seed salts (kept independent of the gameplay RNG so goldens stay
 /// reproducible — same scheme as Sing Back).

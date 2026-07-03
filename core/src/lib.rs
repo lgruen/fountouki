@@ -14,6 +14,7 @@ pub mod storage;
 pub mod settings;
 pub mod singback;
 pub mod clock;
+pub mod compare;
 pub mod sync;
 pub mod route;
 pub mod tracing;

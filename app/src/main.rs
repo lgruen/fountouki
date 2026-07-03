@@ -23,6 +23,7 @@ mod store;
 mod text;
 
 use games::clock::ClockScene;
+use games::compare::CompareScene;
 use games::patterns::PatternsScene;
 use games::phonics::PhonicsScene;
 use games::picker::PickerScene;
@@ -76,6 +77,7 @@ fn build_game(id: &str, db: &Db, now: i64) -> Box<dyn Scene> {
         "tracing" => Box::new(TracingScene::new(db.clone(), now as u32 ^ 0x7e11_e77a, now)),
         "singback" => Box::new(SingbackScene::new(db.clone(), now as u32 ^ 0x5126_acc0, now)),
         "clock" => Box::new(ClockScene::new(db.clone(), now as u32 ^ 0xc10c_c10c, now)),
+        "compare" => Box::new(CompareScene::new(db.clone(), now as u32 ^ 0xc011_a2e5, now)),
         _ => Box::new(PhonicsScene::new(db.clone(), now as u32 ^ 0x5bd1_e995, now)),
     }
 }
@@ -496,6 +498,24 @@ async fn main() {
                 };
                 Box::new(ClockScene::capture(db.clone(), 99, now, cap, &ctx0))
             }
+            "compare" | "compare-read" | "compare-teens" | "compare-fewer" | "compare-judge"
+            | "compare-reward" | "compare-reveal" | "compare-finale" => {
+                use games::compare::CaptureState;
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let idle = Pointer::default();
+                let ctx0 = Ctx { dt: 0.016, time: 0.4, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                let cap = match which {
+                    "compare-read" => CaptureState::ChooseRead,
+                    "compare-teens" => CaptureState::ChooseTeens,
+                    "compare-fewer" => CaptureState::ChooseFewer,
+                    "compare-judge" => CaptureState::Judge,
+                    "compare-reward" => CaptureState::Reward,
+                    "compare-reveal" => CaptureState::Reveal,
+                    "compare-finale" => CaptureState::Finale,
+                    _ => CaptureState::Choose, // "compare"
+                };
+                Box::new(CompareScene::capture(db.clone(), 99, now, cap, &ctx0))
+            }
             _ => {
                 let mut sc = PhonicsScene::new(db.clone(), 7, now);
                 sc.stars = 3; // mid-session for a representative shot
@@ -508,6 +528,7 @@ async fn main() {
             "parent-tracing" => Some(ParentPanel::open(db.clone(), "tracing", now, 99)),
             "parent-singback" => Some(ParentPanel::open(db.clone(), "singback", now, 99)),
             "parent-clock" => Some(ParentPanel::open(db.clone(), "clock", now, 99)),
+            "parent-compare" => Some(ParentPanel::open(db.clone(), "compare", now, 99)),
             _ => None,
         };
 
@@ -1589,6 +1610,160 @@ async fn main() {
                 println!(
                     "FAIL clock-finale (reached={reached}, topbar_dead={topbar_dead}, star_ok={star_ok}, frog_ok={frog_ok}, moon_ok={moon_ok}, friend_ok={friend_ok}, fly_ok={fly_ok}, restarted={restarted})"
                 );
+                fails += 1;
+            }
+        }
+        // compare: drive one round via the real input path — settle to Choose,
+        // tap a card, then the parent's ✓ (approve) or ✗ (reject), settling past
+        // the reward/reveal beat so the next round presents.
+        let grade_round = |sc: &mut CompareScene, tap_side: u8, approve: bool, clk: &mut f32| {
+            let idle = Pointer::default();
+            let mut guard = 0;
+            while !sc.in_choose() && !sc.in_finale() && guard < 40 {
+                *clk += 0.2;
+                let ctx = Ctx { dt: 0.2, time: *clk, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                guard += 1;
+            }
+            if !sc.in_choose() {
+                return;
+            }
+            // Tap the chosen card → enters Judge.
+            *clk += 0.2;
+            let ptr = tap(sc.card_center(&frame, tap_side));
+            let ctx = Ctx { dt: 0.05, time: *clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            // Parent grades.
+            *clk += 0.2;
+            let target = if approve { sc.got_center(&frame) } else { sc.miss_center(&frame) };
+            let ptr = tap(target);
+            let ctx = Ctx { dt: 0.05, time: *clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            // Settle past the reward/reveal beat.
+            let mut g2 = 0;
+            while !sc.in_choose() && !sc.in_finale() && g2 < 40 {
+                *clk += 0.2;
+                let ctx = Ctx { dt: 0.2, time: *clk, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                g2 += 1;
+            }
+        };
+
+        // compare (default level "far"): six parent-approved correct compares
+        // complete the meter monotonically and reach the Finale, recording best=1.
+        {
+            let mut sc = CompareScene::new(Db::mem(), 7, now);
+            let mut clk = 0.0f32;
+            let mut monotonic = true;
+            let mut prev = sc.stars();
+            for _ in 0..6 {
+                let side = sc.correct_side();
+                grade_round(&mut sc, side, true, &mut clk);
+                monotonic &= sc.stars() >= prev;
+                prev = sc.stars();
+            }
+            if sc.in_finale() && monotonic && sc.stars() == 6 && sc.best_level() == 1 {
+                println!("PASS compare-session");
+            } else {
+                println!(
+                    "FAIL compare-session (finale={}, monotonic={monotonic}, stars={}, best={})",
+                    sc.in_finale(),
+                    sc.stars(),
+                    sc.best_level()
+                );
+                fails += 1;
+            }
+        }
+        // compare: progress is gated by the PARENT'S grade, not the child's tap —
+        // the anti-cheat. A wrong-card tap the parent APPROVES still scores; a
+        // correct-card tap the parent REJECTS does not (and never decrements).
+        {
+            let mut sc = CompareScene::new(Db::mem(), 9, now);
+            let mut clk = 0.0f32;
+            // Tap the WRONG card, parent approves → counts (parent is authority).
+            let wrong = 1 - sc.correct_side();
+            grade_round(&mut sc, wrong, true, &mut clk);
+            let after_approve = sc.stars();
+            // Tap the CORRECT card, parent rejects → no score, no decrement.
+            let right = sc.correct_side();
+            grade_round(&mut sc, right, false, &mut clk);
+            let after_reject = sc.stars();
+            if after_approve == 1 && after_reject == 1 {
+                println!("PASS compare-parent-gates-progress");
+            } else {
+                println!("FAIL compare-parent-gates-progress (approve={after_approve}, reject={after_reject})");
+                fails += 1;
+            }
+        }
+        // compare: the Finale is interactive + its (invisible) topbar is dead.
+        // Reach it, then a balloon/star/face tap registers, a top-left tap does
+        // NOT navigate, and Replay restarts (best kept — monotonic).
+        {
+            let mut sc = CompareScene::new(Db::mem(), 7, now);
+            let mut clk = 0.0f32;
+            for _ in 0..6 {
+                let side = sc.correct_side();
+                grade_round(&mut sc, side, true, &mut clk);
+            }
+            let reached = sc.in_finale();
+            let best_at_finale = sc.best_level();
+            // Top-left (← / parent in other scenes) must be dead here.
+            clk += 0.3;
+            let tb = chrome::topbar(&frame);
+            let ptr = tap(tb.home.0);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let nav = sc.update(&ctx);
+            let topbar_dead = matches!(nav, Nav::Stay) && sc.in_finale();
+            clk += 0.3;
+            let ptr = tap(sc.finale_balloon_center(&frame, clk, 1));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let balloon_ok = sc.in_finale() && sc.balloon_taps() == 1;
+            clk += 0.3;
+            let ptr = tap(sc.finale_star_center(&frame, 2));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let star_ok = sc.in_finale() && sc.star_taps() == 1;
+            clk += 0.3;
+            let ptr = tap(sc.finale_face_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let face_ok = sc.in_finale() && sc.face_taps() == 1;
+            clk += 0.3;
+            let ptr = tap(sc.replay_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let restarted = !sc.in_finale() && sc.stars() == 0 && sc.best_level() == best_at_finale;
+            if reached && topbar_dead && balloon_ok && star_ok && face_ok && restarted {
+                println!("PASS compare-finale");
+            } else {
+                println!(
+                    "FAIL compare-finale (reached={reached}, topbar_dead={topbar_dead}, balloon={balloon_ok}, star={star_ok}, face={face_ok}, restarted={restarted})"
+                );
+                fails += 1;
+            }
+        }
+        // compare: a parent "start over" resets best_level back to 0.
+        {
+            let db = Db::mem();
+            let mut sc = CompareScene::new(db.clone(), 7, now);
+            let mut clk = 0.0f32;
+            for _ in 0..6 {
+                let side = sc.correct_side();
+                grade_round(&mut sc, side, true, &mut clk);
+            }
+            let earned = sc.best_level();
+            {
+                use fountouki_core::compare as cmp;
+                let mut kv = db.borrow_kv_mut();
+                let cur = cmp::load(&**kv, now);
+                cmp::save(&mut **kv, &cmp::start_over(&cur, now));
+            }
+            let fresh = CompareScene::new(db, 11, now);
+            if earned >= 1 && fresh.best_level() == 0 {
+                println!("PASS compare-start-over");
+            } else {
+                println!("FAIL compare-start-over (earned={earned}, after_reset={})", fresh.best_level());
                 fails += 1;
             }
         }
