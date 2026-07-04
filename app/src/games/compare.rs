@@ -1211,25 +1211,52 @@ fn cue_press(t: f32) -> f32 {
     }
 }
 
-/// A friendly cartoon hand pointing straight DOWN, fingertip at `tip`. A curled
-/// fist up top, an extended index finger, a thumb off to the side — flat fills,
-/// matching the app's neutral-vector look.
+/// A friendly cartoon hand pointing straight DOWN, fingertip at `tip`. The back
+/// of the hand up top with three curled fingers (knuckle bumps, grooved apart)
+/// and a thumb off the side, and ONE clearly extended index finger reaching down
+/// to the tip. The wide palm + splayed thumb + narrow, creased finger is what
+/// reads as a hand rather than a plunger — flat fills, neutral-vector look.
 fn draw_tap_hand(tip: Vec2, s: f32) {
     let skin = palette::hex(0xf6c99e);
+    let shade = palette::hexa(0xc98a5a, 0.5); // darker skin for creases / grooves
     let cuff = palette::hex(0xe86a8e); // a cheerful pink sleeve cuff
-    let fist = vec2(tip.x - s * 0.04, tip.y - s * 1.18);
-    // Sleeve cuff behind the fist.
-    draw::rounded_rect(fist.x - s * 0.46, fist.y - s * 0.62, s * 0.92, s * 0.44, s * 0.16, cuff);
-    // Fist / palm.
-    draw::rounded_rect(fist.x - s * 0.44, fist.y - s * 0.30, s * 0.88, s * 0.72, s * 0.28, skin);
-    // Curled fingers (two knuckle bumps on the right).
-    draw::disc(fist.x + s * 0.34, fist.y - s * 0.02, s * 0.15, skin);
-    draw::disc(fist.x + s * 0.33, fist.y + s * 0.24, s * 0.14, skin);
-    // Thumb across the front.
-    draw::disc(fist.x - s * 0.36, fist.y + s * 0.12, s * 0.15, skin);
-    // Extended index finger down to the tip.
-    draw::stroke_path(&[vec2(tip.x, fist.y + s * 0.20), tip], s * 0.30, skin);
-    draw::disc(tip.x, tip.y, s * 0.15, skin); // rounded fingertip
+    let cx = tip.x;
+
+    // Proportions, built upward from the fingertip.
+    let finger_w = s * 0.34;
+    let tip_r = finger_w * 0.46;
+    let palm_h = s * 0.66;
+    let palm_w = s * 0.96;
+    let palm_bottom = tip.y - s * 0.70;
+    let palm_top = palm_bottom - palm_h;
+    let palm_x = cx - palm_w * 0.5;
+
+    // Sleeve cuff peeking out behind the top of the hand.
+    draw::rounded_rect(palm_x - s * 0.04, palm_top - s * 0.26, palm_w + s * 0.08, s * 0.40, s * 0.15, cuff);
+    // Thumb: a stubby finger angled off the left side, clearly sticking out past
+    // the palm outline — the strongest "this is a hand" read.
+    draw::fill_ellipse(palm_x - s * 0.16, palm_top + palm_h * 0.44, s * 0.28, s * 0.15, 32.0, skin);
+    // Back of the hand.
+    draw::rounded_rect(palm_x, palm_top, palm_w, palm_h, s * 0.22, skin);
+
+    // Three curled fingers folded across the top — knuckle bumps, grooved apart
+    // so they read as separate fingers, not one blob.
+    let k_y = palm_top + s * 0.05;
+    for f in [0.34_f32, 0.55, 0.76] {
+        draw::disc(palm_x + palm_w * f, k_y, s * 0.15, skin);
+    }
+    for b in [0.445_f32, 0.655] {
+        let gx = palm_x + palm_w * b;
+        draw::stroke_path(&[vec2(gx, k_y - s * 0.06), vec2(gx, k_y + s * 0.16)], s * 0.035, shade);
+    }
+
+    // The one extended index finger, reaching down to the fingertip.
+    let jy = palm_bottom - s * 0.05;
+    draw_rectangle(cx - finger_w * 0.5, jy, finger_w, (tip.y - tip_r) - jy, skin);
+    draw::disc(cx, tip.y - tip_r, tip_r, skin); // rounded fingertip, point at `tip`
+    // A knuckle crease across the finger.
+    let crease = palm_bottom + (tip.y - palm_bottom) * 0.42;
+    draw::stroke_path(&[vec2(cx - finger_w * 0.4, crease), vec2(cx + finger_w * 0.4, crease)], s * 0.035, shade);
 }
 
 // ===========================================================================
