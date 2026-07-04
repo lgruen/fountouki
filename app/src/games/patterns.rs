@@ -24,11 +24,47 @@ use macroquad::prelude::*;
 /// wrong answer, so a level only advances on a clean run (mastery), never on a
 /// mistake-then-correct. Stars stay monotonic regardless. A clean streak *at*
 /// `MAX_LEVEL` fires the finale instead of leveling up (you beat the last level).
-const LEVEL_UP_STREAK: u32 = 4;
-const ADVANCE_DELAY: f32 = 0.85;
+///
+/// A short gate (2) keeps the session brief — climbing all six difficulty tiers
+/// to the train takes ~12 clean answers, in line with the newer games' ~5-min
+/// arc (the old 4-streak needed 24, which dragged for a 4yo).
+const LEVEL_UP_STREAK: u32 = 2;
+const ADVANCE_DELAY: f32 = 0.7;
 const RETRY_DELAY: f32 = 0.55;
-/// Level-up drive-by: how long the mini train takes to cross the screen.
-const DRIVE_DUR: f32 = 3.0;
+/// Level-up drive-by: how long the mini train takes to cross the screen. Kept
+/// snappy — it fires on every level-up (five per session), so a long crossing
+/// piled up dead time.
+const DRIVE_DUR: f32 = 2.0;
+
+// --- Pattern Train finale: interactive tap targets --------------------------
+// The finale mirrors the newer games (compare/clock/singback): several
+// INDEPENDENT tap targets, each with its own debounce id, tap counter, and a
+// short reaction timer that parks at `IDLE_T` when idle. Errorless + infinitely
+// re-tappable; nothing escalates.
+
+/// Parked timer value meaning "idle" (no reaction in flight).
+const IDLE_T: f32 = 99.0;
+/// Max cars we size the per-car bounce-timer array for (period 3 × 2 reps = 6 is
+/// the real max; 12 leaves generous headroom).
+const FINALE_MAX_CARS: usize = 12;
+/// Party balloons bobbing in the finale sky.
+const FINALE_BALLOONS: usize = 4;
+
+/// Reaction durations (seconds).
+const SUN_FLARE_S: f32 = 0.9;
+const FLAG_WAVE_S: f32 = 0.8;
+const CAR_BOUNCE_S: f32 = 0.5;
+const BALLOON_BOB_S: f32 = 0.8;
+
+/// Finale tap-target ids (distinct so the per-target debounce only swallows a
+/// same-target re-fire — a fast tap on a different target always lands).
+const TGT_REPLAY: u32 = 1;
+const TGT_HOME: u32 = 2;
+const TGT_ENGINE: u32 = 3;
+const TGT_SUN: u32 = 4;
+const TGT_FLAG: u32 = 5;
+const TGT_CAR_BASE: u32 = 20;
+const TGT_BALLOON_BASE: u32 = 50;
 
 /// Which scene we're in: the round-by-round game, or the train celebration that
 /// crowns mastering the final level.
@@ -73,6 +109,21 @@ pub struct PatternsScene {
     engine_taps: u32,
     /// Accumulator for the steady confetti-rain trickle.
     rain_acc: f32,
+    /// Per-target tap debounce for the finale's many tap targets.
+    tap_debounce: crate::input::TapDebounce,
+    /// Sun tap reaction (rays flare + pop); parks at `IDLE_T`.
+    sun_t: f32,
+    sun_taps: u32,
+    /// Finish-flag tap reaction (excited flutter + finial pop); parks at `IDLE_T`.
+    flag_t: f32,
+    flag_taps: u32,
+    /// Per-car bounce reaction — poke your own mastered pattern and each piece
+    /// boings. Indexed by car; parks at `IDLE_T`.
+    car_t: [f32; FINALE_MAX_CARS],
+    car_taps: u32,
+    /// Party balloons bobbing in the sky (tap → pop-wobble); park at `IDLE_T`.
+    balloon_t: [f32; FINALE_BALLOONS],
+    balloon_taps: u32,
     // --- level-up drive-by (a mini Pattern Train crosses the bottom) ---
     /// Seconds since a level-up fired the drive-by; `None` when parked offstage.
     drive_t: Option<f32>,
@@ -116,6 +167,15 @@ impl PatternsScene {
             react_kind: 0,
             engine_taps: 0,
             rain_acc: 0.0,
+            tap_debounce: crate::input::TapDebounce::new(),
+            sun_t: IDLE_T,
+            sun_taps: 0,
+            flag_t: IDLE_T,
+            flag_taps: 0,
+            car_t: [IDLE_T; FINALE_MAX_CARS],
+            car_taps: 0,
+            balloon_t: [IDLE_T; FINALE_BALLOONS],
+            balloon_taps: 0,
             drive_t: None,
             drive_items: Vec::new(),
         }
@@ -202,6 +262,14 @@ impl PatternsScene {
         self.react_kind = 0;
         self.engine_taps = 0;
         self.rain_acc = 0.0;
+        self.sun_t = IDLE_T;
+        self.sun_taps = 0;
+        self.flag_t = IDLE_T;
+        self.flag_taps = 0;
+        self.car_t = [IDLE_T; FINALE_MAX_CARS];
+        self.car_taps = 0;
+        self.balloon_t = [IDLE_T; FINALE_BALLOONS];
+        self.balloon_taps = 0;
         self.build_cars();
         ctx.audio.finale();
         let f = &ctx.frame;
@@ -285,28 +353,89 @@ impl PatternsScene {
             self.confetti.rain(ctx.frame.w, -10.0, 1);
             self.rain_acc -= 0.10;
         }
+        // Step every interactive reaction timer; each parks at IDLE_T once done.
+        step_timers(&mut self.car_t, ctx.dt, CAR_BOUNCE_S);
+        step_timers(&mut self.balloon_t, ctx.dt, BALLOON_BOB_S);
+        step_timers(std::slice::from_mut(&mut self.sun_t), ctx.dt, SUN_FLARE_S);
+        step_timers(std::slice::from_mut(&mut self.flag_t), ctx.dt, FLAG_WAVE_S);
+
         let pt = ctx.pointer;
         if !pt.tapped() {
             return Nav::Stay;
         }
-        if input::hit_circle(pt.pos, fl.replay.x, fl.replay.y, fl.btn_r) {
+        if input::hit_circle(pt.pos, fl.replay.x, fl.replay.y, fl.btn_r)
+            && self.tap_debounce.accept(TGT_REPLAY, ctx.time)
+        {
             self.restart();
             return Nav::Stay;
         }
-        if input::hit_circle(pt.pos, fl.home.x, fl.home.y, fl.btn_r) {
+        if input::hit_circle(pt.pos, fl.home.x, fl.home.y, fl.btn_r)
+            && self.tap_debounce.accept(TGT_HOME, ctx.time)
+        {
             return Nav::Home;
         }
         // Tap the engine → a whistle TOOT + steam + confetti, cycling a
-        // non-escalating reaction (errorless, infinitely re-tappable).
+        // non-escalating reaction (errorless, infinitely re-tappable). The train's
+        // own targets are tested before the sky ones so the hero always wins.
         let ex = fl.engine.x + train_offset(self.finale_t, &fl);
         let hit = crate::draw::engine_hit_rect(ex, fl.engine.y, fl.r_boiler);
-        if input::hit_rect(pt.pos, hit.x, hit.y, hit.w, hit.h) {
+        if input::hit_rect(pt.pos, hit.x, hit.y, hit.w, hit.h)
+            && self.tap_debounce.accept(TGT_ENGINE, ctx.time)
+        {
             self.engine_taps += 1;
             self.react_kind = (self.engine_taps as usize - 1) % REACTIONS.len();
             self.react_t = 0.0;
             ctx.audio.train_whistle();
             let tip = crate::draw::engine_funnel_tip(ex, fl.engine.y, fl.r_boiler);
             self.confetti.burst(tip, 44, fl.r_boiler * 0.9);
+            return Nav::Stay;
+        }
+        // The finish flag → an excited flutter + a finial pop + confetti + toot.
+        let flag_c = fl.flag_center();
+        if input::hit_circle(pt.pos, flag_c.x, flag_c.y, fl.flag_w)
+            && self.tap_debounce.accept(TGT_FLAG, ctx.time)
+        {
+            self.flag_t = 0.0;
+            self.flag_taps += 1;
+            ctx.audio.train_whistle();
+            self.confetti.burst(vec2(fl.flag_x - fl.flag_w * 0.5, fl.flag_top), 40, fl.flag_w);
+            return Nav::Stay;
+        }
+        // The sun → a burst of rays + a pop + a twinkle sparkle spray.
+        if input::hit_circle(pt.pos, fl.sun_c.x, fl.sun_c.y, fl.sun_r * 1.4)
+            && self.tap_debounce.accept(TGT_SUN, ctx.time)
+        {
+            self.sun_t = 0.0;
+            self.sun_taps += 1;
+            ctx.audio.twinkle();
+            self.confetti.burst(fl.sun_c, 18, fl.sun_r * 0.9);
+            return Nav::Stay;
+        }
+        // The cars → poke your own mastered pattern; each piece boings up.
+        let tdx = train_offset(self.finale_t, &fl);
+        let n_cars = fl.n_cars.min(self.cars.len()).min(FINALE_MAX_CARS);
+        for i in 0..n_cars {
+            let c = fl.car_seat(i, tdx);
+            if input::hit_circle(pt.pos, c.x, c.y, fl.seat * 0.7)
+                && self.tap_debounce.accept(TGT_CAR_BASE + i as u32, ctx.time)
+            {
+                self.car_t[i] = 0.0;
+                self.car_taps += 1;
+                ctx.audio.tap();
+                return Nav::Stay;
+            }
+        }
+        // Party balloons in the sky → a pop-wobble.
+        for i in 0..FINALE_BALLOONS {
+            let p = fl.balloon(i, self.finale_t);
+            if input::hit_circle(pt.pos, p.x, p.y, fl.balloon_r * 1.25)
+                && self.tap_debounce.accept(TGT_BALLOON_BASE + i as u32, ctx.time)
+            {
+                self.balloon_t[i] = 0.0;
+                self.balloon_taps += 1;
+                ctx.audio.tap();
+                return Nav::Stay;
+            }
         }
         Nav::Stay
     }
@@ -321,7 +450,14 @@ impl PatternsScene {
 
         // Sky (golden-hour) + low sun + far hills + ground band.
         draw::vgradient(0.0, 0.0, f.w, by, palette::SKY_DUSK_TOP, palette::SKY_DUSK_BOT);
-        draw::sun(fl.sun_c.x, fl.sun_c.y, fl.sun_r);
+        // The sun is tappable: it pops and throws a burst of rays when poked.
+        let sun_pop = if self.sun_t < SUN_FLARE_S {
+            1.0 + (self.sun_t / SUN_FLARE_S * pi).sin() * 0.18
+        } else {
+            1.0
+        };
+        draw::sun_rays(fl.sun_c.x, fl.sun_c.y, fl.sun_r, (1.0 - self.sun_t).max(0.0), ctx.time * 1.5);
+        draw::sun(fl.sun_c.x, fl.sun_c.y, fl.sun_r * sun_pop);
         if fl.show_far_hills {
             draw::fill_ellipse(f.w * 0.30, by + f.h * 0.06, f.w * 0.42, f.h * 0.16, 0.0, palette::HILL_FAR);
             draw::fill_ellipse(f.w * 0.72, by + f.h * 0.05, f.w * 0.40, f.h * 0.14, 0.0, palette::HILL_FAR);
@@ -358,6 +494,23 @@ impl PatternsScene {
         if fl.show_bunting {
             draw::bunting(content.x, content.x + content.w, f.h * 0.12, f.h * 0.055, 12, ctx.time);
         }
+
+        // Party balloons drifting in the sky (tap → pop-wobble). Each sways on
+        // its own cadence with a curly string trailing below.
+        for i in 0..FINALE_BALLOONS {
+            let p = fl.balloon(i, self.finale_t);
+            let col = palette::RAINBOW[i % palette::RAINBOW.len()];
+            let sc = if self.balloon_t[i] < BALLOON_BOB_S {
+                1.0 + 0.18 * (1.0 - self.balloon_t[i] / BALLOON_BOB_S)
+            } else {
+                1.0
+            };
+            let sway = 0.13 * (ctx.time * 0.6 + i as f32 * 1.7).sin();
+            let tail = vec2(p.x + fl.balloon_r * 2.4 * sway.sin(), p.y + fl.balloon_r * 2.4 * sway.cos().max(0.3));
+            draw::stroke_path(&[vec2(p.x, p.y + fl.balloon_r * 1.05), tail], 1.6, palette::hexa(0xffffff, 0.7));
+            draw::fill_ellipse(p.x, p.y, fl.balloon_r * sc, fl.balloon_r * 1.18 * sc, sway.to_degrees(), col);
+            draw::disc(p.x - fl.balloon_r * 0.32, p.y - fl.balloon_r * 0.42, fl.balloon_r * 0.18, palette::hexa(0xffffff, 0.5));
+        }
         // Reaction state (engine scoot/squash, headlamp, frog-driver pose).
         let rx = &REACTIONS[self.react_kind];
         let (scoot, squash, lamp, cond) = if self.react_t < rx.dur {
@@ -388,9 +541,16 @@ impl PatternsScene {
             let cx = fl.leftmost_cx + i as f32 * fl.car_pitch + train_dx;
             let body = Rect::new(cx - fl.car_w / 2.0, by - fl.wheel_r - fl.car_h, fl.car_w, fl.car_h);
             draw::train_car_chassis(body, by, fl.wheel_r);
-            let seat_cy = body.y + body.h * 0.46 + (ctx.time * 3.0 + i as f32).sin() * 1.5;
+            // Tap-bounce: poke a car and its pattern piece boings up + grows.
+            let bounce = if i < FINALE_MAX_CARS && self.car_t[i] < CAR_BOUNCE_S {
+                (self.car_t[i] / CAR_BOUNCE_S * pi).sin()
+            } else {
+                0.0
+            };
+            let lift = bounce * fl.car_h * 0.28;
+            let seat_cy = body.y + body.h * 0.46 + (ctx.time * 3.0 + i as f32).sin() * 1.5 - lift;
             draw_cell(cx, seat_cy, fl.seat, palette::WHITE, palette::CELL_BORDER);
-            draw_item(item, cx, seat_cy, fl.seat * 0.78, ctx);
+            draw_item(item, cx, seat_cy, fl.seat * 0.78 * (1.0 + bounce * 0.28), ctx);
         }
 
         // Engine + frog driver (the hero), in front of the cars.
@@ -418,8 +578,18 @@ impl PatternsScene {
         }
 
         // Finish flag drawn LAST (over the steam) so its checkers stay crisp — the
-        // engine is parked left of the pole, so nothing else occludes it.
-        draw::checker_flag(fl.flag_x, by, fl.flag_top, fl.flag_w, fl.flag_h, ctx.time);
+        // engine is parked left of the pole, so nothing else occludes it. Tapping
+        // it whips up the flutter and pops a bigger star on the finial.
+        let flag_time = if self.flag_t < FLAG_WAVE_S {
+            ctx.time + (1.0 - self.flag_t / FLAG_WAVE_S) * 1.6
+        } else {
+            ctx.time
+        };
+        draw::checker_flag(fl.flag_x, by, fl.flag_top, fl.flag_w, fl.flag_h, flag_time);
+        if self.flag_t < FLAG_WAVE_S {
+            let a = 1.0 - self.flag_t / FLAG_WAVE_S;
+            draw::star(fl.flag_x, fl.flag_top - fl.flag_h * 0.22, fl.flag_h * 0.2 * (1.0 + 0.6 * a), palette::GOLD);
+        }
 
         // Replay / Home (phonics-identical placement for cross-finale predictability).
         chrome::draw_corner_buttons(fl.replay, fl.home, fl.btn_r);
@@ -493,6 +663,31 @@ impl PatternsScene {
     }
     pub(crate) fn engine_taps(&self) -> u32 {
         self.engine_taps
+    }
+    pub(crate) fn sun_taps(&self) -> u32 {
+        self.sun_taps
+    }
+    pub(crate) fn flag_taps(&self) -> u32 {
+        self.flag_taps
+    }
+    pub(crate) fn car_taps(&self) -> u32 {
+        self.car_taps
+    }
+    pub(crate) fn balloon_taps(&self) -> u32 {
+        self.balloon_taps
+    }
+    pub(crate) fn finale_sun_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        finale_layout(f, self.car_period).sun_c
+    }
+    pub(crate) fn finale_flag_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        finale_layout(f, self.car_period).flag_center()
+    }
+    pub(crate) fn finale_car_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        let fl = finale_layout(f, self.car_period);
+        fl.car_seat(i, train_offset(self.finale_t, &fl))
+    }
+    pub(crate) fn finale_balloon_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        finale_layout(f, self.car_period).balloon(i, self.finale_t)
     }
     /// Center of the engine tap target at the current (possibly mid-entrance)
     /// position — a point guaranteed to land inside the hit rect.
@@ -879,11 +1074,39 @@ struct FinaleLayout {
     flag_h: f32,
     sun_c: Vec2,
     sun_r: f32,
+    balloon_r: f32,
+    balloon_anchor: [Vec2; FINALE_BALLOONS],
     replay: Vec2,
     home: Vec2,
     btn_r: f32,
     show_far_hills: bool,
     show_bunting: bool,
+}
+
+impl FinaleLayout {
+    /// Seat center of car `i` at the current train offset — the tap target and
+    /// the drawn position share this so a poke never desyncs from the piece.
+    fn car_seat(&self, i: usize, train_dx: f32) -> Vec2 {
+        let cx = self.leftmost_cx + i as f32 * self.car_pitch + train_dx;
+        let body_y = self.ground_y - self.wheel_r - self.car_h;
+        vec2(cx, body_y + self.car_h * 0.46)
+    }
+
+    /// Center of the hanging checker flag (its tap target).
+    fn flag_center(&self) -> Vec2 {
+        vec2(self.flag_x - self.flag_w * 0.5, self.flag_top + self.flag_h * 0.5)
+    }
+
+    /// Balloon `i` bobbing on its own cadence (the tap hit-test uses the same
+    /// value so it never desyncs from the drawn balloon).
+    fn balloon(&self, i: usize, time: f32) -> Vec2 {
+        let a = self.balloon_anchor[i];
+        let ph = i as f32 * 1.7;
+        vec2(
+            a.x + 15.0 * (time * 0.5 + ph).sin() + 6.0 * (time * 0.23 + ph).cos(),
+            a.y + 17.0 * (time * 0.42 + ph).cos(),
+        )
+    }
 }
 
 fn finale_layout(f: &crate::layout::Frame, car_period: usize) -> FinaleLayout {
@@ -948,8 +1171,20 @@ fn finale_layout(f: &crate::layout::Frame, car_period: usize) -> FinaleLayout {
     let rightmost_cx = ex - r * 2.05 - car_w * 0.5;
     let leftmost_cx = rightmost_cx - n_cars.saturating_sub(1) as f32 * car_pitch;
 
-    let sun_r = if f.is_phone() { f.vmin(0.08) } else { f.vmin(0.12) };
-    let sun_c = vec2(content.x + content.w * 0.80, by - f.vmin(0.05));
+    // The tappable sun sits high in the LEFT sky — clear of the train (engine +
+    // cars park to the right/bottom) and the finish flag (top-right), so poking it
+    // never collides with the engine's tap target.
+    let sun_r = if f.is_phone() { f.vmin(0.07) } else { f.vmin(0.09) };
+    let sun_c = vec2(content.x + content.w * 0.13, by * 0.30);
+
+    // Party balloons drift across the mid sky between the sun (left) and the flag
+    // (top-right), above the low cars — each its own tap target.
+    let balloon_r = (f.w * 0.028).clamp(16.0, 34.0);
+    let bspots = [(0.32, 0.32), (0.44, 0.46), (0.56, 0.30), (0.66, 0.44)];
+    let mut balloon_anchor = [Vec2::ZERO; FINALE_BALLOONS];
+    for (b, (fx, fy)) in balloon_anchor.iter_mut().zip(bspots.iter()) {
+        *b = vec2(content.x + content.w * fx, by * fy);
+    }
 
     let (replay, home, br) = chrome::corner_buttons(f);
 
@@ -970,6 +1205,8 @@ fn finale_layout(f: &crate::layout::Frame, car_period: usize) -> FinaleLayout {
         flag_h,
         sun_c,
         sun_r,
+        balloon_r,
+        balloon_anchor,
         replay,
         home,
         btn_r: br,
@@ -1004,6 +1241,18 @@ fn idle_frog(time: f32) -> draw::FrogPose {
         sy: 1.0 + 0.025 * breathe,
         blink,
         tongue: 0.0,
+    }
+}
+
+/// Step in-flight finale reaction timers by `dt`, parking each at [`IDLE_T`]
+/// once it passes `dur` (mirrors the newer games' finale bookkeeping).
+fn step_timers(timers: &mut [f32], dt: f32, dur: f32) {
+    for s in timers.iter_mut() {
+        if *s < dur {
+            *s += dt;
+        } else {
+            *s = IDLE_T;
+        }
     }
 }
 
@@ -1053,6 +1302,14 @@ mod tests {
                 assert!(b.x + fl.btn_r <= f.w - f.safe.right + 0.5, "{w}x{h}: button off the right");
                 assert!(b.y + fl.btn_r <= f.h - f.safe.bottom + 0.5, "{w}x{h}: button below the viewport");
             }
+            // The tappable sun must sit clear of the engine's tap rect, else a
+            // poke at the engine would land on the sun (or vice versa) — the two
+            // targets have to be distinct. Nearest-point of the rect to the sun
+            // center must be outside the sun's (generous 1.4×) tap circle.
+            let nx = fl.sun_c.x.clamp(hit.x, hit.x + hit.w);
+            let ny = fl.sun_c.y.clamp(hit.y, hit.y + hit.h);
+            let d2 = (fl.sun_c.x - nx).powi(2) + (fl.sun_c.y - ny).powi(2);
+            assert!(d2 > (fl.sun_r * 1.4).powi(2), "{w}x{h}: sun tap circle overlaps the engine");
             assert!(fl.n_cars >= 1, "{w}x{h}: no room for even one car");
             // The whole consist (even a period-5 unit) stays inside the content
             // box — the leftmost car never clips off the left edge.
