@@ -49,12 +49,32 @@ const IDLE_T: f32 = 99.0;
 const FINALE_MAX_CARS: usize = 12;
 /// Party balloons bobbing in the finale sky.
 const FINALE_BALLOONS: usize = 4;
+/// Meadow flowers in the finale foreground (tablet only; tap → bloom).
+const FINALE_FLOWERS: usize = 5;
+/// Foreground flower placements: (x fraction of content, y fraction of the
+/// ground band, vmin size). Shared by draw + hit-testing so taps line up.
+const FINALE_FLOWER_POS: [(f32, f32, f32); FINALE_FLOWERS] = [
+    (0.10, 0.46, 0.055),
+    (0.22, 0.60, 0.042),
+    (0.39, 0.50, 0.050),
+    (0.55, 0.62, 0.040),
+    (0.70, 0.48, 0.052),
+];
+
+/// World-space (root position, size) for finale meadow flower `i`; `by` is the
+/// finale ground line.
+fn finale_flower(f: &crate::layout::Frame, by: f32, i: usize) -> (Vec2, f32) {
+    let content = f.content();
+    let (fx, fy, fs) = FINALE_FLOWER_POS[i];
+    (vec2(content.x + content.w * fx, by + (f.h - by) * fy), f.vmin(fs))
+}
 
 /// Reaction durations (seconds).
 const SUN_FLARE_S: f32 = 0.9;
 const FLAG_WAVE_S: f32 = 0.8;
 const CAR_BOUNCE_S: f32 = 0.5;
 const BALLOON_BOB_S: f32 = 0.8;
+const FLOWER_POP_S: f32 = 0.5;
 
 /// Finale tap-target ids (distinct so the per-target debounce only swallows a
 /// same-target re-fire — a fast tap on a different target always lands).
@@ -65,6 +85,7 @@ const TGT_SUN: u32 = 4;
 const TGT_FLAG: u32 = 5;
 const TGT_CAR_BASE: u32 = 20;
 const TGT_BALLOON_BASE: u32 = 50;
+const TGT_FLOWER_BASE: u32 = 80;
 
 /// Which scene we're in: the round-by-round game, or the train celebration that
 /// crowns mastering the final level.
@@ -124,6 +145,9 @@ pub struct PatternsScene {
     /// Party balloons bobbing in the sky (tap → pop-wobble); park at `IDLE_T`.
     balloon_t: [f32; FINALE_BALLOONS],
     balloon_taps: u32,
+    /// Meadow flowers (tap → the bloom springs up); park at `IDLE_T`.
+    flower_t: [f32; FINALE_FLOWERS],
+    flower_taps: u32,
     // --- level-up drive-by (a mini Pattern Train crosses the bottom) ---
     /// Seconds since a level-up fired the drive-by; `None` when parked offstage.
     drive_t: Option<f32>,
@@ -176,6 +200,8 @@ impl PatternsScene {
             car_taps: 0,
             balloon_t: [IDLE_T; FINALE_BALLOONS],
             balloon_taps: 0,
+            flower_t: [IDLE_T; FINALE_FLOWERS],
+            flower_taps: 0,
             drive_t: None,
             drive_items: Vec::new(),
         }
@@ -270,6 +296,8 @@ impl PatternsScene {
         self.car_taps = 0;
         self.balloon_t = [IDLE_T; FINALE_BALLOONS];
         self.balloon_taps = 0;
+        self.flower_t = [IDLE_T; FINALE_FLOWERS];
+        self.flower_taps = 0;
         self.build_cars();
         ctx.audio.finale();
         let f = &ctx.frame;
@@ -356,6 +384,7 @@ impl PatternsScene {
         // Step every interactive reaction timer; each parks at IDLE_T once done.
         step_timers(&mut self.car_t, ctx.dt, CAR_BOUNCE_S);
         step_timers(&mut self.balloon_t, ctx.dt, BALLOON_BOB_S);
+        step_timers(&mut self.flower_t, ctx.dt, FLOWER_POP_S);
         step_timers(std::slice::from_mut(&mut self.sun_t), ctx.dt, SUN_FLARE_S);
         step_timers(std::slice::from_mut(&mut self.flag_t), ctx.dt, FLAG_WAVE_S);
 
@@ -437,6 +466,21 @@ impl PatternsScene {
                 return Nav::Stay;
             }
         }
+        // The meadow flowers (tablet only) → the bloom springs up + a twinkle.
+        if !ctx.frame.is_phone() {
+            for i in 0..FINALE_FLOWERS {
+                let (root, size) = finale_flower(&ctx.frame, fl.ground_y, i);
+                if input::hit_circle(pt.pos, root.x, root.y - size, (size * 0.6).max(20.0))
+                    && self.tap_debounce.accept(TGT_FLOWER_BASE + i as u32, ctx.time)
+                {
+                    self.flower_t[i] = 0.0;
+                    self.flower_taps += 1;
+                    ctx.audio.twinkle();
+                    self.confetti.burst(vec2(root.x, root.y - size), 9, size * 0.7);
+                    return Nav::Stay;
+                }
+            }
+        }
         Nav::Stay
     }
 
@@ -477,16 +521,17 @@ impl PatternsScene {
         draw_line(0.0, by, f.w, by, (r * 0.12).max(3.0), Color::new(0.40, 0.34, 0.28, 1.0));
 
         // A few cheerful meadow flowers in the foreground (tablet only — a phone
-        // foreground is too short and would crowd the buttons).
+        // foreground is too short and would crowd the buttons). Tap → the bloom
+        // springs up.
         if !f.is_phone() {
-            for &(fx, fy, fs) in &[
-                (0.10_f32, 0.46_f32, 0.055_f32),
-                (0.22, 0.60, 0.042),
-                (0.39, 0.50, 0.050),
-                (0.55, 0.62, 0.040),
-                (0.70, 0.48, 0.052),
-            ] {
-                draw::plant(content.x + content.w * fx, by + (f.h - by) * fy, f.vmin(fs));
+            for i in 0..FINALE_FLOWERS {
+                let (root, size) = finale_flower(f, by, i);
+                let pop = if self.flower_t[i] < FLOWER_POP_S {
+                    (self.flower_t[i] / FLOWER_POP_S * pi).sin()
+                } else {
+                    0.0
+                };
+                draw::plant(root.x, root.y, size, pop);
             }
         }
 
@@ -675,6 +720,13 @@ impl PatternsScene {
     }
     pub(crate) fn balloon_taps(&self) -> u32 {
         self.balloon_taps
+    }
+    pub(crate) fn flower_taps(&self) -> u32 {
+        self.flower_taps
+    }
+    pub(crate) fn finale_flower_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        let (root, size) = finale_flower(f, finale_layout(f, self.car_period).ground_y, i);
+        vec2(root.x, root.y - size)
     }
     pub(crate) fn finale_sun_center(&self, f: &crate::layout::Frame) -> Vec2 {
         finale_layout(f, self.car_period).sun_c

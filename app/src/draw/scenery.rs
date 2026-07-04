@@ -157,15 +157,19 @@ pub fn igloo(cx: f32, cy: f32, s: f32) {
     dome(r * 0.28, door);
 }
 
-/// A simple drawn flower-plant rising from `ground_y`.
-pub fn plant(cx: f32, ground_y: f32, size: f32) {
-    draw_line(cx, ground_y, cx, ground_y - size, (size * 0.12).max(2.0), palette::GROUND_BOT);
-    let fy = ground_y - size;
+/// A simple drawn flower-plant rising from `ground_y`. `pop` (0..1, a tap
+/// impulse) springs the bloom: its head swells and perks up a touch, so a poked
+/// flower reacts like everything else in a finale.
+pub fn plant(cx: f32, ground_y: f32, size: f32, pop: f32) {
+    let grow = 1.0 + 0.32 * pop;
+    let fy = ground_y - size * (1.0 + 0.10 * pop);
+    draw_line(cx, ground_y, cx, fy, (size * 0.12).max(2.0), palette::GROUND_BOT);
+    let hr = size * 0.22 * grow;
     for k in 0..5 {
         let a = k as f32 / 5.0 * std::f32::consts::TAU;
-        disc(cx + a.cos() * size * 0.3, fy + a.sin() * size * 0.3, size * 0.22, palette::RAINBOW[0]);
+        disc(cx + a.cos() * size * 0.3 * grow, fy + a.sin() * size * 0.3 * grow, hr, palette::RAINBOW[0]);
     }
-    disc(cx, fy, size * 0.22, palette::RAINBOW[2]);
+    disc(cx, fy, hr, palette::RAINBOW[2]);
 }
 
 // ── Garden (phonics rainbow-garden done scene) ──────────────────────────────

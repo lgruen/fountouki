@@ -604,6 +604,23 @@ async fn main() {
                 println!("FAIL phonics-frog-react (done={}, taps {}->{})", sc.is_done(), before, sc.frog_taps());
                 fails += 1;
             }
+            // Done scene: the garden flowers are tappable too (each bloom springs).
+            let flw0 = sc.garden_flower_taps();
+            let flower_hit = sc.garden_flower_center(&frame);
+            if let Some(fc) = flower_hit {
+                let ptr = tap(fc);
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+            }
+            if sc.is_done() && flower_hit.is_some() && sc.garden_flower_taps() == flw0 + 1 {
+                println!("PASS phonics-garden-flower-react");
+            } else {
+                println!(
+                    "FAIL phonics-garden-flower-react (done={}, had_flower={}, taps {}->{})",
+                    sc.is_done(), flower_hit.is_some(), flw0, sc.garden_flower_taps()
+                );
+                fails += 1;
+            }
         }
         // patterns: the correct choice scores a star.
         {
@@ -871,17 +888,22 @@ async fn main() {
                 let ptr = tap(sc.finale_balloon_center(&frame, 0));
                 let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
+                let flw0 = sc.flower_taps();
+                let ptr = tap(sc.finale_flower_center(&frame, 0));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
                 if sc.in_finale()
                     && sc.sun_taps() == sun0 + 1
                     && sc.flag_taps() == flag0 + 1
                     && sc.car_taps() == car0 + 1
                     && sc.balloon_taps() == bal0 + 1
+                    && sc.flower_taps() == flw0 + 1
                 {
                     println!("PASS patterns-finale-targets");
                 } else {
                     println!(
-                        "FAIL patterns-finale-targets (sun {}->{}, flag {}->{}, car {}->{}, balloon {}->{})",
-                        sun0, sc.sun_taps(), flag0, sc.flag_taps(), car0, sc.car_taps(), bal0, sc.balloon_taps()
+                        "FAIL patterns-finale-targets (sun {}->{}, flag {}->{}, car {}->{}, balloon {}->{}, flower {}->{})",
+                        sun0, sc.sun_taps(), flag0, sc.flag_taps(), car0, sc.car_taps(), bal0, sc.balloon_taps(), flw0, sc.flower_taps()
                     );
                     fails += 1;
                 }
@@ -1002,14 +1024,19 @@ async fn main() {
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let friend_ok = sc.friend_taps() == 1;
+            // A garden flower springs when poked (a tablet-only finale element).
+            let ptr = tap(sc.flower_center(&frame, 0));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let flower_ok = sc.flower_taps() == 1;
             let idle2 = Pointer::default();
             let ctx = Ctx { dt: 2.0, time: 0.0, now, pointer: &idle2, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
-            if door_ok && friend_ok && lit_on && lit_off && sky_ok && sc.is_done() && !sc.window_lit(0) {
+            if door_ok && friend_ok && flower_ok && lit_on && lit_off && sky_ok && sc.is_done() && !sc.window_lit(0) {
                 println!("PASS tracing-housewarming");
             } else {
                 println!(
-                    "FAIL tracing-housewarming (door_ok={door_ok}, friend_ok={friend_ok}, lit_on={lit_on}, lit_off={lit_off}, sky_ok={sky_ok}, done={}, lit0={})",
+                    "FAIL tracing-housewarming (door_ok={door_ok}, friend_ok={friend_ok}, flower_ok={flower_ok}, lit_on={lit_on}, lit_off={lit_off}, sky_ok={sky_ok}, done={}, lit0={})",
                     sc.is_done(),
                     sc.window_lit(0)
                 );

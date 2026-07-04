@@ -40,6 +40,17 @@ const INSTALL_BREAK: f32 = 0.7;
 /// Glyph-outline alpha (over `palette::INK`): a strong, high-contrast guide
 /// that stays clearly visible even with the kid's ink laid over it.
 const OUTLINE_ALPHA: f32 = 0.5;
+/// How long a tapped garden flower's bloom spring lasts (seconds).
+const FLOWER_POP_S: f32 = 0.5;
+
+/// A tap-reaction impulse: 0 → 1 → 0 over `dur`, then flat 0 once settled.
+fn pop_impulse(t: f32, dur: f32) -> f32 {
+    if t < dur {
+        (t / dur * std::f32::consts::PI).sin()
+    } else {
+        0.0
+    }
+}
 
 #[derive(PartialEq, Clone, Copy)]
 enum Phase {
@@ -103,6 +114,9 @@ pub struct TracingScene {
     /// Seconds since the chimney was tapped (a cough of smoke); 99 = idle.
     chimney_t: f32,
     chimney_taps: u32,
+    /// Seconds since each garden flower was tapped (blooms + settles); 99 = idle.
+    flower_t: [f32; 2],
+    flower_taps: u32,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
 }
@@ -144,6 +158,8 @@ impl TracingScene {
             sun_taps: 0,
             chimney_t: 99.0,
             chimney_taps: 0,
+            flower_t: [99.0; 2],
+            flower_taps: 0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x7e11_e77a),
             sync,
         }
@@ -185,6 +201,8 @@ impl TracingScene {
         self.sun_taps = 0;
         self.chimney_t = 99.0;
         self.chimney_taps = 0;
+        self.flower_t = [99.0; 2];
+        self.flower_taps = 0;
     }
 
     fn start_trace(&mut self) {
@@ -344,6 +362,19 @@ impl TracingScene {
                 ctx.audio.frog();
                 let (fc, fr) = dl.friends[i];
                 self.confetti.burst(vec2(fc.x, fc.y - fr), 10, fr * 0.5);
+            } else if !ctx.frame.is_phone() {
+                // The garden flowers (tablet only): tap → the bloom springs up
+                // with a twinkle + a little confetti.
+                if let Some(i) = (0..dl.flowers.len()).find(|&i| {
+                    let (root, size) = dl.flowers[i];
+                    input::hit_circle(pt.pos, root.x, root.y - size, (size * 0.6).max(20.0))
+                }) {
+                    self.flower_t[i] = 0.0;
+                    self.flower_taps += 1;
+                    ctx.audio.twinkle();
+                    let (root, size) = dl.flowers[i];
+                    self.confetti.burst(vec2(root.x, root.y - size), 9, size * 0.7);
+                }
             }
         }
         Nav::Stay
@@ -432,6 +463,13 @@ impl TracingScene {
     pub(crate) fn chimney_taps(&self) -> u32 {
         self.chimney_taps
     }
+    pub(crate) fn flower_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        let (root, size) = done_layout(f).flowers[i.min(1)];
+        vec2(root.x, root.y - size)
+    }
+    pub(crate) fn flower_taps(&self) -> u32 {
+        self.flower_taps
+    }
     pub(crate) fn stroke_count(&self) -> usize {
         self.glyph().strokes.len()
     }
@@ -468,6 +506,9 @@ impl Scene for TracingScene {
             self.lit_warm[i] += (target - self.lit_warm[i]).clamp(-step, step);
         }
         for t in &mut self.friend_t {
+            *t += ctx.dt;
+        }
+        for t in &mut self.flower_t {
             *t += ctx.dt;
         }
         // The build stage's sound cues (digger scoops, truck beeps, brick
@@ -590,22 +631,12 @@ impl Scene for TracingScene {
         draw::card(p.card.x, p.card.y, p.card.w, p.card.h, palette::CARD);
         self.draw_guides(&p);
 
-        // The letter, rendered by the real font — a strong, high-contrast guide
-        // (it stays clearly visible even with the kid's ink over it). The
+        // The model letter — a strong, high-contrast guide (it stays clearly
+        // visible even with the kid's ink over it), drawn from the smoothed
+        // stroke path rather than the font so its curves read truly round. The
         // topping-out beat leaves the card empty: all eyes on the door going in.
         if self.phase != Phase::Topping {
-            let glyph = self.current().to_string();
-            draw_text_ex(
-                &glyph,
-                p.map.pen.x,
-                p.map.pen.y,
-                TextParams {
-                    font: Some(&ctx.fonts.cursive),
-                    font_size: p.font_px,
-                    color: palette::hexa(0x2b2c34, OUTLINE_ALPHA),
-                    ..Default::default()
-                },
-            );
+            self.draw_template(&p);
         }
 
         match self.phase {
@@ -666,12 +697,13 @@ impl TracingScene {
         }
     }
 
-    /// Ink along the canonical stroke path (the demo pen's ink).
-    fn draw_stroke_ink(&self, p: &TLayout, stroke: &[(f32, f32)], upto: f32) {
+    /// Ink along the canonical stroke path, in `col` (the demo pen's ink, and
+    /// — at the guide alpha — the model template).
+    fn draw_stroke_ink(&self, p: &TLayout, stroke: &[(f32, f32)], upto: f32, col: Color) {
         let ink_w = p.ink_w;
         if tr::is_dot(stroke) {
             let c = p.map.to_px(stroke[0]);
-            draw::disc(c.x, c.y, ink_w * 0.62, palette::INK);
+            draw::disc(c.x, c.y, ink_w * 0.62, col);
             return;
         }
         let total = tr::stroke_len(stroke);
@@ -698,13 +730,22 @@ impl TracingScene {
             .into_iter()
             .map(|u| p.map.to_px(u))
             .collect();
-        draw::stroke_path(&pts, ink_w, palette::INK);
+        draw::stroke_path(&pts, ink_w, col);
     }
 
-    fn draw_ink_full(&self, p: &TLayout) {
+    fn draw_ink_full(&self, p: &TLayout, col: Color) {
         for st in self.glyph().strokes {
-            self.draw_stroke_ink(p, st, f32::MAX);
+            self.draw_stroke_ink(p, st, f32::MAX, col);
         }
+    }
+
+    /// The model letter under everything — the same smoothed stroke path as the
+    /// demo/ink, at the guide alpha, so its curves read truly round. (The font
+    /// rasterizer facets this cursive glyph at card sizes; the traced/demo ink
+    /// was fixed the same way — resampled through `tr::smooth`.) A strong,
+    /// high-contrast guide that stays visible under the kid's ink.
+    fn draw_template(&self, p: &TLayout) {
+        self.draw_ink_full(p, palette::hexa(0x2b2c34, OUTLINE_ALPHA));
     }
 
     /// The build state shown beside the card: installed parts = stars (one per
@@ -762,7 +803,7 @@ impl TracingScene {
             let stroke = g.strokes[i];
             if t >= draw_t + pause {
                 // Fully demoed stroke.
-                self.draw_stroke_ink(p, stroke, f32::MAX);
+                self.draw_stroke_ink(p, stroke, f32::MAX, palette::INK);
                 t -= draw_t + pause;
                 continue;
             }
@@ -770,17 +811,17 @@ impl TracingScene {
             let prog = (t / draw_t).clamp(0.0, 1.0);
             if tr::is_dot(stroke) {
                 if prog > 0.4 {
-                    self.draw_stroke_ink(p, stroke, f32::MAX);
+                    self.draw_stroke_ink(p, stroke, f32::MAX, palette::INK);
                 }
             } else {
                 let s = tr::stroke_len(stroke) * anim::ease_in_out_cubic(prog);
-                self.draw_stroke_ink(p, stroke, s);
+                self.draw_stroke_ink(p, stroke, s, palette::INK);
             }
             self.draw_stroke_dots(p, i);
             return;
         }
         // Demo finished — settle frame(s) before the trace phase begins.
-        self.draw_ink_full(p);
+        self.draw_ink_full(p, palette::INK);
     }
 
     /// The trace screen: the kid's free-drawn ink (whatever they drew, wobbles
@@ -848,10 +889,12 @@ impl TracingScene {
         draw::fill_ellipse(dl.house_c.x, dl.house_c.y + hs * 0.085, hs * 0.20, hs * 0.045, 0.0, palette::hexa(0xfff3d6, 0.9));
 
         // A couple of garden plants at the edges (tablet only — a phone's
-        // foreground is too short).
+        // foreground is too short). Each springs its bloom when tapped.
         if !f.is_phone() {
-            draw::plant(f.w * 0.07, dl.ground_y + (f.h - dl.ground_y) * 0.42, f.vmin(0.045));
-            draw::plant(f.w * 0.92, dl.ground_y + (f.h - dl.ground_y) * 0.35, f.vmin(0.052));
+            for i in 0..dl.flowers.len() {
+                let (root, size) = dl.flowers[i];
+                draw::plant(root.x, root.y, size, pop_impulse(self.flower_t[i], FLOWER_POP_S));
+            }
         }
 
         // The letters this session wrote, strung up as bunting flags — the
@@ -998,6 +1041,8 @@ struct DoneLayout {
     /// The sun (center, radius) — a tappable sky element.
     sun_c: Vec2,
     sun_r: f32,
+    /// The two garden flowers (root position, size) — tablet only; tap → bloom.
+    flowers: [(Vec2, f32); 2],
     flag_s: f32,
     /// Bunting swag: x0, x1, top y, center sag.
     bunt: (f32, f32, f32, f32),
@@ -1034,6 +1079,10 @@ fn done_layout(f: &crate::layout::Frame) -> DoneLayout {
         ],
         sun_c: vec2(f.w * 0.84, ground_y * 0.50),
         sun_r: f.vmin(0.06).max(32.0),
+        flowers: [
+            (vec2(f.w * 0.07, band(0.42)), f.vmin(0.045)),
+            (vec2(f.w * 0.92, band(0.35)), f.vmin(0.052)),
+        ],
         flag_s,
         bunt,
     }
@@ -1058,7 +1107,6 @@ impl GlyphMap {
 
 struct TLayout {
     card: Rect,
-    font_px: u16,
     map: GlyphMap,
     /// Traced-ink width (px) ≈ the glyph's own stroke weight.
     ink_w: f32,
@@ -1107,8 +1155,9 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
     let band = tr::ASCENT - tr::DESCENT;
     let scale_h = card_h * 0.92 / band;
     let scale_w = card_w * 0.80 / (bb.2 - bb.0).max(1.0);
-    let font_px = ((scale_h.min(scale_w)) * tr::UPEM) as u16;
-    let scale = font_px as f32 / tr::UPEM;
+    // Quantize to an integer em size, then back to a scale, so a letter's on-
+    // screen size is stable across sessions/frames.
+    let scale = ((scale_h.min(scale_w)) * tr::UPEM).floor() / tr::UPEM;
 
     // Pen so this letter's ink is centered in the card both ways (an ascender
     // letter otherwise crams against the top edge while its unused descender
@@ -1142,7 +1191,6 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
 
     TLayout {
         card,
-        font_px,
         map: GlyphMap { pen: vec2(pen_x, baseline), scale },
         ink_w: (64.0 * scale).max(8.0),
         dot_r: (58.0 * scale / 4.0).clamp(2.5, 4.5),
