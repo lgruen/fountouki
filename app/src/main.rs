@@ -1730,15 +1730,25 @@ async fn main() {
             sc.update(&ctx);
             let face_ok = sc.in_finale() && sc.face_taps() == 1;
             clk += 0.3;
+            let ptr = tap(sc.finale_sun_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let sun_ok = sc.in_finale() && sc.sun_taps() == 1;
+            clk += 0.3;
+            let ptr = tap(sc.finale_friend_center(&frame, 0));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let friend_ok = sc.in_finale() && sc.friend_taps() == 1;
+            clk += 0.3;
             let ptr = tap(sc.replay_center(&frame));
             let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let restarted = !sc.in_finale() && sc.stars() == 0 && sc.best_level() == best_at_finale;
-            if reached && topbar_dead && balloon_ok && star_ok && face_ok && restarted {
+            if reached && topbar_dead && balloon_ok && star_ok && face_ok && sun_ok && friend_ok && restarted {
                 println!("PASS compare-finale");
             } else {
                 println!(
-                    "FAIL compare-finale (reached={reached}, topbar_dead={topbar_dead}, balloon={balloon_ok}, star={star_ok}, face={face_ok}, restarted={restarted})"
+                    "FAIL compare-finale (reached={reached}, topbar_dead={topbar_dead}, balloon={balloon_ok}, star={star_ok}, face={face_ok}, sun={sun_ok}, friend={friend_ok}, restarted={restarted})"
                 );
                 fails += 1;
             }

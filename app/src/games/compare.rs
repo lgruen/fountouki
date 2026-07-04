@@ -65,19 +65,24 @@ const CONFETTI_RESTART_SALT: u32 = 0x85EB_CA6B;
 /// Finale interactive elements.
 const FINALE_BALLOONS: usize = 5;
 const FINALE_STARS: usize = 8;
+const FINALE_FRIENDS: usize = 3;
 /// Parked timer value meaning "idle" (no animation in flight).
 const IDLE: f32 = 99.0;
 const BALLOON_BOB_S: f32 = 0.8;
 const STAR_TWINKLE_S: f32 = 0.6;
 const FACE_WINK_S: f32 = 0.9;
+const FRIEND_HOP_S: f32 = 0.8;
+const SUN_FLARE_S: f32 = 0.9;
 
 /// Finale tap-target ids (distinct so the per-target debounce only swallows a
 /// same-target re-fire).
 const TGT_REPLAY: u32 = 1;
 const TGT_HOME: u32 = 2;
 const TGT_FACE: u32 = 3;
+const TGT_SUN: u32 = 4;
 const TGT_BALLOON_BASE: u32 = 10;
 const TGT_STAR_BASE: u32 = 40;
+const TGT_FRIEND_BASE: u32 = 70;
 
 /// The state a golden capture pins the scene into.
 #[derive(Clone, Copy)]
@@ -134,6 +139,9 @@ pub struct CompareScene {
     /// Set on the round that raised `best_level` (escalates the finale push).
     new_best: bool,
     rain_acc: f32,
+    /// Drives the one-shot "tap this one" hand on the cue placard: counts up from
+    /// scene start, taps once, then holds still (no looping motion during play).
+    cue_t: f32,
     tap_debounce: input::TapDebounce,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
@@ -148,6 +156,10 @@ pub struct CompareScene {
     star_taps: u32,
     face_t: f32,
     face_taps: u32,
+    friend_t: [f32; FINALE_FRIENDS],
+    friend_taps: u32,
+    sun_t: f32,
+    sun_taps: u32,
 }
 
 /// Map the parent-chosen difficulty string to a level number.
@@ -193,6 +205,7 @@ impl CompareScene {
             chosen: None,
             new_best: false,
             rain_acc: 0.0,
+            cue_t: 0.0,
             tap_debounce: input::TapDebounce::new(),
             confetti: crate::confetti::Confetti::new(seed.wrapping_add(CONFETTI_SEED_SALT)),
             sync,
@@ -204,6 +217,10 @@ impl CompareScene {
             star_taps: 0,
             face_t: IDLE,
             face_taps: 0,
+            friend_t: [IDLE; FINALE_FRIENDS],
+            friend_taps: 0,
+            sun_t: IDLE,
+            sun_taps: 0,
         }
     }
 
@@ -211,6 +228,9 @@ impl CompareScene {
     pub fn capture(db: Db, seed: u32, now: i64, cap: CaptureState, _ctx: &Ctx) -> CompareScene {
         let mut sc = CompareScene::new(db, seed, now);
         sc.first = false;
+        // The cue hand has finished its one tap and holds still (goldens are a
+        // single frame — pin it to the resting point).
+        sc.cue_t = 3.0;
         // Pin a representative round + phase per capture (deterministic goldens).
         match cap {
             CaptureState::Choose => {
@@ -271,6 +291,7 @@ impl CompareScene {
                 sc.level = 4;
                 sc.state.best_level = 4;
                 sc.phase = Phase::Finale { t: 0.7 };
+                sc.sun_t = 0.2; // caught mid-flare so the golden shows the sun's rays
                 let fl = finale_layout(&_ctx.frame);
                 let trophy = vec2(fl.face.x, fl.face.y - fl.face_r * 2.2);
                 sc.confetti.burst(trophy, FINALE_BURST_N, fl.face_r * 0.9);
@@ -332,9 +353,13 @@ impl CompareScene {
         self.balloon_t = [IDLE; FINALE_BALLOONS];
         self.star_t = [IDLE; FINALE_STARS];
         self.face_t = IDLE;
+        self.friend_t = [IDLE; FINALE_FRIENDS];
+        self.sun_t = IDLE;
         self.balloon_taps = 0;
         self.star_taps = 0;
         self.face_taps = 0;
+        self.friend_taps = 0;
+        self.sun_taps = 0;
         self.rain_acc = 0.0;
         let fl = finale_layout(&ctx.frame);
         let trophy = vec2(fl.face.x, fl.face.y - fl.face_r * 2.2);
@@ -348,6 +373,7 @@ impl CompareScene {
         self.stars = 0;
         self.streak = 0;
         self.first = true;
+        self.cue_t = 0.0; // replay is a fresh start — let the hand tap once again
         self.confetti = crate::confetti::Confetti::new(self.seed.wrapping_add(CONFETTI_RESTART_SALT));
         self.setup_round();
     }
@@ -421,7 +447,9 @@ impl CompareScene {
         }
         step_timers(&mut self.balloon_t, ctx.dt, BALLOON_BOB_S);
         step_timers(&mut self.star_t, ctx.dt, STAR_TWINKLE_S);
+        step_timers(&mut self.friend_t, ctx.dt, FRIEND_HOP_S);
         step_timers(std::slice::from_mut(&mut self.face_t), ctx.dt, FACE_WINK_S);
+        step_timers(std::slice::from_mut(&mut self.sun_t), ctx.dt, SUN_FLARE_S);
         // Gentle confetti rain.
         self.rain_acc += ctx.dt;
         while self.rain_acc >= RAIN_INTERVAL_S {
@@ -443,11 +471,38 @@ impl CompareScene {
                 return Nav::Home;
             }
             let fl = finale_layout(f);
-            if input::hit_circle(pt.pos, fl.face.x, fl.face.y, fl.face_r) && self.tap_debounce.accept(TGT_FACE, ctx.time) {
+            // The sun: tap → burst of rays, a pop, a twinkle + sparkle spray.
+            if input::hit_circle(pt.pos, fl.sun_c.x, fl.sun_c.y, fl.sun_r * 1.4) && self.tap_debounce.accept(TGT_SUN, ctx.time) {
+                self.sun_t = 0.0;
+                self.sun_taps += 1;
+                ctx.audio.twinkle();
+                self.confetti.burst(fl.sun_c, 18, fl.sun_r * 0.9);
+                return Nav::Stay;
+            }
+            // The hero frog cycles through three reactions (hop / spin / wink), each
+            // with its own sound — so repeat taps stay surprising.
+            if input::hit_circle(pt.pos, fl.face.x, fl.face.y, fl.face_r * 1.2) && self.tap_debounce.accept(TGT_FACE, ctx.time) {
+                match self.face_taps % 3 {
+                    0 => ctx.audio.frog(),
+                    1 => ctx.audio.twinkle(),
+                    _ => ctx.audio.level_up(),
+                }
                 self.face_t = 0.0;
                 self.face_taps += 1;
-                ctx.audio.twinkle();
                 return Nav::Stay;
+            }
+            // The little friend frogs: each hops with a ribbit when poked.
+            for i in 0..FINALE_FRIENDS {
+                let (c, rr) = fl.friends[i];
+                if input::hit_circle(pt.pos, c.x, c.y, rr * 1.35)
+                    && self.friend_t[i] >= FRIEND_HOP_S
+                    && self.tap_debounce.accept(TGT_FRIEND_BASE + i as u32, ctx.time)
+                {
+                    self.friend_t[i] = 0.0;
+                    self.friend_taps += 1;
+                    ctx.audio.frog();
+                    return Nav::Stay;
+                }
             }
             for i in 0..FINALE_BALLOONS {
                 let p = fl.balloon(i, self.finale_time());
@@ -459,8 +514,8 @@ impl CompareScene {
                 }
             }
             for i in 0..FINALE_STARS {
-                let p = fl.star(i);
-                if input::hit_circle(pt.pos, p.x, p.y, fl.star_r) && self.tap_debounce.accept(TGT_STAR_BASE + i as u32, ctx.time) {
+                let p = fl.star(i, self.finale_time());
+                if input::hit_circle(pt.pos, p.x, p.y, fl.star_r * 1.2) && self.tap_debounce.accept(TGT_STAR_BASE + i as u32, ctx.time) {
                     self.star_t[i] = 0.0;
                     self.star_taps += 1;
                     ctx.audio.twinkle();
@@ -529,16 +584,29 @@ impl CompareScene {
         self.balloon_taps
     }
     pub(crate) fn finale_star_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
-        finale_layout(f).star(i.min(FINALE_STARS - 1))
+        finale_layout(f).star(i.min(FINALE_STARS - 1), self.finale_time())
     }
     pub(crate) fn star_taps(&self) -> u32 {
         self.star_taps
+    }
+    pub(crate) fn finale_friend_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        finale_layout(f).friends[i.min(FINALE_FRIENDS - 1)].0
+    }
+    pub(crate) fn friend_taps(&self) -> u32 {
+        self.friend_taps
+    }
+    pub(crate) fn finale_sun_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        finale_layout(f).sun_c
+    }
+    pub(crate) fn sun_taps(&self) -> u32 {
+        self.sun_taps
     }
 }
 
 impl Scene for CompareScene {
     fn update(&mut self, ctx: &Ctx) -> Nav {
         self.confetti.update(ctx.dt);
+        self.cue_t += ctx.dt; // the cue hand's one-shot tap (holds still after)
         // Mastery sync.
         self.sync.drive(ctx.now);
         if let Some(remote) = self.sync.poll_pull() {
@@ -636,7 +704,7 @@ impl Scene for CompareScene {
         self.draw_world(&l, ctx);
         // Progress meter + the big/small cue placard.
         draw_meter(&l, self.stars, ctx);
-        draw_cue(&l, self.round.want_smaller, ctx);
+        draw_cue(&l, self.round.want_smaller, self.cue_t);
 
         // The scale (tilted per phase) with its two cards.
         self.draw_scale(&l, ctx);
@@ -831,8 +899,14 @@ impl CompareScene {
         let time = self.finale_time();
         // A bright, happy pond-noon sky (same world as play, dialled sunnier).
         draw::vgradient(0.0, 0.0, f.w, fl.water_y, palette::hex(0xbfe8ff), palette::hex(0xeaf7ea));
-        // Sun + drifting clouds.
-        draw::sun(f.w * 0.90, f.h * 0.15, f.vmin(0.065).max(32.0));
+        // The sun — tappable: it pops and throws a burst of rays across the sky.
+        let sun_pop = if self.sun_t < SUN_FLARE_S {
+            1.0 + (self.sun_t / SUN_FLARE_S * std::f32::consts::PI).sin() * 0.18
+        } else {
+            1.0
+        };
+        draw::sun_rays(fl.sun_c.x, fl.sun_c.y, fl.sun_r, (1.0 - self.sun_t).max(0.0), time * 1.5);
+        draw::sun(fl.sun_c.x, fl.sun_c.y, fl.sun_r * sun_pop);
         let cr = f.vmin(0.05).max(22.0);
         for &(hy, sc, spd, ph) in &[(0.18f32, 1.05f32, 6.0f32, 0.15f32), (0.30, 0.75, 9.0, 0.6), (0.12, 0.85, 4.5, 0.9)] {
             let span = f.w + cr * 8.0;
@@ -848,32 +922,45 @@ impl CompareScene {
         let reed_h = fl.face_r * 2.2;
         draw::cattail(f.w * 0.05, fl.water_y + 6.0, reed_h, 0.15 * (time * 0.8).sin());
         draw::cattail(f.w * 0.96, fl.water_y + 6.0, reed_h * 0.9, -0.15 * (time * 0.8).sin());
+        // A dragonfly skims the pond in the near corner (a little life on the water).
+        let dfy = fl.water_y + (f.h - fl.water_y) * 0.14 + 5.0 * (time * 1.3).sin();
+        draw::dragonfly(f.w * (0.13 + 0.02 * (time * 0.5).sin()), dfy, f.vmin(0.055).max(24.0), time * 9.0, palette::RAINBOW[5]);
 
-        // Friend frogs, each on a lily pad, hopping on a lazy ambient cadence.
-        for (i, &((fc, fr), (body, hat), phase)) in [
-            (fl.friends[0], (palette::RAINBOW[6], palette::GOLD), 2.0f32),
-            (fl.friends[1], (palette::RAINBOW[1], palette::RAINBOW[4]), 4.2),
-            (fl.friends[2], (palette::RAINBOW[4], palette::RAINBOW[0]), 0.9),
+        // Friend frogs, each on a lily pad. They float on a gentle bob, hop on a
+        // lazy ambient cadence, and each has its OWN tap reaction (hop / spin /
+        // wink) so poking the little ones stays fun.
+        for (i, &((fc, fr), (body, hat))) in [
+            (fl.friends[0], (palette::RAINBOW[6], palette::GOLD)),
+            (fl.friends[1], (palette::RAINBOW[1], palette::RAINBOW[4])),
+            (fl.friends[2], (palette::RAINBOW[4], palette::RAINBOW[0])),
         ]
         .iter()
         .enumerate()
         {
-            draw::lily_pad(fc.x, fc.y + fr * 1.15, fr * 1.7, palette::hex(0x4fa85a), 0.0);
-            let amb = (time + phase).rem_euclid(5.6);
-            let pose = if amb < 0.7 {
-                let fly = (amb / 0.7 * std::f32::consts::PI).sin();
-                draw::FrogPose { dy: -fly * fr * 0.6, sy: 1.0 + fly * 0.14, sx: 1.0 - fly * 0.07, tongue: if i >= 1 { fly } else { 0.0 }, ..Default::default() }
+            let bob = fr * 0.06 * (time * 1.3 + i as f32 * 2.1).sin(); // floats on the water
+            let cy = fc.y + bob;
+            draw::lily_pad(fc.x, cy + fr * 1.15, fr * 1.7, palette::hex(0x4fa85a), 0.0);
+            let pose = if self.friend_t[i] < FRIEND_HOP_S {
+                react_pose(i as u8, self.friend_t[i] / FRIEND_HOP_S, fr)
             } else {
-                let breathe = (time * 1.85 + phase).sin();
-                draw::FrogPose { sx: 1.0 - 0.025 * breathe, sy: 1.0 + 0.03 * breathe, ..Default::default() }
+                let phase = i as f32 * 2.1;
+                let amb = (time + phase).rem_euclid(6.4);
+                if amb < 0.7 {
+                    let fly = (amb / 0.7 * std::f32::consts::PI).sin();
+                    draw::FrogPose { dy: -fly * fr * 0.5, sy: 1.0 + fly * 0.12, sx: 1.0 - fly * 0.06, ..Default::default() }
+                } else {
+                    let breathe = (time * 1.85 + phase).sin();
+                    draw::FrogPose { sx: 1.0 - 0.025 * breathe, sy: 1.0 + 0.03 * breathe, ..Default::default() }
+                }
             };
-            draw::frog(fc.x, fc.y, fr, body, pose);
-            draw::frog_party_hat(fc.x, fc.y, fr, pose, hat);
+            draw::frog(fc.x, cy, fr, body, pose);
+            draw::frog_party_hat(fc.x, cy, fr, pose, hat);
         }
 
-        // Blossoms floating on the water (tap → bloom + twinkle).
+        // Blossoms floating on the water (tap → bloom + twinkle). `fl.star` bobs
+        // them on the ripples so they visibly drift.
         for i in 0..FINALE_STARS {
-            let p = fl.star(i);
+            let p = fl.star(i, time);
             let bloom = if self.star_t[i] < STAR_TWINKLE_S {
                 0.6 + 0.4 * (1.0 - self.star_t[i] / STAR_TWINKLE_S)
             } else {
@@ -882,23 +969,26 @@ impl CompareScene {
             draw::lily_pad(p.x, p.y, fl.star_r, palette::hex(0x53ab5d), bloom);
         }
 
-        // Balloons bobbing in the sky (tap → pop-wobble).
+        // Balloons drifting in the sky (tap → pop-wobble). Each sways on its own
+        // cadence with a curly string trailing below.
         for i in 0..FINALE_BALLOONS {
             let p = fl.balloon(i, time);
             let col = palette::RAINBOW[i % palette::RAINBOW.len()];
             let sc = if self.balloon_t[i] < BALLOON_BOB_S { 1.0 + 0.18 * (1.0 - self.balloon_t[i] / BALLOON_BOB_S) } else { 1.0 };
-            draw::stroke_path(&[p, vec2(p.x, p.y + fl.balloon_r * 2.4)], 1.6, palette::hexa(0xffffff, 0.7));
-            draw::fill_ellipse(p.x, p.y, fl.balloon_r * sc, fl.balloon_r * 1.18 * sc, 0.0, col);
+            let sway = 0.13 * (time * 0.6 + i as f32 * 1.7).sin();
+            let tail = vec2(p.x + fl.balloon_r * 2.4 * sway.sin(), p.y + fl.balloon_r * 2.4 * sway.cos().max(0.3));
+            draw::stroke_path(&[vec2(p.x, p.y + fl.balloon_r * 1.05), tail], 1.6, palette::hexa(0xffffff, 0.7));
+            draw::fill_ellipse(p.x, p.y, fl.balloon_r * sc, fl.balloon_r * 1.18 * sc, sway.to_degrees(), col);
             draw::disc(p.x - fl.balloon_r * 0.32, p.y - fl.balloon_r * 0.42, fl.balloon_r * 0.18, palette::hexa(0xffffff, 0.5));
         }
 
-        // The hero: Froggy on his big pad, hoisting the golden trophy star.
+        // The hero: Froggy on his big pad, hoisting the golden trophy star. He
+        // cycles reactions (hop / spin / wink) on repeat taps.
         let hero = fl.face;
         let hr = fl.face_r;
         draw::lily_pad(hero.x, hero.y + hr * 1.2, hr * 2.2, palette::hex(0x57b061), 0.0);
         let hop = if self.face_t < FACE_WINK_S {
-            let fly = (self.face_t / FACE_WINK_S * std::f32::consts::PI).sin();
-            draw::FrogPose { dy: -fly * hr * 0.8, sy: 1.0 + fly * 0.16, sx: 1.0 - fly * 0.08, tongue: fly, blink: 0.7, ..Default::default() }
+            react_pose(((self.face_taps.saturating_sub(1)) % 3) as u8, self.face_t / FACE_WINK_S, hr)
         } else {
             let breathe = (time * 1.7).sin();
             draw::FrogPose { sx: 1.0 - 0.02 * breathe, sy: 1.0 + 0.025 * breathe, blink: 0.15, ..Default::default() }
@@ -922,44 +1012,65 @@ impl CompareScene {
         chrome::draw_corner_buttons(replay, home, br);
     }
 
-    /// A row of numbered flags strung across the top — one per correct compare
-    /// (the session's "trophies"), popping in one by one with a gentle sway.
+    /// A garland of numbered rainbow PENNANTS strung across the top — one per
+    /// correct compare (the session's "trophies"). They pop in one by one, the
+    /// whole string sways, each pennant swings on its own little pendulum, and a
+    /// gold star caps each rope knot — a proper banner, not a thin line of tags.
     fn draw_number_bunting(&self, ctx: &Ctx, fl: &FinaleLayout) {
         let f = &ctx.frame;
         let time = self.finale_time();
-        let (x0, x1) = (f.w * 0.08, f.w * 0.92);
-        let y = f.h * 0.045;
-        let sag = f.h * 0.05;
-        let yat = |t: f32| y + sag * 4.0 * t * (1.0 - t);
-        const SEG: usize = 40;
-        let mut line = Vec::with_capacity(SEG + 1);
-        for i in 0..=SEG {
-            let t = i as f32 / SEG as f32;
-            line.push(vec2(x0 + (x1 - x0) * t, yat(t)));
+        let (x0, x1) = (f.w * 0.06, f.w * 0.94);
+        let y = f.h * 0.05;
+        let sag = f.h * 0.055;
+        // The whole garland sways slowly, as if in a light breeze.
+        let sway = (time * 0.8).sin() * f.h * 0.006;
+        let yat = |t: f32| y + sway + sag * 4.0 * t * (1.0 - t);
+        // Two ropes for a fuller garland.
+        const SEG: usize = 48;
+        for rope in 0..2 {
+            let off = rope as f32 * 4.0;
+            let mut line = Vec::with_capacity(SEG + 1);
+            for i in 0..=SEG {
+                let t = i as f32 / SEG as f32;
+                line.push(vec2(x0 + (x1 - x0) * t, yat(t) + off));
+            }
+            draw::stroke_path(&line, 3.5, palette::hexa(0x6f5a4a, 0.85));
         }
-        draw::stroke_path(&line, 3.0, palette::hexa(0x6f5a4a, 0.8));
         let n = GOAL;
-        let fs = fl.flag_s;
+        let fs = fl.flag_s * 1.3; // bigger, bolder pennants
         for i in 0..n {
             let t = (i as f32 + 0.5) / n as f32;
-            let popt = anim::clamp01((time - 0.30 - 0.12 * i as f32) / 0.4);
+            let popt = anim::clamp01((time - 0.25 - 0.12 * i as f32) / 0.42);
             if popt <= 0.0 {
                 continue;
             }
             let sc = anim::back_out(popt);
             let fsw = fs * sc;
-            let x = x0 + (x1 - x0) * t + (time * 1.6 + i as f32 * 1.3).sin() * 2.0;
+            let x = x0 + (x1 - x0) * t;
             let top = yat(t);
-            let rot = (sag * 4.0 * (1.0 - 2.0 * t)).atan2(x1 - x0);
-            let pivot = vec2(x, top);
-            draw::rounded_rect_rot(Rect::new(x - fsw / 2.0, top, fsw, fsw * 1.16), fsw * 0.12, pivot, rot, palette::CARD);
-            draw::rounded_rect_rot(Rect::new(x - fsw / 2.0, top, fsw, fsw * 0.18), fsw * 0.10, pivot, rot, palette::RAINBOW[i as usize % 7]);
-            let (sr, cr) = rot.sin_cos();
+            // The rope's local slope + a gentle per-flag pendulum swing.
+            let slope = (yat(t + 0.02) - yat(t - 0.02)).atan2((x1 - x0) * 0.04);
+            let rot = slope + 0.07 * (time * 1.3 + i as f32 * 0.7).sin();
+            let (sr, crot) = rot.sin_cos();
+            // Local→screen: +ly points DOWN the pennant (toward its apex).
+            let rp = |lx: f32, ly: f32| vec2(x + lx * crot - ly * sr, top + lx * sr + ly * crot);
+            let col = palette::RAINBOW[i as usize % 7];
+            let a = rp(-fsw * 0.5, 0.0);
+            let b = rp(fsw * 0.5, 0.0);
+            let apex = rp(0.0, fsw * 1.4);
+            draw_triangle(a, b, apex, col);
+            // A soft shine down the left face + a gold star over the rope knot.
+            let mid = rp(-fsw * 0.16, fsw * 0.62);
+            draw_triangle(a, mid, apex, palette::hexa(0xffffff, 0.16));
+            draw::star(x, top - fsw * 0.05, fsw * 0.17, palette::GOLD);
+            // The number, dark ink for contrast on the bright pennant, centered on
+            // the upper body.
+            let np = rp(0.0, fsw * 0.58);
             text::draw_centered_rot(
                 &(i + 1).to_string(),
-                x - fsw * 0.72 * sr,
-                top + fsw * 0.72 * cr,
-                (fsw * 0.6).max(1.0) as u16,
+                np.x,
+                np.y,
+                (fsw * 0.72).max(1.0) as u16,
                 &ctx.fonts.cursive,
                 palette::INK,
                 rot,
@@ -1052,24 +1163,73 @@ fn draw_meter(l: &Lay, stars: u32, _ctx: &Ctx) {
     }
 }
 
-/// The non-text direction cue: a small placard with a little disc and a big
-/// disc; the one we're hunting is ringed (and gently pulses). "Bigger" rings the
-/// big disc, "smaller" the little one — the emblem's size IS the instruction.
-fn draw_cue(l: &Lay, want_smaller: bool, ctx: &Ctx) {
+/// The non-text direction cue: a placard with a small circle and a big circle
+/// (same colour, so ONLY size differs — size IS the instruction), and a pointing
+/// hand that TAPS the target one. "Bigger" points at the big circle, "smaller" at
+/// the little one. The hand taps once when the scene opens, then holds still,
+/// pointing — no looping motion to distract from reading the numbers.
+fn draw_cue(l: &Lay, want_smaller: bool, cue_t: f32) {
     let c = l.cue;
     draw::card(c.x, c.y, c.w, c.h, palette::CARD);
-    let cy = c.y + c.h / 2.0;
-    let small = vec2(c.x + c.w * 0.34, cy);
-    let big = vec2(c.x + c.w * 0.66, cy);
-    let sr = c.h * 0.16;
-    let br = c.h * 0.30;
-    draw::disc(small.x, small.y, sr, palette::hex(0x9fb0c3));
-    draw::disc(big.x, big.y, br, palette::hex(0x9fb0c3));
-    // ring the target
+    // The two size emblems sit low in the card, leaving room for the hand above.
+    let cy = c.y + c.h * 0.70;
+    let small = vec2(c.x + c.w * 0.30, cy);
+    let big = vec2(c.x + c.w * 0.70, cy);
+    let sr = c.h * 0.11;
+    let br = c.h * 0.22;
+    let dim = palette::hexa(0x2bd5a0, 0.32); // pale green — the "other" size
+    draw::disc(small.x, small.y, sr, dim);
+    draw::disc(big.x, big.y, br, dim);
+    // The wanted size: a solid green circle with a calm, static ring (no pulse).
     let (tp, tr) = if want_smaller { (small, sr) } else { (big, br) };
-    let pulse = 1.0 + 0.12 * anim::pulse(ctx.time, 1.1);
-    draw::arc(tp.x, tp.y, tr * 1.5 * pulse, 0.0, TAU, (c.h * 0.05).max(3.0), palette::ACCENT);
-    draw::disc(tp.x, tp.y, tr, palette::ACCENT);
+    draw::disc(tp.x, tp.y, tr, palette::RAINBOW[3]);
+    draw::arc(tp.x, tp.y, tr + (c.h * 0.05).max(3.0), 0.0, TAU, (c.h * 0.03).max(2.5), palette::hexa(0x2b9d5f, 0.9));
+    // The pointing hand, tapping the target then resting just above it.
+    let press = cue_press(cue_t);
+    let hand_s = c.h * 0.24;
+    let hover = tr * 0.6 + hand_s * 0.2;
+    let tip = vec2(tp.x, tp.y - tr - hover * (1.0 - press));
+    draw_tap_hand(tip, hand_s);
+}
+
+/// The cue hand's one-shot tap: raised → presses down onto the target → settles
+/// to a resting hover and holds there. Returns 0 (fully raised) .. 1 (touching).
+fn cue_press(t: f32) -> f32 {
+    let t = t - 0.25; // a short lead-in so the tap lands after the cards settle
+    if t <= 0.0 {
+        return 0.0;
+    }
+    let rest = 0.5;
+    let down = 0.30;
+    let up = 0.42;
+    if t < down {
+        anim::ease_out_cubic(t / down) // 0 → 1: press down
+    } else if t < down + up {
+        1.0 - (1.0 - rest) * anim::ease_in_out_cubic((t - down) / up) // 1 → rest
+    } else {
+        rest // hold, still, pointing
+    }
+}
+
+/// A friendly cartoon hand pointing straight DOWN, fingertip at `tip`. A curled
+/// fist up top, an extended index finger, a thumb off to the side — flat fills,
+/// matching the app's neutral-vector look.
+fn draw_tap_hand(tip: Vec2, s: f32) {
+    let skin = palette::hex(0xf6c99e);
+    let cuff = palette::hex(0xe86a8e); // a cheerful pink sleeve cuff
+    let fist = vec2(tip.x - s * 0.04, tip.y - s * 1.18);
+    // Sleeve cuff behind the fist.
+    draw::rounded_rect(fist.x - s * 0.46, fist.y - s * 0.62, s * 0.92, s * 0.44, s * 0.16, cuff);
+    // Fist / palm.
+    draw::rounded_rect(fist.x - s * 0.44, fist.y - s * 0.30, s * 0.88, s * 0.72, s * 0.28, skin);
+    // Curled fingers (two knuckle bumps on the right).
+    draw::disc(fist.x + s * 0.34, fist.y - s * 0.02, s * 0.15, skin);
+    draw::disc(fist.x + s * 0.33, fist.y + s * 0.24, s * 0.14, skin);
+    // Thumb across the front.
+    draw::disc(fist.x - s * 0.36, fist.y + s * 0.12, s * 0.15, skin);
+    // Extended index finger down to the tip.
+    draw::stroke_path(&[vec2(tip.x, fist.y + s * 0.20), tip], s * 0.30, skin);
+    draw::disc(tip.x, tip.y, s * 0.15, skin); // rounded fingertip
 }
 
 // ===========================================================================
@@ -1104,10 +1264,10 @@ fn lay(f: &crate::layout::Frame) -> Lay {
     let bottom = f.h - f.safe.bottom.max(8.0);
 
     let meter_y = top + (f.h * 0.02).clamp(10.0, 22.0);
-    // cue placard, centered under the meter
-    let cue_w = (f.w * 0.16).clamp(120.0, 220.0);
-    let cue_h = (f.h * 0.09).clamp(52.0, 90.0);
-    let cue = Rect::new(cx - cue_w / 2.0, meter_y + (f.h * 0.03).clamp(14.0, 30.0), cue_w, cue_h);
+    // cue placard, centered under the meter (tall enough for the pointing hand)
+    let cue_w = (f.w * 0.17).clamp(150.0, 250.0);
+    let cue_h = (f.h * 0.13).clamp(76.0, 118.0);
+    let cue = Rect::new(cx - cue_w / 2.0, meter_y + (f.h * 0.03).clamp(18.0, 34.0), cue_w, cue_h);
 
     // grade buttons pinned near the bottom
     let grade_r = (f.w * 0.045).clamp(34.0, 54.0);
@@ -1179,6 +1339,9 @@ struct FinaleLayout {
     /// Froggy the hero: body center + radius.
     face: Vec2,
     face_r: f32,
+    /// The tappable sun (center + radius).
+    sun_c: Vec2,
+    sun_r: f32,
     balloon_r: f32,
     /// Blossom (lily-pad) radius for the tappable water flowers.
     star_r: f32,
@@ -1197,10 +1360,17 @@ impl FinaleLayout {
     fn balloon(&self, i: usize, time: f32) -> Vec2 {
         let a = self.balloon_anchor[i];
         let ph = i as f32 * 1.7;
-        vec2(a.x + 8.0 * (time * 0.6 + ph).sin(), a.y + 10.0 * (time * 0.5 + ph).cos())
+        vec2(
+            a.x + 15.0 * (time * 0.5 + ph).sin() + 6.0 * (time * 0.23 + ph).cos(),
+            a.y + 17.0 * (time * 0.42 + ph).cos(),
+        )
     }
-    fn star(&self, i: usize) -> Vec2 {
-        self.stars[i]
+    /// Blossom `i` bobbing on the pond ripples (time-dependent so it truly
+    /// floats; the tap hit-test uses the same value so it never desyncs).
+    fn star(&self, i: usize, time: f32) -> Vec2 {
+        let a = self.stars[i];
+        let ph = i as f32 * 1.3;
+        vec2(a.x + 4.0 * (time * 0.7 + ph).sin(), a.y + 5.0 * (time * 0.9 + ph).cos())
     }
 }
 
@@ -1211,6 +1381,9 @@ fn finale_layout(f: &crate::layout::Frame) -> FinaleLayout {
     let face_r = (f.w * 0.058).clamp(36.0, 78.0);
     // Froggy stands front-and-center, near the top of the pond.
     let face = vec2(cx, water_y + pondh * 0.34);
+    // The sun tucked in the top-right sky (tappable → rays + twinkle).
+    let sun_c = vec2(f.w * 0.90, f.h * 0.15);
+    let sun_r = f.vmin(0.065).max(32.0);
     let balloon_r = (f.w * 0.033).clamp(20.0, 40.0);
     let star_r = (f.w * 0.030).clamp(16.0, 36.0);
     let flag_s = f.vmin(0.10).clamp(38.0, 72.0);
@@ -1241,7 +1414,19 @@ fn finale_layout(f: &crate::layout::Frame) -> FinaleLayout {
         *s = vec2(f.w * fx, water_y + pondh * fy);
     }
 
-    FinaleLayout { face, face_r, balloon_r, star_r, balloon_anchor, stars, water_y, friends, flag_s }
+    FinaleLayout { face, face_r, sun_c, sun_r, balloon_r, star_r, balloon_anchor, stars, water_y, friends, flag_s }
+}
+
+/// A frog's tap reaction, cycled by `kind` for variety so repeat pokes surprise:
+/// 0 = a big hop with the tongue out, 1 = a full happy spin, 2 = a wink + squish.
+/// `p` runs 0..1 through the beat; `r` is the frog's body radius.
+fn react_pose(kind: u8, p: f32, r: f32) -> draw::FrogPose {
+    let fly = (p * std::f32::consts::PI).sin();
+    match kind % 3 {
+        0 => draw::FrogPose { dy: -fly * r * 0.9, sy: 1.0 + fly * 0.18, sx: 1.0 - fly * 0.09, tongue: fly, ..Default::default() },
+        1 => draw::FrogPose { rot: anim::ease_in_out_cubic(p) * TAU, dy: -fly * r * 0.5, ..Default::default() },
+        _ => draw::FrogPose { blink: fly, sx: 1.0 + 0.12 * fly, sy: 1.0 - 0.06 * fly, dy: -fly * r * 0.2, ..Default::default() },
+    }
 }
 
 /// Step in-flight timers by `dt`, parking each at [`IDLE`] once past `dur`.
