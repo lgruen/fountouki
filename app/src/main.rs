@@ -162,8 +162,8 @@ async fn main() {
                 Box::new(sc)
             }
             "patterns-levelup" => {
-                // A clean streak of 4 fires the level-up drive-by; settle ~1.2 s
-                // so the golden catches the mini train mid-crossing.
+                // A clean streak fires the level-up drive-by; settle ~1.0 s so the
+                // golden catches the mini train mid-crossing.
                 {
                     let mut kv = db.borrow_kv_mut();
                     let ps = fountouki_core::settings::PatternsSettings {
@@ -175,16 +175,18 @@ async fn main() {
                 let frame = Frame::new(w as f32, h as f32, Insets::default());
                 let mut sc = PatternsScene::new(db.clone(), 7, now);
                 let idle = Pointer::default();
-                for i in 0..4 {
+                let mut guard = 0;
+                while !sc.drive_active() && guard < 10 {
                     let ptr = tap(sc.choice_center(&frame, sc.correct_index()));
                     let ctx = Ctx { dt: 0.05, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
-                    if i < 3 {
+                    guard += 1;
+                    if !sc.drive_active() {
                         let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                         sc.update(&ctx);
                     }
                 }
-                for _ in 0..12 {
+                for _ in 0..10 {
                     let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
@@ -217,9 +219,9 @@ async fn main() {
                 Box::new(PatternsScene::new(db.clone(), 5, now))
             }
             "patterns-done" => {
-                // Master the final level (a clean streak of 4 at MAX_LEVEL) to
-                // reach the Pattern Train finale, then settle the entrance so the
-                // golden shows the train parked + celebrating at the flag.
+                // Master the final level (a clean streak at MAX_LEVEL) to reach the
+                // Pattern Train finale, then settle the entrance so the golden shows
+                // the train parked + celebrating at the flag.
                 {
                     let mut kv = db.borrow_kv_mut();
                     let ps = fountouki_core::settings::PatternsSettings {
@@ -764,16 +766,16 @@ async fn main() {
                 let ctx = Ctx { dt: 1.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
             };
-            // Three clean correct: one short of a level-up.
-            for _ in 0..3 { play_correct(&mut sc); }
+            // One clean correct: one short of a level-up (streak 1 of 2).
+            play_correct(&mut sc);
             let lvl = sc.level;
             // A mistake breaks the run, so the very next correct must NOT advance.
             play_wrong(&mut sc);
             play_correct(&mut sc);
             let held = sc.level == lvl;
             // A fresh clean run of LEVEL_UP_STREAK then does advance.
-            for _ in 0..4 { play_correct(&mut sc); }
-            if held && sc.level == lvl + 1 && sc.stars == 8 {
+            for _ in 0..2 { play_correct(&mut sc); }
+            if held && sc.level == lvl + 1 && sc.stars == 4 {
                 println!("PASS patterns-level-streak");
             } else {
                 println!("FAIL patterns-level-streak (held={}, level {}->{}, stars={})", held, lvl, sc.level, sc.stars);
@@ -785,11 +787,14 @@ async fn main() {
         {
             let mut sc = PatternsScene::new(Db::mem(), 31, now);
             let idle = Pointer::default();
-            for i in 0..4 {
+            // Play clean correct answers until a level-up fires the drive-by.
+            let mut guard = 0;
+            while !sc.drive_active() && guard < 10 {
                 let ptr = tap(sc.choice_center(&frame, sc.correct_index()));
                 let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
                 sc.update(&ctx);
-                if i < 3 {
+                guard += 1;
+                if !sc.drive_active() {
                     let ctx = Ctx { dt: 4.0, time: 0.0, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
                     sc.update(&ctx);
                 }
@@ -845,6 +850,41 @@ async fn main() {
             } else {
                 println!("FAIL patterns-engine-react (finale={}, taps {}->{})", sc.in_finale(), before, sc.engine_taps());
                 fails += 1;
+            }
+            // The finale's OTHER tap targets (like the newer games): the sun, the
+            // finish flag, a pattern car, and a party balloon each react to a poke
+            // — independent, errorless, re-tappable.
+            {
+                let sun0 = sc.sun_taps();
+                let ptr = tap(sc.finale_sun_center(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let flag0 = sc.flag_taps();
+                let ptr = tap(sc.finale_flag_center(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let car0 = sc.car_taps();
+                let ptr = tap(sc.finale_car_center(&frame, 0));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let bal0 = sc.balloon_taps();
+                let ptr = tap(sc.finale_balloon_center(&frame, 0));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if sc.in_finale()
+                    && sc.sun_taps() == sun0 + 1
+                    && sc.flag_taps() == flag0 + 1
+                    && sc.car_taps() == car0 + 1
+                    && sc.balloon_taps() == bal0 + 1
+                {
+                    println!("PASS patterns-finale-targets");
+                } else {
+                    println!(
+                        "FAIL patterns-finale-targets (sun {}->{}, flag {}->{}, car {}->{}, balloon {}->{})",
+                        sun0, sc.sun_taps(), flag0, sc.flag_taps(), car0, sc.car_taps(), bal0, sc.balloon_taps()
+                    );
+                    fails += 1;
+                }
             }
             // Replay returns to a fresh game at level 1 (stars reset).
             let ptr = tap(sc.replay_center(&frame));
