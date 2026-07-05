@@ -21,6 +21,11 @@ use nanoserde::SerJson;
 /// Stripes in the rainbow = stars needed to complete a session.
 const GOAL: u32 = 7;
 const HOP_DUR: f32 = 0.45;
+/// Max garden flowers we size the per-flower tap-timer array for (4 hero plants
+/// + up to 6 back-row = 10; a little headroom).
+const GARDEN_FLOWERS: usize = 12;
+/// How long a tapped garden flower's bloom spring lasts (seconds).
+const GARDEN_POP_S: f32 = 0.5;
 
 #[derive(PartialEq, Clone, Copy)]
 enum Phase {
@@ -53,6 +58,10 @@ pub struct PhonicsScene {
     /// Seed for the done-scene garden — re-rolled each session so a fresh mix of
     /// plants "grows" at the payoff ("what grew this time?").
     garden_seed: u32,
+    /// Seconds since each garden flower was tapped (blooms + settles); indexed by
+    /// the flower's order in the (deterministic) garden. Large = idle.
+    garden_flower_t: [f32; GARDEN_FLOWERS],
+    garden_flower_taps: u32,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
 }
@@ -86,6 +95,8 @@ impl PhonicsScene {
             frog_kind: 0,
             frog_taps: 0,
             garden_seed: seed ^ 0x9e37_79b9,
+            garden_flower_t: [99.0; GARDEN_FLOWERS],
+            garden_flower_taps: 0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x00c0_ffee),
             sync,
         }
@@ -102,13 +113,15 @@ impl PhonicsScene {
         self.hop_time = 99.0;
         // Re-roll the garden so replaying grows a fresh mix of plants.
         self.garden_seed = (self.rng.next_f64() * u32::MAX as f64) as u32 ^ 0x9e37_79b9;
+        self.garden_flower_t = [99.0; GARDEN_FLOWERS];
+        self.garden_flower_taps = 0;
         self.queue = srs::build_queue(&self.state, &deck::INTRO_ORDER, now, &mut self.rng);
         srs::avoid_repeat(&mut self.queue, self.last);
         self.qi = 0;
     }
 
     fn update_done(&mut self, ctx: &Ctx) -> Nav {
-        let (frog_c, fr, replay, home_b, br, _gy) = done_layout(&ctx.frame);
+        let (frog_c, fr, replay, home_b, br, gy) = done_layout(&ctx.frame);
         let pt = ctx.pointer;
         if pt.tapped() {
             if input::hit_circle(pt.pos, replay.x, replay.y, br) {
@@ -123,6 +136,25 @@ impl PhonicsScene {
                 self.frog_t = 0.0;
                 ctx.audio.frog();
                 self.confetti.burst(vec2(frog_c.x, frog_c.y - fr * 0.95), 16, fr * 0.55);
+            } else if let Some((fi, bloom, size)) =
+                // The garden flowers: rebuild the (deterministic) garden and find
+                // the tapped bloom — it springs up with a twinkle + a little
+                // confetti. Same order as draw_done, so `garden_flower_t` lines up.
+                build_garden(self.garden_seed, &ctx.frame, gy, replay, home_b, br)
+                    .iter()
+                    .filter(|g| matches!(g.kind, GardenLayer::Plant(_)))
+                    .take(GARDEN_FLOWERS)
+                    .enumerate()
+                    .find_map(|(fi, g)| {
+                        let bloom = vec2(g.pos.x, g.pos.y - g.size);
+                        input::hit_circle(pt.pos, bloom.x, bloom.y, (g.size * 0.62).max(18.0))
+                            .then_some((fi, bloom, g.size))
+                    })
+            {
+                self.garden_flower_t[fi] = 0.0;
+                self.garden_flower_taps += 1;
+                ctx.audio.twinkle();
+                self.confetti.burst(bloom, 8, size * 0.7);
             }
         }
         Nav::Stay
@@ -161,10 +193,19 @@ impl PhonicsScene {
                 draw::grass_tuft(g.pos.x, g.pos.y, g.size, palette::hex(0x47a64a), (ctx.time * 0.9 + g.phase).sin() * 0.5);
             }
         }
+        // Plant items, in the same order `update_done` uses to index the tap
+        // timers: a tapped flower springs its whole plant up (scale impulse).
+        let mut fi = 0usize;
         for g in &garden {
             if let GardenLayer::Plant(kind) = g.kind {
+                let pop = if fi < GARDEN_FLOWERS && self.garden_flower_t[fi] < GARDEN_POP_S {
+                    (self.garden_flower_t[fi] / GARDEN_POP_S * std::f32::consts::PI).sin()
+                } else {
+                    0.0
+                };
+                fi += 1;
                 let sway = (ctx.time * 1.1 + g.phase).sin();
-                draw::garden_plant(g.pos.x, g.pos.y, g.size, kind, g.color, sway);
+                draw::garden_plant(g.pos.x, g.pos.y, g.size * (1.0 + 0.24 * pop), kind, g.color, sway);
             }
         }
         let rx = &REACTIONS[self.frog_kind];
@@ -260,6 +301,17 @@ impl PhonicsScene {
     pub(crate) fn frog_taps(&self) -> u32 {
         self.frog_taps
     }
+    pub(crate) fn garden_flower_taps(&self) -> u32 {
+        self.garden_flower_taps
+    }
+    /// Bloom center of the first garden flower (playtest tap target).
+    pub(crate) fn garden_flower_center(&self, f: &crate::layout::Frame) -> Option<Vec2> {
+        let (_, _, replay, home_b, br, gy) = done_layout(f);
+        build_garden(self.garden_seed, f, gy, replay, home_b, br)
+            .iter()
+            .find(|g| matches!(g.kind, GardenLayer::Plant(_)))
+            .map(|g| vec2(g.pos.x, g.pos.y - g.size))
+    }
     /// Force the current card to a specific letter (capture/playtest only) so a
     /// golden can show a chosen exemplar (e.g. the drawn igloo for 'i').
     pub(crate) fn debug_set_letter(&mut self, c: char) {
@@ -273,6 +325,9 @@ impl Scene for PhonicsScene {
         self.hop_time += ctx.dt;
         self.confetti.update(ctx.dt);
         self.frog_t += ctx.dt;
+        for t in &mut self.garden_flower_t {
+            *t += ctx.dt;
+        }
         if let Some(t) = self.advance_in {
             let t = t - ctx.dt;
             if t <= 0.0 {
