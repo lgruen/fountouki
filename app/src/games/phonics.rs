@@ -441,7 +441,7 @@ impl Scene for PhonicsScene {
                 let off = -amp * 4.0 * prog * (1.0 - prog);
                 let glyph = self.current().to_string();
                 let cy = p.card.y + p.card.h * 0.52 + off;
-                text::draw_centered(&glyph, cx, cy, p.letter_size, &ctx.fonts.cursive, palette::INK);
+                text::draw_centered(&glyph, cx, cy, p.letter_size, &ctx.fonts.handwriting, palette::INK);
             }
             Phase::Miss => {
                 let glyph = self.current().to_string();
@@ -450,7 +450,7 @@ impl Scene for PhonicsScene {
                     cx,
                     p.card.y + p.card.h * 0.24,
                     (p.letter_size as f32 * 0.58) as u16,
-                    &ctx.fonts.cursive,
+                    &ctx.fonts.handwriting,
                     palette::INK,
                 );
                 // Picture only — no word label (distracting at this age), and
@@ -494,7 +494,7 @@ impl Scene for PhonicsScene {
                     cx,
                     p.advance.0.y,
                     (p.card.h * 0.16) as u16,
-                    &ctx.fonts.cursive,
+                    &ctx.fonts.handwriting,
                     palette::OK_STRONG,
                 );
             }

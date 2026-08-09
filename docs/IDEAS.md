@@ -50,8 +50,11 @@ details (see `CLAUDE.md`).
 
 ## Construction writing (tracing v1 shipped; wrapper + SRS future)
 - **Shipped as the `tracing` game (lowercase a–z)**: per-letter pen strokes
-  extracted from VicModernCursive (`tools/trace_extract/extract.py`,
-  skeleton + chart-routed; baked into `core/src/tracing_data.rs`), animated
+  derived from the official Tasmanian handwriting charts
+  (`tools/handwriting_font/build.py`, skeleton + chart-routed; baked into
+  `core/src/tracing_data.rs`), taught in the official letter families
+  (anticlockwise `c o a d g q e s f` → stick `l i t j` → wave `u y` →
+  clockwise `r n m h p b k` → diagonal `v w x z`), animated
   stroke-order demo, green start / red end dots (numbered for f t x i j),
   corridor finger-tracing over the faded font glyph (errorless, monotonic),
   5-letter sessions, persisted next-letter progression, parent start-over.
@@ -59,31 +62,34 @@ details (see `CLAUDE.md`).
   letter: walls → door → windows → roof → chimney, crane-cable install + hammer
   clonk), pencil-drawn demo, rising pentatonic trace ticks, and a house-warming
   finale (letter bunting, doorbell door, lightable windows, hard-hat frog).
-- Still future from the original sketch below: capitals + digits (pipeline
-  supports them — add chart routes per glyph), guide fading across boxes,
-  finished houses accreting into a street on the picker.
+- Still future from the original sketch below: capitals + digits as *traceable*
+  glyphs (the `tools/handwriting_font/` pipeline supports them — add a
+  hand-authored chart route per glyph), guide fading across boxes, finished
+  houses accreting into a street on the picker.
 - Touch / stylus tracing of letters + digits. Construction wrapper:
   each correct letter unlocks a pre-made house part (window, door,
   roof tile, pipe) via a tradie-installs animation. Session arc =
   one finished house (~5 min, ~6–10 letters/digits). Finished houses
   optionally accrete into a street on the picker across sessions.
-- Letterforms: **Victorian Modern Cursive** (unjoined / print form),
-  the typeface taught in Victorian state schools. CC BY, bundled at
-  `/public/fonts/vicmodcursive/` and already wired into Phonics so
-  recognition and production share one canonical shape (single-story
-  a, single-story g, exit-flick tails, etc.). The joined cursive
-  variant is for a much later phase.
-- Sequencing borrowed from Handwriting Without Tears: capitals first
-  (Frog-Jump → Starting-Corner → Center-Starter groups), then
-  lowercase, then digits — the developmental order, not VMC's
-  school-curriculum order. Verify each VMC capital lands in the
-  right HWT group at build time; most will, since the grouping is
-  about start position.
-- Per-letter presentation also borrowed from HWT: numbered start
-  dots, direction arrows, plus the kid-friendly stroke vocabulary —
-  "big line / little line / big curve / little curve / magic c" plus
-  **"tail"** for VMC's exit flick (HWT has no equivalent term since
-  HWT print has no flick).
+- Letterforms: the **Tasmanian Basic Handwriting Style** (unjoined /
+  print form) — the style actually taught in Tasmanian schools, per
+  the *Tasmanian Handwriting Guidelines (2023)* (DECYP, CC BY 4.0).
+  There is no official font file and commercial TAS fonts' licences
+  exclude apps, so **we author our own font**
+  (`tools/handwriting_font/build.py` → `app/assets/fonts/handwriting.ttf`,
+  family "Fountouki Handwriting"; see `/ATTRIBUTION.md`). Wired into
+  Phonics / Patterns / Compare / Clock too, so recognition and
+  production share one canonical shape. Joined/semi-joined Tasmanian
+  cursive is for a much later phase.
+- Lowercase sequencing follows the **official Tasmanian letter
+  families** (anticlockwise → stick → wave → clockwise → diagonal):
+  movement-pattern groups, so each family reuses one motor plan.
+- Handwriting Without Tears is still the reference for the *other*
+  axes: capitals-then-lowercase-then-digits developmental ordering if
+  capitals land, and per-letter presentation — numbered start dots,
+  direction arrows, and the kid-friendly stroke vocabulary ("big line
+  / little line / big curve / little curve / magic c"), plus a term
+  for any exit flick the shipped letterform carries.
 - Drip-in + Leitner, same shape as Phonics. Per-letter
   `{ box, due, lastSeen }`, 5-box Leitner. At most
   `NEW_LETTER_BUFFER` unsettled letters in rotation; a new letter

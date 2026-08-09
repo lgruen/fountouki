@@ -17,16 +17,17 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 ## Project shape
 - Cargo workspace. **`core/`** = pure logic + data + protocol, NO macroquad
   (`fountouki-core`): srs, patterns, themes, deck, audio synth, settings, sync,
-  storage, route, rng, tracing, singback, clock, compare (stroke data baked by
-  `tools/trace_extract/extract.py`). Fast to compile, unit-tested
-  (`cargo test -p fountouki-core`).
+  storage, route, rng, tracing (stroke data baked by
+  `tools/handwriting_font/build.py`), singback, clock, compare. Fast to
+  compile, unit-tested (`cargo test -p fountouki-core`).
 - **`app/`** = the macroquad binary `fountouki`: rendering, scenes, input,
   audio playback, the engine. Depends on `core`.
   - `palette` `text` `draw` `anim` `input` `layout` `scene` `sound` `confetti`
     `store` `parent` `emoji`; `games/{picker,phonics,patterns,tracing,singback,clock,compare}.rs`.
   - `layout.rs` computes every region from viewport size + safe-area insets +
     form factor — this is the consistency cure; keep layout ours.
-  - Fonts (VicModernCursive) + Twemoji emoji sprites are `include_bytes!`-baked.
+  - Fonts (own-authored Tasmanian-style handwriting + Varela Round UI) + Twemoji
+    emoji sprites are `include_bytes!`-baked (see `ATTRIBUTION.md`).
 - **`web/`** = PWA shell (index.html + macroquad `mq_js_bundle.js` + `sw.js` +
   manifest/icons); the built `fountouki.wasm` is dropped in by CI.
 - **`server/`** = Cloudflare Worker sync (unchanged). `docs/port-spec/` = the

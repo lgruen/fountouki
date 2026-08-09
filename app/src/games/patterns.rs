@@ -915,7 +915,7 @@ impl Scene for PatternsScene {
                 // pops against the bar and stays legible on the pale fill.
                 let (sx, sy) = p.cell_center(self.round.visible.len());
                 draw_cell(sx, sy, p.cell * pulse, palette::ACCENT_SOFT, palette::ACCENT);
-                text::draw_centered("?", sx, sy, (p.cell * 0.7) as u16, &ctx.fonts.cursive, palette::ACCENT_STRONG);
+                text::draw_centered("?", sx, sy, (p.cell * 0.7) as u16, &ctx.fonts.handwriting, palette::ACCENT_STRONG);
                 // Choice buttons.
                 for (i, r) in p.choices.iter().enumerate() {
                     let mut fill = palette::CARD;
@@ -983,7 +983,13 @@ fn draw_item(item: &Item, cx: f32, cy: f32, sz: f32, ctx: &Ctx) {
                     DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() },
                 );
             } else if g.chars().all(|c| c.is_ascii_alphanumeric()) {
-                text::draw_centered(g, cx, cy, (sz * 0.95) as u16, &ctx.fonts.cursive, palette::INK);
+                // Two size classes in the handwriting font: digits are
+                // cap-height (≈0.78 em) while lowercase letters are x-height
+                // (≈0.40 em). Sizing both the same would make the numbers theme
+                // tower over the letters theme, so digits get roughly half the
+                // font_size to land at the same rendered height in the cell.
+                let px = if g.chars().all(|c| c.is_ascii_digit()) { sz * 0.49 } else { sz * 0.95 };
+                text::draw_centered(g, cx, cy, px as u16, &ctx.fonts.handwriting, palette::INK);
             } else {
                 draw::rounded_rect(cx - sz * 0.4, cy - sz * 0.4, sz * 0.8, sz * 0.8, sz * 0.18, palette::ACCENT_SOFT);
             }

@@ -1,4 +1,4 @@
-//! Tracing: finger-trace VicModernCursive letters with the chart's stroke
+//! Tracing: finger-trace the handwriting font's letters in the taught stroke
 //! order. Each letter plays an animated pen demo first (watch), then the kid
 //! traces freely over the high-contrast glyph (trace): the laid ink is the
 //! finger's *actual* path (so a wobbly trace looks wobbly — the parent judges
@@ -741,7 +741,7 @@ impl TracingScene {
 
     /// The model letter under everything — the same smoothed stroke path as the
     /// demo/ink, at the guide alpha, so its curves read truly round. (The font
-    /// rasterizer facets this cursive glyph at card sizes; the traced/demo ink
+    /// rasterizer facets the outline glyph at card sizes; the traced/demo ink
     /// was fixed the same way — resampled through `tr::smooth`.) A strong,
     /// high-contrast guide that stays visible under the kid's ink.
     fn draw_template(&self, p: &TLayout) {
@@ -988,7 +988,7 @@ impl TracingScene {
                 x - fs * 0.74 * sr,
                 top + fs * 0.74 * cr,
                 (fs * 0.62).max(1.0) as u16,
-                &ctx.fonts.cursive,
+                &ctx.fonts.handwriting,
                 palette::INK,
                 rot,
             );
@@ -1192,8 +1192,10 @@ fn plan(f: &crate::layout::Frame, ch: char) -> TLayout {
     TLayout {
         card,
         map: GlyphMap { pen: vec2(pen_x, baseline), scale },
-        ink_w: (64.0 * scale).max(8.0),
-        dot_r: (58.0 * scale / 4.0).clamp(2.5, 4.5),
+        // Template/ink weight is 2× the font's pen so the traceable path reads
+        // chunkier than the letterform itself (same ratio the VMC-era 64 had).
+        ink_w: (2.0 * tr::PEN_WIDTH * scale).max(8.0),
+        dot_r: (tr::PEN_WIDTH * 1.6 * scale / 4.0).clamp(2.5, 4.5),
         watch: (vec2(cx - step, by), btn_r),
         miss: (vec2(cx, by), btn_r * 0.66),
         got: (vec2(cx + step, by), btn_r),
@@ -1318,5 +1320,25 @@ mod tests {
         assert!(door_swing(0.5) >= 1.0);
         assert!(door_swing(1.44) < 0.2);
         assert_eq!(door_swing(2.0), 0.0);
+    }
+
+    /// The baked font and the baked stroke data are generated from the same
+    /// pipeline run (`tools/handwriting_font/build.py`). If one is regenerated
+    /// without the other, the tracing template drifts from the rasterized
+    /// glyphs everywhere else — catch it here.
+    #[test]
+    fn stroke_data_matches_baked_font() {
+        let bytes: &[u8] = include_bytes!("../../assets/fonts/handwriting.ttf");
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for &b in bytes {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        assert_eq!(
+            h,
+            tr::SOURCE_FONT_FNV1A64,
+            "handwriting.ttf and tracing_data.rs are out of sync — re-run \
+             `uv run tools/handwriting_font/build.py` (font) and `--traces`"
+        );
     }
 }

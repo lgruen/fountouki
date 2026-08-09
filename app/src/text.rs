@@ -1,30 +1,33 @@
-//! Font loading + centered text helpers. VicModernCursive is baked into the
+//! Font loading + centered text helpers. The handwriting font is baked into the
 //! binary via include_bytes! so there is no asset-path / web-fetch dependency
 //! on any platform, and the glyph atlas is identical everywhere.
+//!
+//! **Size classes matter at every call site.** In the handwriting font (UPEM
+//! 1000) the ink heights per em are:
+//! - lowercase x-height (a c e m n o …) ≈ 0.40 em
+//! - caps, ascenders (b d h k l t) and **digits** ≈ 0.78 em
+//!
+//! So a digit drawn at `font_size` is ~1.94× taller than a lowercase letter at
+//! the same `font_size`. A call site that sizes a numeral must pick its ratio
+//! against the ~0.78 em cap box, not the ~0.40 em x-height. Digits also carry
+//! real side bearings, so multi-digit numbers pack correctly with plain
+//! [`draw_centered`] — no app-side tracking hack.
 use macroquad::prelude::*;
 use std::cell::RefCell;
 
 pub struct Fonts {
-    /// VicModernCursive — the canonical learn-to-write letterform (single-story
-    /// a/g). Used ONLY for letter/number learning stimuli.
-    pub cursive: Font,
-    pub cursive_bold: Font,
+    /// Fountouki Handwriting — the self-authored Tasmanian-style print
+    /// letterform the kids are taught to write (single-story a/g, unjoined).
+    /// Used ONLY for letter/number learning stimuli; chrome uses the UI font.
+    pub handwriting: Font,
 }
 
 impl Fonts {
     pub fn load() -> Fonts {
-        let cursive = load_ttf_font_from_bytes(include_bytes!(
-            "../assets/fonts/VicModernCursive-Regular.ttf"
-        ))
-        .expect("VicModernCursive-Regular");
-        let cursive_bold = load_ttf_font_from_bytes(include_bytes!(
-            "../assets/fonts/VicModernCursive-Bold.ttf"
-        ))
-        .expect("VicModernCursive-Bold");
-        Fonts {
-            cursive,
-            cursive_bold,
-        }
+        let handwriting =
+            load_ttf_font_from_bytes(include_bytes!("../assets/fonts/handwriting.ttf"))
+                .expect("handwriting.ttf");
+        Fonts { handwriting }
     }
 }
 
@@ -47,55 +50,6 @@ pub fn draw_centered(text: &str, cx: f32, cy: f32, size: u16, font: &Font, color
             ..Default::default()
         },
     );
-}
-
-/// Glyph tracking for multi-digit numerals drawn in the cursive font.
-/// VicModernCursive's digits carry wide side bearings, so a two-digit number
-/// (10/11/12/…/20) otherwise reads as two separate numbers; this tightens the
-/// inter-digit gap so it packs into one numeral. Shared by every game that draws
-/// two-digit numbers (clock hours, compare cards) so the spacing is identical.
-pub const NUMERAL_TRACKING: f32 = 0.72;
-
-/// Like [`draw_centered`], but the advance between glyphs is scaled by `tracking`
-/// (1.0 = font default, <1.0 tightens; see [`NUMERAL_TRACKING`]). VicModernCursive's
-/// digits carry generous side bearings, so two-digit numbers otherwise read as two
-/// separate numbers; this packs the digits into a single numeral. Single-digit
-/// strings are unaffected (the run is centered on the full trailing advance, so a
-/// lone glyph lands exactly where [`draw_centered`] would put it).
-pub fn draw_centered_tracked(text: &str, cx: f32, cy: f32, size: u16, font: &Font, color: Color, tracking: f32) {
-    // Per-glyph advances, then cumulative pen positions with the gaps scaled.
-    let advs: Vec<f32> = text
-        .chars()
-        .map(|ch| measure_text(ch.to_string().as_str(), Some(font), size, 1.0).width)
-        .collect();
-    if advs.is_empty() {
-        return;
-    }
-    let mut pens = Vec::with_capacity(advs.len());
-    let mut pen = 0.0;
-    for &adv in &advs {
-        pens.push(pen);
-        pen += adv * tracking;
-    }
-    // Center on the run's full extent (last pen + last *unscaled* advance), so a
-    // single glyph matches draw_centered exactly.
-    let total = pens[pens.len() - 1] + advs[advs.len() - 1];
-    let start = cx - total / 2.0;
-    let dim = measure_text(text, Some(font), size, 1.0);
-    let y = cy + dim.offset_y / 2.0;
-    for (ch, &px) in text.chars().zip(pens.iter()) {
-        draw_text_ex(
-            ch.to_string().as_str(),
-            start + px,
-            y,
-            TextParams {
-                font: Some(font),
-                font_size: size,
-                color,
-                ..Default::default()
-            },
-        );
-    }
 }
 
 /// Like [`draw_centered`], but the glyphs are rotated `rot` radians (clockwise,
@@ -126,9 +80,10 @@ pub fn draw_centered_rot(text: &str, cx: f32, cy: f32, size: u16, font: &Font, c
 }
 
 // --- UI font (Varela Round) ------------------------------------------------
-// Clean rounded sans for chrome, labels, parent menu, HUD. Cursive is reserved
-// for letter/number learning stimuli. Baked in + held thread-local so the free
-// `ui_*` helpers can reach it without threading a font through every call.
+// Clean rounded sans for chrome, labels, parent menu, HUD. The handwriting font
+// is reserved for letter/number learning stimuli. Baked in + held thread-local
+// so the free `ui_*` helpers can reach it without threading a font through
+// every call.
 thread_local! {
     static UI_FONT: RefCell<Option<Font>> = const { RefCell::new(None) };
 }
@@ -172,21 +127,4 @@ pub fn ui_left(text: &str, x: f32, cy: f32, size: u16, color: Color) {
             TextParams { font, font_size: size, color, ..Default::default() },
         );
     });
-}
-
-/// Draw text left-aligned at `x`, vertically centered on `cy`.
-pub fn draw_centered_left(text: &str, x: f32, cy: f32, size: u16, font: &Font, color: Color) {
-    let dim = measure_text(text, Some(font), size, 1.0);
-    let y = cy + dim.offset_y / 2.0;
-    draw_text_ex(
-        text,
-        x,
-        y,
-        TextParams {
-            font: Some(font),
-            font_size: size,
-            color,
-            ..Default::default()
-        },
-    );
 }

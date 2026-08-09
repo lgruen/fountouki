@@ -85,11 +85,6 @@ const RAIN_INTERVAL_S: f32 = 0.12;
 const STAR_POP_DUR: f32 = 0.42;
 const STAR_POP_CAP: f32 = 1.25;
 
-/// Glyph tracking for the hour numerals (the dial face AND the card under the
-/// frog) — the shared multi-digit tightening ([`text::NUMERAL_TRACKING`]), so
-/// 10/11/12 pack into one numeral.
-use crate::text::NUMERAL_TRACKING;
-
 /// Confetti seed salts (kept independent of the gameplay RNG so goldens stay
 /// reproducible — same scheme as Sing Back).
 const CONFETTI_SEED_SALT: u32 = 0x9E37_79B9;
@@ -706,14 +701,18 @@ impl ClockScene {
                 chh,
                 palette::CARD,
             );
-            text::draw_centered_tracked(
+            // Digits are cap-height (≈0.78 em) in the handwriting font, so the
+            // font_size is ~1.28× the ink height we want: 0.95 of the badge
+            // radius fills the card's 1.85·badge_r box without touching its
+            // rounded edges, and 10/11/12 pack as one numeral on the font's own
+            // side bearings.
+            text::draw_centered(
                 &th.to_string(),
                 slot.x,
                 slot.y,
-                (lay.badge_r * 1.85) as u16,
-                &ctx.fonts.cursive,
+                (lay.badge_r * 0.95) as u16,
+                &ctx.fonts.handwriting,
                 palette::INK,
-                NUMERAL_TRACKING,
             );
         } else {
             draw_face(slot, lay.model_r, ctx, true, 0);
@@ -1075,7 +1074,7 @@ impl ClockScene {
                 zx,
                 zy,
                 (r * (0.3 + zt * 0.2) * zscale).max(1.0) as u16,
-                &ctx.fonts.cursive,
+                &ctx.fonts.handwriting,
                 palette::hexa(0xffffff, (1.0 - zt) * 0.8),
             );
         }
@@ -1188,14 +1187,17 @@ fn draw_face(c: Vec2, r: f32, ctx: &Ctx, numerals: bool, glow_num: u8) {
             if glow_num == h {
                 draw::disc(p.x, p.y, r * 0.20, palette::hexa(0xffd166, 0.85));
             }
-            text::draw_centered_tracked(
+            // Digits are cap-height (≈0.78 em) here, so font_size ≈ 1.28× the
+            // ink height: 0.145·r draws a numeral about a fifth of the dial
+            // radius tall — big enough to read across the room, small enough
+            // that 10/11/12 clear their neighbours and the tick ring.
+            text::draw_centered(
                 &h.to_string(),
                 p.x,
                 p.y,
-                (r * 0.28).max(14.0) as u16,
-                &ctx.fonts.cursive,
+                (r * 0.145).max(8.0) as u16,
+                &ctx.fonts.handwriting,
                 palette::INK,
-                NUMERAL_TRACKING,
             );
         }
     }
