@@ -12,5 +12,10 @@ screenshots/
 app/smoke.png
 app/out.png
 
-# Python (tools/trace_extract)
+# Python (tools/handwriting_font)
 __pycache__/
+
+# Vendor font subsets extracted from the Tasmanian handwriting PDFs, plus
+# intermediate rasters. Local-only — we ship re-authored geometry, never
+# third-party font programs. See tools/handwriting_font/README.md.
+tools/handwriting_font/reference/

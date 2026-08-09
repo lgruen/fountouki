@@ -341,8 +341,9 @@ in_miss_reveal = false
 //     show miss+got buttons, hide advance button.
 ```
 
-The card shows **only the letter glyph** (Victorian Modern Cursive font),
-no exemplar emoji. No exemplar is shown during a correct prompt — single
+The card shows **only the letter glyph** (Victorian Modern Cursive font
+— *superseded: the shipped app uses the Tasmanian Basic Handwriting Style
+(own-authored font), see `/ATTRIBUTION.md`*), no exemplar emoji. No exemplar is shown during a correct prompt — single
 stimulus.
 
 ### 5.3 onMissed() — parent taps ✗
@@ -803,6 +804,9 @@ Phonics burst counts: got-it = `22 + streak_boost*8` (22..=62); done scene
 ---
 
 ## 12. Typography / fonts
+
+*Superseded: the shipped app uses the Tasmanian Basic Handwriting Style
+(own-authored font) — see `/ATTRIBUTION.md`.*
 
 - Letter glyph + parent-menu glyphs use **Victorian Modern Cursive**
   (`VicModernCursive`, Regular + Bold .ttf), single-story `a`/`g` — matches

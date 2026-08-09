@@ -16,13 +16,17 @@ reason the rewrite exists. Audience for this doc: a future Claude working here.
 ```
 core/      fountouki-core — PURE logic/data/protocol, no macroquad. 120 unit tests.
 app/       the macroquad binary `fountouki` — rendering, scenes, input, audio.
-  assets/  fonts (VicModernCursive stimuli, Varela Round UI) + 110 Twemoji PNGs.
+  assets/  fonts (own-authored handwriting stimuli, Varela Round UI) + 110 Twemoji PNGs.
 web/       PWA shell: index.html + macroquad mq_js_bundle.js + sw.js + manifest/icons.
 server/    Cloudflare Worker sync (UNCHANGED from the TS app; see server/README.md).
-tools/     goldens.sh — the screenshot matrix.
+tools/     goldens.sh — the screenshot matrix. handwriting_font/ — builds the font
+           + tracing stroke data from the official Tasmanian handwriting charts.
 docs/      port-spec/ — the spec the rewrite was ported from (source of truth).
 ios/ android/  optional native build scaffolds + READMEs.
 ```
+- Fonts + emoji licensing/provenance: [`ATTRIBUTION.md`](ATTRIBUTION.md) — the
+  handwriting font is **ours**, following the CC BY Tasmanian Basic Handwriting
+  Style; UI font is Varela Round (OFL); emoji are Twemoji (CC-BY).
 
 ### `core/` modules (pure, testable)
 - `srs` — shared per-letter Leitner SRS (phonics + tracing): boxes 0–4,
@@ -40,14 +44,15 @@ ios/ android/  optional native build scaffolds + READMEs.
 - `storage` — `KeyValueStore` trait + `ns_key` (`fountouki.<area>.<name>.v1`) +
   legacy migration. `route` — `parse_hash`/`hash_for`. `rng` — `Mulberry32`.
 - `tracing` — letter-tracing stroke data + progress logic: per-letter pen
-  centerlines baked from VicModernCursive by `tools/trace_extract/extract.py`
-  (chart-accurate stroke order; macroquad can't read glyph outlines at
-  runtime), corridor-follow `advance_progress`, and the motor-skill teaching
-  `ORDER` driving the shared Leitner SRS (persisted + synced `LeitnerState`,
-  migrated from the legacy next-letter blob).
+  centerlines baked by `tools/handwriting_font/build.py` from the official
+  Tasmanian handwriting charts (chart-accurate stroke order; macroquad can't
+  read glyph outlines at runtime), corridor-follow `advance_progress`, and the
+  motor-skill teaching `ORDER` — the Tasmanian letter families (anticlockwise,
+  stick, wave, clockwise, diagonal) — driving the shared Leitner SRS (persisted
+  + synced `LeitnerState`, migrated from the legacy next-letter blob).
 
 ### `app/` modules (rendering)
-- Engine: `palette` `text` (cursive + UI font) `draw` (vector primitives,
+- Engine: `palette` `text` (handwriting + UI font) `draw` (vector primitives,
   rainbow-arc geometry, frog, star, confetti shapes) `anim` `input` (pointer +
   500ms long-press) `layout` (**Frame** computes every region from viewport +
   safe-area + form factor — the consistency cure) `scene` (`Scene` trait + `Ctx`
@@ -71,8 +76,9 @@ cargo build --release -p fountouki --target wasm32-unknown-unknown   # web build
   (`--import-undefined`/`--export-table`).
 - `--capture <png> <scene> [w] [h]` renders a scene offscreen to a PNG. Scene
   ids: `picker phonics phonics-miss phonics-done patterns patterns-emoji
-  patterns-unit tracing tracing-watch tracing-two-stroke tracing-done
-  parent-patterns parent-phonics parent-tracing`.
+  patterns-numbers patterns-unit tracing tracing-watch tracing-two-stroke
+  tracing-done parent-patterns parent-phonics parent-tracing` (full list in
+  `tools/goldens.sh`).
 
 ## Testing & visual verification
 - **Logic**: `cargo test --workspace` (core). **Gameplay**: `--playtest` drives

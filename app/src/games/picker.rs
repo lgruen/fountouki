@@ -147,7 +147,7 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
                 palette::RAINBOW[1],
             );
             draw::rounded_rect(x0 + 2.0 * (s + gap) - s / 2.0, cy - s / 2.0, s, s, s * 0.2, palette::ACCENT_SOFT);
-            text::draw_centered("?", x0 + 2.0 * (s + gap), cy, (s * 0.9) as u16, &ctx.fonts.cursive, palette::ACCENT);
+            text::draw_centered("?", x0 + 2.0 * (s + gap), cy, (s * 0.9) as u16, &ctx.fonts.handwriting, palette::ACCENT);
         }
         "phonics" => {
             // mini rainbow swaying above the frog mascot
@@ -158,8 +158,9 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
             draw::frog(cx, fy, fr, palette::RAINBOW[3], draw::FrogPose::default());
         }
         "tracing" => {
-            // The mechanic (a cursive 'a' wearing the chart's start/end dots)
-            // beside the reward (the build-a-house site, crane mid-build).
+            // The mechanic (a handwriting-font 'a' wearing the chart's
+            // start/end dots) beside the reward (the build-a-house site, crane
+            // mid-build).
             use fountouki_core::tracing as tr;
             if let Some(g) = tr::glyph('a') {
                 let font_px = (r.w * 0.52) as u16;
@@ -174,7 +175,7 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
                     pen.x,
                     pen.y,
                     TextParams {
-                        font: Some(&ctx.fonts.cursive),
+                        font: Some(&ctx.fonts.handwriting),
                         font_size: font_px,
                         color: palette::INK,
                         ..Default::default()
@@ -183,7 +184,9 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
                 let to_px = |p: (f32, f32)| vec2(pen.x + p.0 * scale, pen.y - p.1 * scale);
                 let start = to_px(g.strokes[0][0]);
                 let end = to_px(*g.strokes[0].last().unwrap());
-                let dr = r.w * 0.042;
+                // Small enough not to swallow the 2 o'clock start corner —
+                // the letterform is narrower than the icon box.
+                let dr = r.w * 0.030;
                 draw::disc(end.x, end.y, dr * 0.8, palette::RAINBOW[0]);
                 draw::disc(start.x, start.y, dr, palette::OK_STRONG);
             }
@@ -247,7 +250,10 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
                 draw::stroke_path(&[end, pc], 1.6, palette::hex(0xc8881f));
                 let ch = cw * 1.1;
                 draw::card(pc.x - cw / 2.0, pc.y, cw, ch, palette::CARD);
-                text::draw_centered(val, pc.x, pc.y + ch / 2.0, (ch * 0.7) as u16, &ctx.fonts.cursive, palette::INK);
+                // Digits are cap-height (≈0.78 em) in the handwriting font, so
+                // font_size ≈ 1.28× the ink height: 0.36·ch fills a bit over a
+                // quarter of the little card without touching its edges.
+                text::draw_centered(val, pc.x, pc.y + ch / 2.0, (ch * 0.36) as u16, &ctx.fonts.handwriting, palette::INK);
             }
             draw::disc(piv.x, piv.y, hb * 0.16, palette::hex(0xf6b73c));
         }

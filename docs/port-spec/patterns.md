@@ -632,7 +632,8 @@ Unmount: clear all pending timers, delete debug global, clear container.
 - `.cell`: `flex:1 1 0`, `aspect-ratio 1/1`, max-width `clamp(56px,9.5vw,104px)`,
   rounded, white bg, glyph font-size `clamp(20px,6.5vw,60px)`. Font family
   `'VicModernCursive', …` (single-story a/g) so letters/numbers match phonics;
-  emoji/shapes fall through.
+  emoji/shapes fall through. *Superseded: the shipped app uses the Tasmanian
+  Basic Handwriting Style (own-authored font) — see `/ATTRIBUTION.md`.*
 - `.cell.shape::after`: a 65%×65% block colored `--shape-color`, rounded
   `--shape-radius` (default 50%), `clip-path: --shape-clip` (default none).
 - `.cell.slot`: accent-soft bg, `?` glyph, pulsing scale 1↔1.06 (1.6s).

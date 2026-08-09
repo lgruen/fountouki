@@ -203,6 +203,19 @@ async fn main() {
                 }
                 Box::new(PatternsScene::new(db.clone(), 5, now))
             }
+            "patterns-numbers" => {
+                // Exercises the digit-vs-letter size branch in the item glyph
+                // renderer (digits are cap-height in the handwriting font).
+                {
+                    let mut kv = db.borrow_kv_mut();
+                    let ps = fountouki_core::settings::PatternsSettings {
+                        theme_choice: "numbers".to_string(),
+                        ..Default::default()
+                    };
+                    fountouki_core::settings::save_patterns(&mut **kv, &ps);
+                }
+                Box::new(PatternsScene::new(db.clone(), 5, now))
+            }
             "patterns-hard" => {
                 // Hard pins 4 choices (correct + unit-mate + pool distractors) —
                 // exercises the single-row choice layout. emoji-animals has a big

@@ -85,6 +85,9 @@ box-3 `#4adf99` · box-4 gradient `135deg #ffd84f→#ff9a3c` + glow.
 
 ## 2. Typography
 
+*Superseded: the shipped app uses the Tasmanian Basic Handwriting Style
+(own-authored font) — see `/ATTRIBUTION.md`.*
+
 - **Body font**: system stack `-apple-system, BlinkMacSystemFont, "Segoe UI", "Comic Sans MS", "Comic Sans", system-ui, sans-serif`. On iOS this resolves to San Francisco (the screenshots show SF, not Comic Sans). Used for labels, topbar, buttons, settings.
 - **VicModernCursive** (`public/fonts/vicmodcursive/`, weights 400 + 700): the **canonical letterform** — single-story `a`, single-story `g` — matching how the child learns to handwrite. `font-display: swap` (system fallback while loading). Used **only where letters/numbers are the learning stimulus**:
   - `.phonics-letter` (the big card glyph).
@@ -198,7 +201,7 @@ App shell `#app`: `max-width min(960px,100%)`, centered, `height 100dvh`, flex c
 - **The 🐸 frog mascot** — the recurring character, the single tappable joy at the reward, the only "pet" in the app. Highest-equity element after the rainbow. Keep the playful tap-reactions (real jumps).
 - **Confetti + springy micro-animations** (letter hop, choice pop/shake, pip/arc pop, star-count pop). The springy cubic-bezier `(0.34,1.6,0.64,1)` overshoot is the app's motion signature.
 - **Brand pink `--accent` `#f582ae`** for "tap here" affordances (pulsing `?` slot, primary buttons).
-- **VicModernCursive** for all letter/number stimuli — pedagogically load-bearing (matches handwriting). Must ship in the GPU font atlas; don't fall back to sans like the screenshot capture did.
+- **VicModernCursive** for all letter/number stimuli — pedagogically load-bearing (matches handwriting). Must ship in the GPU font atlas; don't fall back to sans like the screenshot capture did. *Superseded: the shipped app uses the Tasmanian Basic Handwriting Style (own-authored font) — see `/ATTRIBUTION.md`. The "a handwriting font, baked into the atlas" requirement still holds.*
 - **🌰 stays the launcher icon only** — never render it in-app.
 - **Errorless / monotonic / one-stimulus / big-tap-target** layout discipline.
 

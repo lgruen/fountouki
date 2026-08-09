@@ -1,10 +1,12 @@
 //! Letter tracing — stroke-order data + pure trace-progress logic.
 //!
-//! Stroke centerlines are extracted offline from VicModernCursive by
-//! `tools/trace_extract/extract.py` (macroquad can only rasterize fonts, so
-//! the pen paths are baked into `tracing_data.rs`). Coordinates are font
-//! units, y up, origin at the pen position on the baseline — the same frame
-//! `draw_text_ex(glyph, pen_x, baseline_y, ..)` uses, so the app overlays
+//! Stroke centerlines are baked offline out of the handwriting font by
+//! `tools/handwriting_font/build.py --traces` (macroquad can only rasterize
+//! fonts, so the pen paths live in `tracing_data.rs`), following the pen
+//! routes in that tool's `routes.py` — the stroke order and direction of the
+//! Tasmanian "Basic Handwriting Style" Beginner's Alphabet chart. Coordinates
+//! are font units, y up, origin at the pen position on the baseline — the same
+//! frame `draw_text_ex(glyph, pen_x, baseline_y, ..)` uses, so the app overlays
 //! them on the rendered glyph with `px = pen + unit * font_size / UPEM`.
 //!
 //! Tracing is errorless coaching, not pass/fail: progress only ever moves
@@ -18,7 +20,9 @@ use crate::srs;
 use crate::storage::KeyValueStore;
 use nanoserde::{DeJson, SerJson};
 
-pub use crate::tracing_data::{ASCENT, DESCENT, GLYPHS, UPEM, X_HEIGHT};
+pub use crate::tracing_data::{
+    ASCENT, DESCENT, GLYPHS, PEN_WIDTH, SOURCE_FONT_FNV1A64, UPEM, X_HEIGHT,
+};
 
 /// One letter's pen strokes. A single-point stroke is a "dot" (i / j): the kid
 /// taps it instead of dragging.
@@ -193,16 +197,19 @@ fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
 
 // --- teaching order + persisted Leitner progression --------------------------
 
-/// Lowercase teaching order, grouped by stroke family (anticlockwise "magic c"
-/// letters first, then straight-down letters, then down + hump, then the
-/// trickier diagonals) — easiest motor patterns first, à la HWT, adapted to
-/// VMC's lowercase-first curriculum. This is the SRS drip-in order (tracing's
-/// counterpart of phonics' `deck::INTRO_ORDER`).
+/// Lowercase teaching order: the Tasmanian handwriting guidelines' motor
+/// families (Appendix 3), in family order and in the guidelines' order within
+/// each family. One movement pattern is learned, then reused — every letter in
+/// a family is the previous one plus a small addition, so the hand practises
+/// the same shape six times before the next pattern arrives. This is the SRS
+/// drip-in order (tracing's counterpart of phonics' `deck::INTRO_ORDER`).
 pub const ORDER: [char; 26] = [
-    'c', 'a', 'd', 'o', 'g', 'q', 'e', 's', // magic-c family
-    'l', 'i', 't', 'u', 'j', 'y', // big/little lines down
-    'n', 'm', 'h', 'r', 'b', 'p', 'k', 'f', // down, back up, over
-    'v', 'w', 'x', 'z', // diagonals
+    // anticlockwise: every oval starts at 2 o'clock and travels anticlockwise
+    'c', 'o', 'a', 'd', 'g', 'q', 'e', 's', 'f', //
+    'l', 'i', 't', 'j', // stick: straight down
+    'u', 'y', // wave: down, inverted arch, up
+    'r', 'n', 'm', 'h', 'p', 'b', 'k', // clockwise: down, trace up, over
+    'v', 'w', 'x', 'z', // diagonal: sharp points, no curves
 ];
 
 /// Letters traced per session (~5 minutes at a preschool pace). Matches the
@@ -211,7 +218,7 @@ pub const ORDER: [char; 26] = [
 pub const SESSION_GOAL: usize = 6;
 
 /// Which letters the SRS allows right now (drip-in frontier over `ORDER`).
-/// Fresh learner → `c, a, d`.
+/// Fresh learner → `c, o, a`.
 pub fn active_letters(state: &srs::LeitnerState) -> Vec<char> {
     srs::active_letters(state, &ORDER)
 }
@@ -316,23 +323,53 @@ mod tests {
             assert_eq!(g.strokes.len(), 2, "{c} should have body + dot");
             assert!(is_dot(g.strokes[1]), "{c}: second stroke should be the dot");
         }
-        // f, t, x are the two-stroke letters of the chart.
-        for c in ['f', 't', 'x'] {
-            assert_eq!(glyph(c).unwrap().strokes.len(), 2, "{c} should have 2 strokes");
+        // f, t, x are the only lowercase letters that lift the pen: everything
+        // else in this style is one continuous stroke (retraces and all).
+        for c in 'a'..='z' {
+            let want = match c {
+                'i' | 'j' | 'f' | 't' | 'x' => 2,
+                _ => 1,
+            };
+            assert_eq!(glyph(c).unwrap().strokes.len(), want, "{c}: stroke count");
         }
     }
 
-    /// 'g' (like a/d/q) is a magic-c bowl: the pen starts at the bowl's true
-    /// top-right corner, not below it. Regression for a baked start dot that
-    /// sat ~30 units under the corner (an end-extension hook).
+    /// The anticlockwise family (c o a d g q) starts at **2 o'clock** — the
+    /// top-right of the oval. For 'g' that corner is the top-right of the
+    /// *bowl*, so measure the box over the bowl only (y > 0 drops the
+    /// descender hook, which reaches further left and far below). Regression
+    /// for a baked start dot that sat ~30 units inside the corner (a pruned
+    /// pen tip, or an end-extension hooking the wrong way).
     #[test]
     fn g_starts_at_the_bowl_top_right() {
         let g = glyph('g').unwrap();
         let start = g.strokes[0][0];
-        let bb = ink_bbox(g);
-        // Within a stroke-width of both the right edge and the top of the ink.
-        assert!(bb.2 - start.0 <= 12.0, "g start not at right edge: {start:?} bbox {bb:?}");
-        assert!(bb.3 - start.1 <= 12.0, "g start not at top: {start:?} bbox {bb:?}");
+        let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
+        for &(x, y) in g.strokes[0].iter().filter(|p| p.1 > 0.0) {
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+        // Within a stroke-width of both the right edge and the top of the bowl.
+        assert!(max_x - start.0 <= 12.0, "g start not at the bowl's right: {start:?} / {max_x}");
+        assert!(max_y - start.1 <= 12.0, "g start not at the bowl's top: {start:?} / {max_y}");
+    }
+
+    /// The same 2 o'clock start, for the rest of the oval family. 'a' and 'q'
+    /// share g's shape; 'o' closes its loop where it started; 'c' stops short
+    /// of the top, so it is checked against its own first-quadrant box.
+    #[test]
+    fn the_oval_family_starts_at_two_oclock() {
+        for c in ['a', 'o', 'q', 'c'] {
+            let g = glyph(c).unwrap();
+            let start = g.strokes[0][0];
+            let bb = ink_bbox(g);
+            let (w, h) = (bb.2 - bb.0, bb.3 - bb.1);
+            // Right half, top quarter of the letter — no other corner qualifies.
+            assert!(
+                start.0 >= bb.0 + 0.6 * w && start.1 >= bb.1 + 0.75 * h,
+                "{c}: start {start:?} is not at 2 o'clock of {bb:?}"
+            );
+        }
     }
 
     #[test]
@@ -462,16 +499,16 @@ mod tests {
     use crate::storage::MemStore;
 
     #[test]
-    fn fresh_active_letters_are_the_magic_c_start() {
+    fn fresh_active_letters_are_the_anticlockwise_start() {
         let now = 1000;
         let mut st = srs::empty_state();
         srs::ensure_letters(&mut st, now);
-        assert_eq!(active_letters(&st), vec!['c', 'a', 'd']);
+        assert_eq!(active_letters(&st), vec!['c', 'o', 'a']);
         // Fresh learner: everything due → the queue is a permutation of them.
         let mut rng = crate::rng::Mulberry32::new(7);
         let mut q = build_queue(&st, now, &mut rng);
         q.sort_unstable();
-        assert_eq!(q, vec!['a', 'c', 'd']);
+        assert_eq!(q, vec!['a', 'c', 'o']);
     }
 
     #[test]
@@ -479,11 +516,11 @@ mod tests {
         let now = 1000;
         let mut st = srs::empty_state();
         srs::ensure_letters(&mut st, now);
-        for c in ['c', 'a', 'd'] {
+        for c in ['c', 'o', 'a'] {
             srs::grade_got_it(&mut st, c, now);
         }
-        // c,a,d settled → the buffer refills with o,g,q.
-        assert_eq!(active_letters(&st), vec!['c', 'a', 'd', 'o', 'g', 'q']);
+        // c,o,a settled → the buffer refills with the rest of the ovals.
+        assert_eq!(active_letters(&st), vec!['c', 'o', 'a', 'd', 'g', 'q']);
     }
 
     #[test]
@@ -532,7 +569,7 @@ mod tests {
         let now = 9_000;
         let mut st = srs::empty_state();
         srs::ensure_letters(&mut st, 100);
-        for c in ['c', 'a', 'd'] {
+        for c in ['c', 'o', 'a'] {
             srs::grade_got_it(&mut st, c, 100);
         }
         let reset = start_over(&st, now);

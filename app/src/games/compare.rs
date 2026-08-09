@@ -1066,12 +1066,16 @@ impl CompareScene {
             // The number, dark ink for contrast on the bright pennant, centered on
             // the upper body.
             let np = rp(0.0, fsw * 0.58);
+            // Digits are cap-height (≈0.78 em) in the handwriting font, so
+            // font_size ≈ 1.28× the ink height: 0.37·fsw keeps the numeral a bit
+            // over a quarter of the flag's width tall, inside the pennant's
+            // tapering body.
             text::draw_centered_rot(
                 &(i + 1).to_string(),
                 np.x,
                 np.y,
-                (fsw * 0.72).max(1.0) as u16,
-                &ctx.fonts.cursive,
+                (fsw * 0.37).max(1.0) as u16,
+                &ctx.fonts.handwriting,
                 palette::INK,
                 rot,
             );
@@ -1079,8 +1083,8 @@ impl CompareScene {
     }
 }
 
-/// Draw one number card: rounded tile + honey border, a cursive numeral (with
-/// two-digit tracking), an optional ten-frame of dots, and highlight glow/tint.
+/// Draw one number card: rounded tile + honey border, a handwriting-font
+/// numeral, an optional ten-frame of dots, and highlight glow/tint.
 fn draw_card(cr: Rect, value: u8, pop: f32, glow: Option<Color>, tint: Option<Color>, dots: bool, ctx: &Ctx) {
     // pop scales about the card center
     let (cx, cy) = (cr.x + cr.w / 2.0, cr.y + cr.h / 2.0);
@@ -1100,10 +1104,14 @@ fn draw_card(cr: Rect, value: u8, pop: f32, glow: Option<Color>, tint: Option<Co
         draw::rounded_rect(r.x, r.y, r.w, r.h, palette::RADIUS, t);
     }
 
-    // numeral (top portion when dots show, else centered)
+    // Numeral (top portion when dots show, else centered). Digits are
+    // cap-height (≈0.78 em) in the handwriting font, so font_size ≈ 1.28× the
+    // ink height: the numeral stands ~16% of the card tall over a ten-frame and
+    // ~22% when it has the card to itself. Teens pack on the font's own side
+    // bearings — no app-side tracking.
     let num_cy = if dots { r.y + r.h * 0.34 } else { cy };
-    let num_px = if dots { (r.h * 0.40) as u16 } else { (r.h * 0.56) as u16 };
-    text::draw_centered_tracked(&value.to_string(), cx, num_cy, num_px, &ctx.fonts.cursive, palette::INK, text::NUMERAL_TRACKING);
+    let num_px = if dots { (r.h * 0.205) as u16 } else { (r.h * 0.287) as u16 };
+    text::draw_centered(&value.to_string(), cx, num_cy, num_px, &ctx.fonts.handwriting, palette::INK);
 
     if dots {
         let fh = r.h * 0.34;
