@@ -91,6 +91,14 @@ REF_FILES = {
 UPEM = 1000
 X_HEIGHT = 400.0          # target x-height ink top; sets the master scale k
 DIGIT_SIDE_BEARING = 90.0  # digits/!/? are set on a tight, uniform sidebearing
+
+
+def digit_bearing(ch: str) -> float:
+    """Per-glyph digit sidebearing. The official '1' is a bare stem (no flag,
+    no base), so at the uniform bearing a pair like "11" reads as two tally
+    marks; halving its bearing pulls 10/11/12/21 into one visual number
+    without touching the letterform itself."""
+    return 45.0 if ch == "1" else DIGIT_SIDE_BEARING
 SPACE_ADVANCE = 300
 FAMILY = "Fountouki Handwriting"
 SUBFAMILY = "Regular"
@@ -1079,7 +1087,7 @@ def main():
         poly = expand(strokes[ch], dots[ch], pen)
         assert poly is not None and not poly.is_empty, f"{ch!r}: empty outline"
         if ch in DIGITS + AUTHORED:
-            poly = affinity.translate(poly, xoff=DIGIT_SIDE_BEARING - poly.bounds[0])
+            poly = affinity.translate(poly, xoff=digit_bearing(ch) - poly.bounds[0])
         polys[ch] = polygons(poly, pen)
         bounds[ch] = poly.bounds
 
@@ -1106,7 +1114,7 @@ def main():
         cmap[ord(ch)] = name
         x0, _y0, x1, _y1 = bounds[ch]
         if ch in DIGITS + AUTHORED:
-            adv = int(round(x1 - x0 + 2 * DIGIT_SIDE_BEARING))
+            adv = int(round(x1 - x0 + 2 * digit_bearing(ch)))
         else:
             adv = int(round(ref_adv[ch] * k))
         metrics[name] = (adv, int(round(x0)))
