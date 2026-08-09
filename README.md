@@ -76,8 +76,9 @@ cargo build --release -p fountouki --target wasm32-unknown-unknown   # web build
   (`--import-undefined`/`--export-table`).
 - `--capture <png> <scene> [w] [h]` renders a scene offscreen to a PNG. Scene
   ids: `picker phonics phonics-miss phonics-done patterns patterns-emoji
-  patterns-unit tracing tracing-watch tracing-two-stroke tracing-done
-  parent-patterns parent-phonics parent-tracing`.
+  patterns-numbers patterns-unit tracing tracing-watch tracing-two-stroke
+  tracing-done parent-patterns parent-phonics parent-tracing` (full list in
+  `tools/goldens.sh`).
 
 ## Testing & visual verification
 - **Logic**: `cargo test --workspace` (core). **Gameplay**: `--playtest` drives

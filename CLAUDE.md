@@ -37,7 +37,7 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
 - `cargo run -p fountouki` — interactive desktop.
 - `--capture <png> <scene> [w] [h]` — render a scene offscreen to a PNG.
   Scenes: `picker phonics phonics-miss phonics-miss-igloo phonics-done patterns
-  patterns-emoji patterns-unit patterns-hard patterns-levelup patterns-done
+  patterns-emoji patterns-numbers patterns-unit patterns-hard patterns-levelup patterns-done
   tracing tracing-watch tracing-two-stroke tracing-reward tracing-build
   tracing-grade tracing-done tracing-housewarming singback singback-ready
   singback-input singback-miss singback-reward singback-finale clock clock-routine

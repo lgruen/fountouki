@@ -23,7 +23,10 @@ consecutive shortest-path segments.
 
 Families (the teaching order in `core::tracing::ORDER`):
 
-* anticlockwise `c o a d g q e s f` — every oval starts at **2 o'clock** and
+* anticlockwise `c o a d g q e s f` — yes, `f` really is grouped here (the
+  guidelines' p37/p59 family lists read "c o a d g q, plus e s f" — its top
+  curl starts like a c); it sits last in the family because it is the hardest
+  of the nine. Every oval starts at **2 o'clock** and
   travels anticlockwise; `a d g q` then run back up the closing side and down
   the stem, `e` starts low on its crossbar, `f` curls back at the top.
 * stick `l i t j` — straight down; `l` flicks out, `t` crosses after.

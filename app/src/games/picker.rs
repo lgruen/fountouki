@@ -184,7 +184,9 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
                 let to_px = |p: (f32, f32)| vec2(pen.x + p.0 * scale, pen.y - p.1 * scale);
                 let start = to_px(g.strokes[0][0]);
                 let end = to_px(*g.strokes[0].last().unwrap());
-                let dr = r.w * 0.042;
+                // Small enough not to swallow the 2 o'clock start corner —
+                // the letterform is narrower than the icon box.
+                let dr = r.w * 0.030;
                 draw::disc(end.x, end.y, dr * 0.8, palette::RAINBOW[0]);
                 draw::disc(start.x, start.y, dr, palette::OK_STRONG);
             }
