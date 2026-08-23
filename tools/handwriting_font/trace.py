@@ -329,7 +329,7 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
     def in_zone(p):
         if not junctions:
             return False
-        r = 1.2 * float(radius[p]) + 1.0
+        r = 1.5 * float(radius[p]) + 1.0
         return any((p[0]-j[0])**2 + (p[1]-j[1])**2 <= r*r for j in junctions)
 
     # --- retrace status + structural cuts ----------------------------------
@@ -361,7 +361,11 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             while j + 1 < last and deg[path[j + 1]] >= 3:
                 j += 1
             c = (i + j) // 2
-            a0, a1 = max(0, c - 6), min(last, c + 6)
+            # measure the bend across the whole crotch zone: a shallow merge
+            # (the d bowl-side onto its stem) spreads its direction change
+            # over the junction's width and a short baseline misses it
+            w = max(6, int(1.5 * float(radius[path[c]])) + 4)
+            a0, a1 = max(0, c - w), min(last, c + w)
             d_in = unit_vec((path[c][0]-path[a0][0], path[c][1]-path[a0][1]))
             d_out = unit_vec((path[a1][0]-path[c][0], path[a1][1]-path[c][1]))
             if (d_in != (0.0, 0.0) and d_out != (0.0, 0.0)
@@ -408,7 +412,7 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         r, c = _px_of(u)
         return 0 <= r < mask.shape[0] and 0 <= c < mask.shape[1] and mask[r, c]
 
-    def tangent_ext(pts, at_start):
+    def tangent_ext(pts, at_start, land_on=None):
         """Tangential tip extension of a smoothed polyline: continue along
         its own end tangent to just short of the ink boundary. Replaces the
         old raw-pixel-direction ray (which kinked against the smoothed
@@ -433,8 +437,13 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         run, d = 0.0, 0.0
         while d + step <= cap:
             d += step
-            if not _inside((a[0] + t[0] * d, a[1] + t[1] * d)):
+            q = (a[0] + t[0] * d, a[1] + t[1] * d)
+            if not _inside(q):
                 break
+            if land_on is not None:
+                for lp in land_on:
+                    if math.hypot(q[0]-lp[0], q[1]-lp[1]) < 3.5:
+                        return q  # touch the drawn line exactly
             run = d
         if run <= step:
             return None
@@ -531,7 +540,10 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             return pts
         n = ((b[1]-a[1]) / chord, -(b[0]-a[0]) / chord)
         devs = [abs((p[0]-a[0]) * n[0] + (p[1]-a[1]) * n[1]) for p in pts]
-        if max(devs) >= max(3.5, 0.02 * chord):
+        # tall spans tolerate more: a long stem crossing two fat junctions
+        # (the d) carries ~10 units of crotch-bridge wobble and is still,
+        # in the letterform, a straight line
+        if max(devs) >= max(3.5, min(12.0, 0.025 * chord)):
             return pts
         arc = _arcs(pts)
         total = arc[-1] or 1.0
@@ -582,6 +594,18 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         land_tail = e == last and (deg[seg[-1]] >= 3 or in_zone(seg[-1]))
         if land_tail and len(keep) > 3:
             keep = keep[:-1]
+            # also shed tail points already riding on an earlier stroke's
+            # line (the b bowl-close curling over its stem) so the landing
+            # walk meets it cleanly instead of looping
+            prior_px = [q for sc in sections if sc.get("pts")
+                        for q in sc["pts"][::2]]
+            while len(keep) > 4:
+                u = to_units(keep[-1])
+                if any(math.hypot(u[0]-lp[0], u[1]-lp[1]) < 10.0
+                       for lp in prior_px):
+                    keep.pop()
+                else:
+                    break
         pts = _fair(smooth_resample(keep, to_units, resample, smooth_win))
         if e != last and is_reversal_cut(e):
             pts = _straight_tail(pts)
@@ -594,7 +618,13 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             if tip:
                 pts = [tip] + pts
         if e == last and (deg[seg[-1]] == 1 or land_tail):
-            tip = tangent_ext(pts, at_start=False)
+            prior = [q for sc in sections if sc.get("pts")
+                     for q in sc["pts"][::2]] if land_tail else None
+            already = prior and any(
+                math.hypot(pts[-1][0]-lp[0], pts[-1][1]-lp[1]) < 4.0
+                for lp in prior)
+            tip = None if already else tangent_ext(pts, at_start=False,
+                                                   land_on=prior)
             if tip:
                 pts = pts + [tip]
         # arc mapping over the *original* pixel run (chord length)
@@ -717,7 +747,10 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             if not all(_inside(p) for p in pts[1:-1]):
                 continue
             dev = _max_dev(pts, replay_pts)
-            if not (dev < 1.6 * resample or dev > corridor):
+            if dev <= corridor:
+                # anything short of a clear corridor departure is drawn as
+                # the exact replay — a subtly bowed sweep splits visibly
+                # from the pass it should coincide with
                 continue
             score = abs(k1 - k2)
             if best is None or score < best[0]:
@@ -930,13 +963,37 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
                 if mid is not None:
                     emit(mid)
                 emit(rest)
-        # excursion at a reversal cut: the pen dips into the wedge and back
-        if kind == "rev" and e in excursion:
-            ex = excursion[e]
-            raw = [path[e]] + list(ex)
-            ex_pts = smooth_resample(raw, to_units, resample, smooth_win)
-            emit(ex_pts)
-            emit(list(reversed(ex_pts)))
+        # cusp dip at a reversal: straight out-and-back along the approach
+        # tangent — the skeleton wedge branch curls sideways (the odd little
+        # detours at the m feet and w valleys), the pen should not
+        if kind == "rev" and e in excursion and len(out) >= 4:
+            # dip along the turn's bisector: straight into the wedge tip for
+            # a stem foot, straight down into a v/w valley point
+            kk = TURN_LOOKAHEAD
+            a0, a1 = max(0, e - kk), min(last, e + kk)
+            di = unit_vec((path[e][0]-path[a0][0], path[e][1]-path[a0][1]))
+            do = unit_vec((path[a1][0]-path[e][0], path[a1][1]-path[e][1]))
+            bis = unit_vec((di[0]-do[0], di[1]-do[1]))
+            # pixel (row, col) -> unit direction (x right, y up)
+            t_dir = unit_vec((bis[1], -bis[0]))
+            tips = []
+            if t_dir != (0.0, 0.0):
+                r_px = int(round((_u00[1] - out[-1][1]) / _sx))
+                c_px = int(round((out[-1][0] - _u00[0]) / _sx))
+                cap = 0.0
+                if 0 <= r_px < mask.shape[0] and 0 <= c_px < mask.shape[1]:
+                    cap = max(3.0, float(radius[r_px, c_px]) * 2.4) * abs(_sx)
+                step = max(1.5, resample * 0.5)
+                dwalk = 0.0
+                while dwalk + step <= cap:
+                    dwalk += step
+                    q = (out[-1][0] + t_dir[0]*dwalk, out[-1][1] + t_dir[1]*dwalk)
+                    if not _inside(q):
+                        break
+                    tips.append(q)
+                tips = tips[:int(len(tips) * 0.85)]
+            emit(tips)
+            emit(list(reversed(tips)))
     return out, midline_reversals
 
 
