@@ -500,13 +500,14 @@ def _terminal(pts, deg, res, pen_px, r_ref, at_start):
 # Explicit terminal repairs, in final font units (applied after the built-x
 # rescale). `_terminal` trims a free end back out of sub-pen-width ink and
 # never re-extends a trimmed end — right for the A/N/M apexes, but the '2'
-# base's long gradual exit taper is swallowed whole by that trim, chopping
-# the numeral's bottom-right ~90 units short of the style's bar length
-# (cf. z/Z/E, whose bottom bars end ~50-65 units right of slope-alignment
-# with the shape above; the trimmed '2' undershot even pure slope-alignment).
-# Each entry re-extends the glyph's *lowest* free stroke end along its own
-# end tangent.
-TERMINAL_EXTEND = {"2": 95.0}
+# base's long gradual exit taper is swallowed whole by that trim (measured on
+# the reference: the trim backs the centerline out 109 units), chopping the
+# numeral's bottom-right. Each entry re-extends the glyph's *lowest* free
+# stroke end along its own end tangent. The 108 was calibrated against the
+# stripped TasBegRegNum '2' silhouette: it zeroes the bar-end mismatch under
+# a best-shift overlay (the guidelines chart shows the same proportion, bar
+# ending 0.176 of the ink width left of the bowl's right extreme).
+TERMINAL_EXTEND = {"2": 108.0}
 
 
 def repair_terminals(strokes, ext):
