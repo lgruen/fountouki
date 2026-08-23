@@ -374,18 +374,71 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
     bounds = sorted({0, last} | {c for c in cuts if 0 < c < last})
     turns_set = set(turns)
 
-    def is_reversal_cut(c):
-        """A cut where the pen genuinely stops and reverses (stem feet, the z
-        corner, v/w vertices) — kept as a hard V. Everything else is a chain
-        handoff and gets stitched smoothly."""
-        return (c in turns_set and deg[path[c]] < 3 and not in_zone(path[c]))
+    def _turn_dot(c):
+        a0, a1 = max(0, c - k), min(last, c + k)
+        d_in = unit_vec((path[c][0]-path[a0][0], path[c][1]-path[a0][1]))
+        d_out = unit_vec((path[a1][0]-path[c][0], path[a1][1]-path[c][1]))
+        return d_in[0]*d_out[0] + d_in[1]*d_out[1]
 
-    def end_ext(idx, back_idx):
-        if deg[path[idx]] != 1:
+    def is_reversal_cut(c):
+        """A cut where the pen genuinely stops and reverses — kept as a hard
+        V. That is any sharp turn away from a junction (stem feet, the z
+        corner, v/w vertices), and, ON a junction, a near-total direction
+        flip into a *retrace* (the a/d/g/q closure tops: up the closing side
+        and straight back down the same ink). A junction turn into fresh ink
+        (b peeling off its stem into the bowl) is a chain handoff however
+        sharp it looks in the raw path, and gets stitched smoothly."""
+        if c not in turns_set:
+            return False
+        if deg[path[c]] < 3 and not in_zone(path[c]):
+            return True
+        # the flip cut may have been deduped into a nearby turn index, so
+        # look a few pixels out on both sides
+        into_retrace = (any(revisit[min(c + j, last)] for j in (2, 4, 6))
+                        and not revisit[max(c - 4, 0)])
+        return into_retrace and _turn_dot(c) < -0.7
+
+    # inverse of to_units (it is affine in (row, col)) for inside-ink checks
+    _u00 = to_units((0.0, 0.0))
+    _sx = to_units((0.0, 1.0))[0] - _u00[0]
+    def _px_of(u):
+        return (int(round((_u00[1] - u[1]) / _sx)),
+                int(round((u[0] - _u00[0]) / _sx)))
+    def _inside(u):
+        r, c = _px_of(u)
+        return 0 <= r < mask.shape[0] and 0 <= c < mask.shape[1] and mask[r, c]
+
+    def tangent_ext(pts, at_start):
+        """Tangential tip extension of a smoothed polyline: continue along
+        its own end tangent to just short of the ink boundary. Replaces the
+        old raw-pixel-direction ray (which kinked against the smoothed
+        curve) and doubles as the tangential landing for a stroke that ends
+        against another stroke's line (b's bowl closing onto its stem)."""
+        if len(pts) < 3:
             return None
-        d = unit_vec((path[idx][0] - path[back_idx][0],
-                      path[idx][1] - path[back_idx][1]))
-        return ray_extend(path[idx], d, mask, radius)
+        # the immediate end segment, so the joint itself cannot kink (a
+        # longer tangent baseline disagrees with it on a curling tip)
+        if at_start:
+            a, b = pts[0], pts[1]
+        else:
+            a, b = pts[-1], pts[-2]
+        t = unit_vec((a[0] - b[0], a[1] - b[1]))
+        if t == (0.0, 0.0):
+            return None
+        r_px, c_px = _px_of(a)
+        if not (0 <= r_px < mask.shape[0] and 0 <= c_px < mask.shape[1]):
+            return None
+        cap = max(3.0, float(radius[r_px, c_px]) * 2.4) * abs(_sx)
+        step = abs(_sx)
+        run, d = 0.0, 0.0
+        while d + step <= cap:
+            d += step
+            if not _inside((a[0] + t[0] * d, a[1] + t[1] * d)):
+                break
+            run = d
+        if run <= step:
+            return None
+        return (a[0] + t[0] * run * 0.85, a[1] + t[1] * run * 0.85)
 
     # --- excursions: only at true reversals (not at branch junctions) ------
     excursion = {}
@@ -394,7 +447,7 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         d_in = unit_vec((path[i][0] - path[i - k][0], path[i][1] - path[i - k][1]))
         d_out = unit_vec((path[i + k][0] - path[i][0], path[i + k][1] - path[i][1]))
         d = unit_vec((d_in[0] - d_out[0], d_in[1] - d_out[1]))
-        if deg[path[i]] >= 3 or in_zone(path[i]):
+        if not is_reversal_cut(i):
             continue  # branch departure, not a pen reversal
         ex = wedge_detour(path[i], d, route_set, sk)
         if (ex is None and deg[path[i]] == 2
@@ -422,12 +475,23 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             sections.append(dict(kind="re", s=s, e=e))
             continue
         seg = [path[i] for i in idxs]
-        # excise crotch-zone interiors; keep the pinned ends
+        # excise crotch-zone interiors; keep the pinned ends — except a
+        # stroke END landing on a junction (b's bowl closing onto its stem):
+        # there the knot pin kinks, so drop it and land tangentially below
         keep = [seg[0]] + [p for p in seg[1:-1] if not in_zone(p)] + [seg[-1]]
-        ext_head = end_ext(0, min(8, last)) if s == 0 else None
-        ext_tail = end_ext(last, max(0, last - 8)) if e == last else None
-        raw = ([ext_head] if ext_head else []) + keep + ([ext_tail] if ext_tail else [])
-        pts = smooth_resample(raw, to_units, resample, smooth_win)
+        land_tail = e == last and (deg[seg[-1]] >= 3 or in_zone(seg[-1]))
+        if land_tail and len(keep) > 3:
+            keep = keep[:-1]
+        pts = smooth_resample(keep, to_units, resample, smooth_win)
+        # tangential tip extensions along the *smoothed* end directions
+        if s == 0 and deg[seg[0]] == 1:
+            tip = tangent_ext(pts, at_start=True)
+            if tip:
+                pts = [tip] + pts
+        if e == last and (deg[seg[-1]] == 1 or land_tail):
+            tip = tangent_ext(pts, at_start=False)
+            if tip:
+                pts = pts + [tip]
         # arc mapping over the *original* pixel run (chord length)
         chord = [0.0]
         for a, b in zip(seg, seg[1:]):
@@ -436,8 +500,7 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         for j, i in enumerate(idxs):
             if not revisit[i]:
                 sec_of[first_seen[path[i]]] = (len(sections), chord[j] / total)
-        sections.append(dict(kind="fresh", pts=pts,
-                             head_ext=bool(ext_head), tail_ext=bool(ext_tail)))
+        sections.append(dict(kind="fresh", pts=pts))
 
     def clip(pts, f0, f1):
         """Sub-polyline of pts between arc fractions f0..f1 (may be reversed)."""
@@ -459,14 +522,6 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         if f0 > f1:
             out.reverse()
         return out
-
-    # inverse of to_units (it is affine in (row, col)) for inside-ink checks
-    _u00 = to_units((0.0, 0.0))
-    _sx = to_units((0.0, 1.0))[0] - _u00[0]
-    def _inside(u):
-        c = int(round((u[0] - _u00[0]) / _sx))
-        r = int(round((_u00[1] - u[1]) / _sx))
-        return 0 <= r < mask.shape[0] and 0 <= c < mask.shape[1] and mask[r, c]
 
     def _arcs(pts):
         arc = [0.0]
@@ -508,7 +563,8 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
                for i in range(k + 1)]
         # radius sign got folded into c; regenerate from actual endpoints
         pts[0], pts[-1] = p0, p1
-        return pts, 1.0 / abs(r)
+        # signed curvature w.r.t. the sampled traversal: left turn positive
+        return pts, sense / abs(r)
 
     def _max_dev(pts, ref):
         """Max distance from samples `pts` to polyline `ref` (vertex metric)."""
@@ -521,13 +577,14 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             worst = max(worst, d)
         return worst
 
-    def blend_into(p0, nxt_pts, replay_pts, corridor):
-        """Sweep from the reversal point `p0` into the polyline `nxt_pts` as a
-        single circular arc that arrives tangentially — constant curvature,
-        so the up-line does not change curvature mid-flight. The join point
-        is chosen where the arc's curvature best matches the branch's own
-        local curvature (so arc + branch read as one continuous arc), among
-        joins whose sweep stays inside the ink.
+    def blend_into(p0, t_launch, nxt_pts, replay_pts, corridor):
+        """Sweep from the reversal point `p0` into the polyline `nxt_pts`,
+        leaving tangentially along `t_launch` (the line the pen just drew —
+        the sweep peels off the stem, it does not break away at an angle)
+        and arriving tangentially on the branch: a biarc, G1 at both ends.
+        The join point is chosen to make the biarc closest to a single arc
+        (min curvature step between its halves), among joins whose sweep
+        stays inside the ink and is not a hard S.
 
         The sweep must also make sense against the literal retrace
         (`replay_pts`): it is kept only when it either hugs that line
@@ -544,29 +601,23 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         for i in range(2, len(nxt_pts) - 2):
             if arc[i] < 3 * resample:
                 continue
-            if arc[i] > 0.55 * total:
+            if arc[i] > 0.6 * total:
                 break
             p1 = nxt_pts[i]
             t1 = unit_vec((nxt_pts[i+1][0] - nxt_pts[i-1][0],
                            nxt_pts[i+1][1] - nxt_pts[i-1][1]))
-            got = _circ_arc(p0, p1, t1)
+            got = _biarc(p0, t_launch, p1, t1)
             if got is None:
                 continue
-            pts, kappa = got
+            pts, k1, k2 = got
+            if _kinky_s(k1, k2):
+                continue
             if not all(_inside(p) for p in pts[1:-1]):
                 continue
             dev = _max_dev(pts, replay_pts)
             if not (dev < 1.6 * resample or dev > corridor):
                 continue
-            # branch curvature at the join, from the circumcircle of a
-            # local point triple
-            a, b, cc = nxt_pts[i-2], nxt_pts[i], nxt_pts[i+2]
-            ab = math.hypot(b[0]-a[0], b[1]-a[1])
-            bc = math.hypot(cc[0]-b[0], cc[1]-b[1])
-            ca = math.hypot(a[0]-cc[0], a[1]-cc[1])
-            area2 = abs((b[0]-a[0])*(cc[1]-a[1]) - (b[1]-a[1])*(cc[0]-a[0]))
-            k_branch = (2.0 * area2 / (ab * bc * ca)) if area2 > 1e-9 else 0.0
-            score = abs(kappa - k_branch)
+            score = abs(k1 - k2)
             if best is None or score < best[0]:
                 best = (score, pts, arc[i] / total)
         if best is None:
@@ -597,7 +648,8 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
 
     def _biarc(p0, t0, p1, t1):
         """G1 pair of circular arcs from (p0, t0) to (p1, t1) — the classic
-        equal-tangent-length construction. Returns samples or None."""
+        equal-tangent-length construction. Returns (samples, k1, k2) with the
+        two signed curvatures along the traversal, or None."""
         A = (p1[0]-p0[0], p1[1]-p0[1])
         u = (t0[0]+t1[0], t0[1]+t1[1])
         qa = u[0]*u[0] + u[1]*u[1] - 4.0
@@ -626,20 +678,34 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         if g1 is None or g2 is None:
             return None
         first = list(reversed(g1[0]))
-        return first + g2[0][1:]
+        # g1 was sampled jn->p0; traversing it reversed flips its sign
+        return first + g2[0][1:], -g1[1], g2[1]
+
+    def _kinky_s(k1, k2):
+        """An S-shaped biarc (curvature sign flip) is fine when one half is
+        near-straight (a lane-change merge), ugly when both halves bend
+        hard — that reads as a wobble, not a join."""
+        return k1 * k2 < 0 and min(abs(k1), abs(k2)) > 1.0 / 220.0
 
     def stitch(tail_pts, head_pts, r_junction):
-        """Join two chain geometries around a junction with a trimmed biarc;
-        fall back to plain concatenation when no inside-ink biarc exists."""
-        base = max(1.6 * r_junction, 3.0 * resample)
-        for f in (1.0, 0.7, 0.5, 0.3, 0.15):
+        """Join two chain geometries with a trimmed biarc, G1 at both ends.
+        These handoffs are tangential *merges* (a bowl flowing onto its stem,
+        a descent flowing into its exit), not corners to fillet — so the
+        trims are letter-proportional (a fifth of the x-height and up, not a
+        crotch-radius nick) and shrink only until the biarc fits the ink.
+        Falls back to plain concatenation when nothing fits."""
+        base = max(2.8 * r_junction, 17.0 * resample)
+        for f in (1.0, 0.7, 0.5, 0.35, 0.22, 0.12):
             t = base * f
             trimmed, p0, t0 = _trim_tail(tail_pts, t)
             rest, p1, t1 = _trim_head(head_pts, t)
             if t0 == (0.0, 0.0) or t1 == (0.0, 0.0):
                 continue
-            mid = _biarc(p0, t0, p1, t1)
-            if mid is None:
+            got = _biarc(p0, t0, p1, t1)
+            if got is None:
+                continue
+            mid, k1, k2 = got
+            if _kinky_s(k1, k2):
                 continue
             if all(_inside(p) for p in mid[1:-1]):
                 return trimmed, mid, rest
@@ -687,9 +753,18 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             prev_end = (runs[-1][0][-1] if runs and runs[-1][0]
                         else (replay[0] if replay else None))
             if (nxt and nxt["kind"] == "fresh" and len(nxt["pts"]) >= 4
-                    and prev_end is not None):
-                corridor = 2.2 * float(radius[path[s]]) * _sx
-                res = blend_into(prev_end, nxt["pts"], replay, corridor)
+                    and prev_end is not None and len(replay) >= 3):
+                # a genuine sweep must clear the retraced stroke by well
+                # over its own width — measured over the whole retrace, not
+                # one (possibly crotch-fattened) pixel
+                med_r = float(np.median([radius[path[i]]
+                                         for i in range(s, e + 1)]))
+                corridor = 3.2 * med_r * abs(_sx)
+                t_launch = unit_vec((replay[2][0] - replay[0][0],
+                                     replay[2][1] - replay[0][1]))
+                res = (blend_into(prev_end, t_launch, nxt["pts"], replay,
+                                  corridor)
+                       if t_launch != (0.0, 0.0) else None)
                 if res:
                     pts = res[0]
                     skip_frac[si + 1] = res[1]

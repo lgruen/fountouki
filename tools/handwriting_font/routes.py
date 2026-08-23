@@ -164,6 +164,13 @@ EXPECTED_REVERSALS = {
     # crotch zone, which the chain-structured emitter treats as a branch
     # departure, not a pen reversal — only the stem foot counts now.
     "k": 1,  # (0.05,0.03) stem foot
+    # Anticlockwise family: the closure-top cusp — the pen closes the bowl,
+    # touches the top of the closing side and runs straight back down the
+    # same ink. On d and q that cusp sits on plain degree-2 ink, so it
+    # registers here; on a and g the same cusp lands on the junction knot
+    # (degree >= 3) and is not counted.
+    "d": 1,  # (0.63,0.51) closure top
+    "q": 1,  # (0.92,0.90) closure top
     # Wave family: u rises to x-height on the right and comes straight back
     # down the same ink — the one reversal the chart draws as two arrows.
     "u": 1,  # (0.95,0.96) top right
