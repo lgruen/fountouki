@@ -464,6 +464,106 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             if ray:
                 excursion[i] = [ray]
 
+    def _fair(pts, win=9):
+        """Tangent-angle fairing of one chain's geometry: nothing in these
+        letterforms changes its curvature sign mid-chain (only the s, whose
+        inflection is far broader than the window and survives), so smooth
+        the tangent angle — this irons out the low-amplitude curvature
+        flicker that skeleton noise and excision bridges leave behind,
+        without moving the line more than a couple of units. Faired BEFORE
+        retraces copy the chain, so both passes stay identical. Sharp steps
+        (the z corners live inside sections) are pinned; a stretch that
+        would leave the ink keeps its original geometry."""
+        if len(pts) < win + 2:
+            return pts
+        P = np.asarray(pts, dtype=float)
+        segs = np.diff(P, axis=0)
+        L = np.hypot(segs[:, 0], segs[:, 1])
+        keep = L > 1e-9
+        # hard vertices: direction change over one step sharper than ~35 deg
+        dots = np.full(len(segs) - 1, 1.0)
+        for i in range(len(segs) - 1):
+            if keep[i] and keep[i + 1]:
+                dots[i] = (segs[i] @ segs[i + 1]) / (L[i] * L[i + 1])
+        corners = [0] + [i + 1 for i in np.where(dots < math.cos(math.radians(35)))[0]] \
+                  + [len(P) - 1]
+        corners = sorted(set(corners))
+        out_pts = list(pts)
+        for a, b in zip(corners, corners[1:]):
+            if b - a < win + 2:
+                continue
+            theta = np.unwrap(np.arctan2(segs[a:b, 1], segs[a:b, 0]))
+            pad = win // 2
+            padded = np.concatenate([np.repeat(theta[:1], pad), theta,
+                                     np.repeat(theta[-1:], pad)])
+            sm = np.convolve(padded, np.ones(win) / win, mode="valid")
+            # rebuild with original segment lengths, then close the endpoint
+            # gap by distributing it along arc length
+            piece = [P[a]]
+            for th, ln in zip(sm, L[a:b]):
+                piece.append((piece[-1][0] + math.cos(th) * ln,
+                              piece[-1][1] + math.sin(th) * ln))
+            err = (P[b][0] - piece[-1][0], P[b][1] - piece[-1][1])
+            arcs = np.concatenate([[0.0], np.cumsum(L[a:b])])
+            total = arcs[-1] or 1.0
+            faired = [(p[0] + err[0] * s / total, p[1] + err[1] * s / total)
+                      for p, s in zip(piece, arcs)]
+            if all(_inside(p) for p in faired[1:-1]):
+                out_pts[a:b + 1] = faired
+        return out_pts
+
+    def _arcs(pts):
+        arc = [0.0]
+        for a, b in zip(pts, pts[1:]):
+            arc.append(arc[-1] + math.hypot(b[0]-a[0], b[1]-a[1]))
+        return arc
+
+    def _straighten(pts):
+        """A chain that is nearly straight IS straight in this letterform
+        (the v/w arms, the z limbs, every stem): the couple of units of
+        skeleton wobble that survive smoothing read as a bent ruler line, so
+        snap the section onto its own chord."""
+        if len(pts) < 4:
+            return pts
+        a, b = pts[0], pts[-1]
+        chord = math.hypot(b[0]-a[0], b[1]-a[1])
+        if chord < 4 * resample:
+            return pts
+        n = ((b[1]-a[1]) / chord, -(b[0]-a[0]) / chord)
+        devs = [abs((p[0]-a[0]) * n[0] + (p[1]-a[1]) * n[1]) for p in pts]
+        if max(devs) >= max(3.5, 0.02 * chord):
+            return pts
+        arc = _arcs(pts)
+        total = arc[-1] or 1.0
+        return [(a[0] + (b[0]-a[0]) * t / total, a[1] + (b[1]-a[1]) * t / total)
+                for t in arc]
+
+    def _straight_tail(pts, n_tail=7, n_base=5):
+        """Straighten a section's last ~35 units where it runs into a
+        reversal cusp: the medial axis of the tip's taper (or of a v/w
+        mitre) bends spuriously, like a crotch zone — which painted a flare
+        on the u riser, the a/g/q closure tops and the v/w arms. Projected
+        onto the approach tangent; kept only if it stays in the ink.
+        Replays copy the source, so both passes inherit the same line."""
+        if len(pts) < n_tail + n_base + 4:
+            return pts
+        b0 = pts[-(n_tail + n_base)]
+        b1 = pts[-n_tail]
+        t = unit_vec((b1[0]-b0[0], b1[1]-b0[1]))
+        if t == (0.0, 0.0):
+            return pts
+        arc = _arcs(pts[-n_tail:])
+        tail = [(b1[0] + t[0]*d, b1[1] + t[1]*d) for d in arc[1:]]
+        if not all(_inside(p) for p in tail):
+            return pts
+        return pts[:-n_tail + 1] + tail if n_tail > 1 else pts
+
+    def _straight_head(pts, n_head=7, n_base=5):
+        """Mirror of `_straight_tail` for a section that *leaves* a reversal
+        cusp (the second v/w arm, the descent side of a hard corner)."""
+        rev = _straight_tail(list(reversed(pts)), n_head, n_base)
+        return list(reversed(rev))
+
     # --- per-section geometry ----------------------------------------------
     # fresh sections: smoothed once; retraced sections: replay the source.
     sec_of = {}          # path index of a fresh pixel -> (section idx, arc frac)
@@ -482,7 +582,12 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         land_tail = e == last and (deg[seg[-1]] >= 3 or in_zone(seg[-1]))
         if land_tail and len(keep) > 3:
             keep = keep[:-1]
-        pts = smooth_resample(keep, to_units, resample, smooth_win)
+        pts = _fair(smooth_resample(keep, to_units, resample, smooth_win))
+        if e != last and is_reversal_cut(e):
+            pts = _straight_tail(pts)
+        if s != 0 and is_reversal_cut(s):
+            pts = _straight_head(pts)
+        pts = _straighten(pts)
         # tangential tip extensions along the *smoothed* end directions
         if s == 0 and deg[seg[0]] == 1:
             tip = tangent_ext(pts, at_start=True)
@@ -522,12 +627,6 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         if f0 > f1:
             out.reverse()
         return out
-
-    def _arcs(pts):
-        arc = [0.0]
-        for a, b in zip(pts, pts[1:]):
-            arc.append(arc[-1] + math.hypot(b[0]-a[0], b[1]-a[1]))
-        return arc
 
     def _circ_arc(p0, p1, t1):
         """The unique constant-curvature path from `p0` to `p1` arriving
@@ -610,7 +709,10 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             if got is None:
                 continue
             pts, k1, k2 = got
-            if _kinky_s(k1, k2):
+            # the whole sweep must curve the way the branch it joins curves
+            # (or be flat): a wrong-sign half is a visible S-flick at launch
+            kb = _local_sign(nxt_pts, i)
+            if not (_sign_ok(k1, kb) and _sign_ok(k2, kb)):
                 continue
             if not all(_inside(p) for p in pts[1:-1]):
                 continue
@@ -682,10 +784,32 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         return first + g2[0][1:], -g1[1], g2[1]
 
     def _kinky_s(k1, k2):
-        """An S-shaped biarc (curvature sign flip) is fine when one half is
-        near-straight (a lane-change merge), ugly when both halves bend
-        hard — that reads as a wobble, not a join."""
-        return k1 * k2 < 0 and min(abs(k1), abs(k2)) > 1.0 / 220.0
+        """Nothing in these letterforms inflects at a join (only the s has a
+        real inflection, and it is inside one chain) — so a biarc whose
+        halves curve in opposite directions is rejected unless one half is
+        essentially straight (its sag over a whole join is under a unit)."""
+        return k1 * k2 < 0 and min(abs(k1), abs(k2)) > 1.0 / 1200.0
+
+    FLAT_K = 1.0 / 1200.0
+
+    def _sign_ok(k, k_ref):
+        """A transition arc's curvature is acceptable when it is essentially
+        flat, its reference is flat, or the two curve the same way."""
+        return abs(k) < FLAT_K or abs(k_ref) < FLAT_K or k * k_ref > 0
+
+    def _local_sign(pts, i, w=4):
+        """Signed curvature of a polyline around vertex i (circumcircle of a
+        spread triple)."""
+        a = pts[max(0, i - w)]
+        b = pts[i]
+        c = pts[min(len(pts) - 1, i + w)]
+        ab = math.hypot(b[0]-a[0], b[1]-a[1])
+        bc = math.hypot(c[0]-b[0], c[1]-b[1])
+        ca = math.hypot(a[0]-c[0], a[1]-c[1])
+        if ab * bc * ca < 1e-9:
+            return 0.0
+        cross = (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+        return 2.0 * cross / (ab * bc * ca)
 
     def stitch(tail_pts, head_pts, r_junction):
         """Join two chain geometries with a trimmed biarc, G1 at both ends.
@@ -695,20 +819,31 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
         crotch-radius nick) and shrink only until the biarc fits the ink.
         Falls back to plain concatenation when nothing fits."""
         base = max(2.8 * r_junction, 17.0 * resample)
-        for f in (1.0, 0.7, 0.5, 0.35, 0.22, 0.12):
-            t = base * f
-            trimmed, p0, t0 = _trim_tail(tail_pts, t)
-            rest, p1, t1 = _trim_head(head_pts, t)
-            if t0 == (0.0, 0.0) or t1 == (0.0, 0.0):
-                continue
-            got = _biarc(p0, t0, p1, t1)
-            if got is None:
-                continue
-            mid, k1, k2 = got
-            if _kinky_s(k1, k2):
-                continue
-            if all(_inside(p) for p in mid[1:-1]):
-                return trimmed, mid, rest
+        ladder = (1.0, 0.7, 0.5, 0.35, 0.22, 0.12)
+        # asymmetric trim pairs: a laterally-offset pair of chains often has
+        # no inflection-free biarc at symmetric trims, but does once the
+        # curving side is trimmed further back (its tangent rotates); search
+        # widest-first so the join stays a long merge
+        for ft in ladder:
+            for fh in ladder:
+                trimmed, p0, t0 = _trim_tail(tail_pts, base * ft)
+                rest, p1, t1 = _trim_head(head_pts, base * fh)
+                if t0 == (0.0, 0.0) or t1 == (0.0, 0.0):
+                    continue
+                got = _biarc(p0, t0, p1, t1)
+                if got is None:
+                    continue
+                mid, k1, k2 = got
+                if _kinky_s(k1, k2):
+                    continue
+                # each half must curve like the chain it continues (or be
+                # flat) — a wrong-sign half is a visible S-wobble
+                ka = _local_sign(trimmed, len(trimmed) - 1)
+                kb = _local_sign(rest, 0)
+                if not (_sign_ok(k1, ka) and _sign_ok(k2, kb)):
+                    continue
+                if all(_inside(p) for p in mid[1:-1]):
+                    return trimmed, mid, rest
         return tail_pts, None, head_pts
 
     def replay_of(sec):
@@ -771,6 +906,7 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
                     joined = True
         kind = "end" if e == last else ("rev" if is_reversal_cut(e) else "smooth")
         runs.append([pts, kind, joined, e])
+
 
     out = []
     def emit(pts):
