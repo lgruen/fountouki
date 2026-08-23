@@ -95,6 +95,14 @@ Per glyph, `build.py`:
    centerline; dots keep their measured radius.
 8. **Stroke-expand**: shapely `buffer` per centerline — round caps, mitred
    joins — unioned per glyph.
+   For `a`–`z` this expansion happens **twice**: the extraction centerlines
+   carry medial-axis junction artifacts, so their buffer union grows small
+   blobs at every join. That stage-1 font is only the routing scaffold — the
+   tracing emitter (below) traces it, and stage 2 rebuilds each traced
+   letter's outline as the pen extrusion of its *traced strokes*, clipped to
+   the stage-1 silhouette (keeps the calibrated caps/terminals, and nothing
+   can poke past the reference-gated ink). The shipped glyph ink and the
+   tracing-game template are therefore the same drawing.
 9. **Outline fit**: split each ring at its corners (tangents measured over an
    arc-length window well under the pen radius, or the round caps read as
    corners), least-squares cubic Béziers (Schneider), then `cu2qu` → `glyf`.
