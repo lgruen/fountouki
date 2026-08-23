@@ -83,6 +83,10 @@ Per glyph, `build.py`:
    own width (a skeleton keeps going into a taper, and a round pen laid there
    paints a stub), otherwise push it out so the round cap lands on the reference
    ink boundary — a skeleton stops about one pen radius short of a stroke end.
+   A trimmed end is never re-extended (that guard keeps the A/N/M apexes
+   blunt instead of stubby), so a long gradual exit taper is swallowed whole;
+   the known casualty — the `2` base bar — is re-extended explicitly via
+   `TERMINAL_EXTEND`, in final font units along the end tangent.
 5. **Smooth** (boxcar) and resample at a fixed arc-length step.
 6. **Normalize** to upem 1000 with a single scale `k`, pinned so the *built*
    `x` has an ink top of exactly 400. (Stroke expansion is a Minkowski sum, so

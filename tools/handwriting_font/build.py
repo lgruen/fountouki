@@ -467,10 +467,12 @@ def _terminal(pts, deg, res, pen_px, r_ref, at_start):
     going after the ink has become thinner than the stroke, and a round pen
     laid on that part paints a fat stub sticking out of the letter.
 
-    *Extend* what is left along the ink: a skeleton stops about one pen radius
-    short of a stroke end, so push the tip out until the round cap lands on the
-    reference ink boundary. For a tapered terminal the two steps cancel and the
-    tip ends up where it started; at an apex only the trim applies."""
+    *Extend* what is left along the ink — but only when nothing was trimmed: a
+    skeleton stops about one pen radius short of a stroke end, so push the tip
+    out until the round cap lands on the reference ink boundary. A trimmed end
+    is deliberately never re-extended (see the comment below), which keeps the
+    A/N/M apexes from growing stubs but also swallows a long gradual exit
+    taper whole — a casualty gets an explicit TERMINAL_EXTEND repair instead."""
     seq = list(pts) if at_start else list(pts)[::-1]
     p = seq[0]
     if not (isinstance(p[0], (int, np.integer)) and deg[p] == 1):
@@ -493,6 +495,32 @@ def _terminal(pts, deg, res, pen_px, r_ref, at_start):
         if ext > 0.5:
             seq = [(p[0] + d[0] * ext, p[1] + d[1] * ext)] + seq
     return seq if at_start else seq[::-1]
+
+
+# Explicit terminal repairs, in final font units (applied after the built-x
+# rescale). `_terminal` trims a free end back out of sub-pen-width ink and
+# never re-extends a trimmed end — right for the A/N/M apexes, but the '2'
+# base's long gradual exit taper is swallowed whole by that trim, chopping
+# the numeral's bottom-right ~90 units short of the style's bar length
+# (cf. z/Z/E, whose bottom bars end ~50-65 units right of slope-alignment
+# with the shape above; the trimmed '2' undershot even pure slope-alignment).
+# Each entry re-extends the glyph's *lowest* free stroke end along its own
+# end tangent.
+TERMINAL_EXTEND = {"2": 95.0}
+
+
+def repair_terminals(strokes, ext):
+    """Extend the lowest stroke end (start or tip) of one glyph by `ext` units
+    along the local end direction. `strokes` is mutated in place."""
+    ends = [(s[i][1], si, i) for si, s in enumerate(strokes) if len(s) >= 2
+            for i in (0, -1)]
+    _y, si, i = min(ends)
+    s = strokes[si]
+    a = s[i]
+    b = s[min(8, len(s) - 1)] if i == 0 else s[max(-9, -len(s))]
+    d = trace.unit_vec((a[0] - b[0], a[1] - b[1]))
+    p = (a[0] + d[0] * ext, a[1] + d[1] * ext)
+    s.insert(0, p) if i == 0 else s.append(p)
 
 
 # ---------------------------------------------------------------------------
@@ -1058,6 +1086,10 @@ def main():
     dots = {ch: [((p[0] * c, p[1] * c), r * c) for p, r in v]
             for ch, v in dots.items()}
     log(f"  built-x correction {c:.5f} -> k = {k:.6f}, pen {pen:.2f}")
+
+    for ch, ext in TERMINAL_EXTEND.items():
+        repair_terminals(strokes[ch], ext)
+        log(f"  terminal repair {ch!r}: +{ext:.0f} units")
 
     # slope from the 'l' stem
     slope = measure_slope(strokes["l"])
