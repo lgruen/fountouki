@@ -499,15 +499,20 @@ def _terminal(pts, deg, res, pen_px, r_ref, at_start):
 
 # Explicit terminal repairs, in final font units (applied after the built-x
 # rescale). `_terminal` trims a free end back out of sub-pen-width ink and
-# never re-extends a trimmed end — right for the A/N/M apexes, but the '2'
-# base's long gradual exit taper is swallowed whole by that trim (measured on
-# the reference: the trim backs the centerline out 109 units), chopping the
-# numeral's bottom-right. Each entry re-extends the glyph's *lowest* free
-# stroke end along its own end tangent. The 108 was calibrated against the
-# stripped TasBegRegNum '2' silhouette: it zeroes the bar-end mismatch under
-# a best-shift overlay (the guidelines chart shows the same proportion, bar
-# ending 0.176 of the ink width left of the bowl's right extreme).
-TERMINAL_EXTEND = {"2": 108.0}
+# never re-extends a trimmed end — right for the A/N/M apexes, but a long
+# gradual exit taper is swallowed whole by that trim (the '2' base lost 109
+# units of centerline). Each entry re-extends the glyph's *lowest* free
+# stroke end along its own end tangent, calibrated against the reference:
+# walk a corridor (half-width = the stroke's own half-width) along the end
+# direction to the taper ink's farthest extent, land the cap edge there
+# (extent - pen/2). On the '2' this matches the best-shift silhouette
+# overlay's zero-mismatch point exactly. An audit of every free end found
+# these five; the other ~80 trims are apexes / angled cuts within a few
+# units (A/M/V apexes and the ',' tail must stay blunt — re-extending them
+# regrows the stubs the trim exists to prevent). The coverage assert at the
+# end of the build is the regression guard.
+TERMINAL_EXTEND = {"2": 108.0, "d": 50.0, "e": 36.0, "l": 27.0, "q": 26.0,
+                   "c": 7.0}
 
 
 def repair_terminals(strokes, ext):
@@ -911,7 +916,7 @@ def emit_traces(out_path, ttf_path, fingerprint, pen_width):
         rows_a, _ = np.where(mask)
         extremes[ch] = (to_units((rows_a.max(), 0))[1], to_units((rows_a.min(), 0))[1])
 
-        strokes, reversals = [], 0
+        strokes, raw_paths, reversals = [], [], 0
         for spec in routes.ROUTES[ch]:
             if spec == "dot":
                 if not dots:
@@ -929,12 +934,12 @@ def emit_traces(out_path, ttf_path, fingerprint, pen_width):
             pts, rev = trace.process_stroke(path, big, radius, sk, to_units,
                                             smooth_win, resample)
             strokes.append(pts)
+            raw_paths.append(path)
             reversals += rev
         if reversals != routes.EXPECTED_REVERSALS.get(ch, 0):
             warnings.append(f"{ch}: {reversals} mid-line reversals "
                             f"(expected {routes.EXPECTED_REVERSALS.get(ch, 0)})")
-        covers[ch] = route_cover(sk, strokes, routes.ROUTES[ch], left, top,
-                                 px2u, resample)
+        covers[ch] = route_cover(sk, raw_paths, resample / px2u)
         outside = points_outside_ink(strokes, mask, left, top, px2u)
         if outside:
             warnings.append(f"{ch}: {outside} baked point(s) outside the ink")
@@ -968,19 +973,19 @@ def points_outside_ink(strokes, mask, left, top, px2u):
     return n
 
 
-def route_cover(sk, strokes, specs, left, top, px2u, resample):
-    """Fraction of the glyph's skeleton pixels the routed pen passes over.
-    Below ~0.95 means the route skipped part of the letter (a branch never
-    visited, a loop cut short)."""
-    route_px = [(top - uy / px2u - 0.5, ux / px2u - left - 0.5)
-                for spec, st in zip(specs, strokes) if spec != "dot"
-                for ux, uy in st]
+def route_cover(sk, raw_paths, resample_px):
+    """Fraction of the glyph's skeleton pixels the *routed pixel path* passes
+    over. Below ~0.95 means the route skipped part of the letter (a branch
+    never visited, a loop cut short). Measured on the raw route, not the
+    emitted geometry: the retrace-into-branch blend deliberately sweeps off
+    the skeleton, but the route itself must still have visited everything."""
+    route_px = [p for path in raw_paths for p in path]
     skp = np.argwhere(sk)
     if not route_px or not len(skp):
         return 0.0
-    rp = np.array(route_px)
+    rp = np.array(route_px, dtype=float)
     d2 = ((skp[:, None, :] - rp[None, :, :]) ** 2).sum(-1).min(1)
-    return float((d2 < (resample / px2u * 1.5) ** 2).mean())
+    return float((d2 < (resample_px * 1.5) ** 2).mean())
 
 
 # ---------------------------------------------------------------------------
@@ -1217,6 +1222,35 @@ def main():
         assert m.any(), f"{ch!r} renders blank"
         assert adv > 0, f"{ch!r} zero advance"
     log("  round-trip + freetype render OK")
+
+    # Built-vs-reference silhouette gate: every glyph with a reference must
+    # match its silhouette to within ~a pen radius. This is what catches a
+    # swallowed terminal (the truncated '2' scored 0.959 here) or any future
+    # trim/fit regression; `!?` are authored and have no reference.
+    val_ppem = 256
+    # the reference upem is 3000 and its letters sit at a different fraction
+    # of the em than ours — render it at a k-scaled ppem so px/unit matches
+    ref_ppem = int(round(val_ppem * upem_ref * k / UPEM))
+    f_built = trace.load_face(args.out, val_ppem)
+    f_ref = {"regular": trace.load_face(ref["regular"], ref_ppem),
+             "regnum": trace.load_face(stripped, ref_ppem),
+             "bold": trace.load_face(ref["bold"], ref_ppem)}
+    tol = val_ppem * 0.02
+    built_cov = {}
+    for ch in LOWER + UPPER + DIGITS + PUNCT:
+        _iou, built_cov[ch] = silhouette_match(
+            trace.render(f_ref[src[ch]], ch)[0],
+            trace.render(f_built, ch)[0], tol)
+    worst = min(built_cov, key=built_cov.get)
+    log(f"  built vs reference: coverage min {built_cov[worst]:.4f} "
+        f"({worst!r}) mean {np.mean(list(built_cov.values())):.4f}")
+    for ch, cov in built_cov.items():
+        # ',' tapers to a point sharper than the pen (like the A apex, a
+        # known limitation) and legitimately sits at ~0.95.
+        floor = 0.94 if ch == "," else 0.97
+        assert cov >= floor, (
+            f"built {ch!r} drifted from the reference silhouette "
+            f"({cov:.3f} < {floor}) — check its terminals/fit")
 
     m = dict(x_height=x_height, cap=cap_built, ascender=ascender,
              descender=descender, pen=pen, slope=slope)

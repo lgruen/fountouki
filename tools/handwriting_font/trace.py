@@ -282,32 +282,120 @@ def wedge_detour(t, d, route_set, sk):
 
 
 def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
-    """Split the routed path at sharp turns, send each turn down its retrace
-    wedge (the unvisited skeleton branch + a raycast to the ink boundary),
-    extend the route ends to the ink boundary, and smooth each piece with its
-    ends pinned — so reversals stay sharp and reach the bottom of their wedge
-    instead of being rounded off early. Also returns the count of mid-line
-    reversals (~180 deg turns on a degree-2 pixel with no wedge beyond), for
-    the EXPECTED_REVERSALS overshoot check."""
+    """Chain-structured pen geometry for one routed stroke.
+
+    The old approach smoothed pieces bounded only by sharp turns, so a
+    retrace's return pass was smoothed independently of its outgoing pass
+    (they diverged into a visible bulge), the boxcar smeared an arch's
+    curvature into the straight stem it joins, and turn ray-casts fired at
+    branch junctions where nothing reverses (a poke past the letter edge).
+    Redesign, from the letterform's structure:
+
+    - Cut the path at sharp turns / mitred vertices AND wherever its
+      retrace status flips (the branch-departure points of m/n/h/a/d/...).
+    - A retraced section that leads into a new branch (the m/n/h arches, the
+      b/p/k bowls and loops) is not drawn as a literal retrace: nobody
+      writes an m by re-inking the stem and turning ~90 deg at the junction.
+      The pen instead sweeps a single circular arc — constant curvature, no
+      mid-flight curvature change — from the reversal point into the
+      branch, joining where the branch's own curvature best matches the
+      arc's (so sweep + branch read as one arc). The sweep is kept only
+      when it stays inside the ink AND either hugs the literal retrace
+      (~straight, y's descent) or clearly leaves the stroke's corridor
+      (m's crotch); an in-between bow falls back to the exact replay of
+      the pass it retraces — those two passes cannot diverge.
+    - Every other chain handoff (a bowl closing onto a stem in a/d/g/q/u, a
+      replayed descent meeting its exit flick, a junction the path bends
+      through) is stitched with a trimmed biarc: two circular arcs, tangent
+      continuous at both ends, sized to the crotch and checked inside the
+      ink — no ledges, no hard elbows.
+    - Within a junction's crotch (nearer a degree>=3 skeleton pixel than
+      ~its local ink half-width) the medial axis is a crotch artifact, not
+      the stroke's centerline — those pixels are excised and the section
+      bridges straight across, so a downstroke stays straight through the
+      junction and curvature changes only at the branch point.
+    - Wedge excursions + ray extensions fire only at true reversals (the
+      turn pixel is not a junction), and the return leg mirrors the
+      outgoing leg exactly.
+
+    Returns (points, midline_reversal_count) as before."""
     k = TURN_LOOKAHEAD
     deg = degree_map(sk)
-    turns = turns_and_vertices(path)
     route_set = set(path)
     last = len(path) - 1
+
+    # --- junction crotch zones ---------------------------------------------
+    junctions = [p for p in route_set if deg[p] >= 3]
+    def in_zone(p):
+        if not junctions:
+            return False
+        r = 1.2 * float(radius[p]) + 1.0
+        return any((p[0]-j[0])**2 + (p[1]-j[1])**2 <= r*r for j in junctions)
+
+    # --- retrace status + structural cuts ----------------------------------
+    first_seen = {}
+    revisit = []
+    for i, p in enumerate(path):
+        revisit.append(p in first_seen)
+        if p not in first_seen:
+            first_seen[p] = i
+    turns = turns_and_vertices(path)
+    flips = set()
+    for i in range(1, last + 1):
+        if revisit[i] != revisit[i - 1]:
+            # cut on the retraced side of the flip (the junction pixel)
+            flips.add(i - 1 if revisit[i - 1] else i)
+    cuts = list(turns)
+    for c in sorted(flips):
+        if all(abs(c - p) > 3 for p in cuts):
+            cuts.append(c)
+    # junction pass-throughs that bend (a bowl closing onto a stem): a
+    # straight pass (m's stem) stays uncut, a bending one gets a cut so the
+    # stitching pass below can round it with a biarc instead of the straight
+    # excision bridge leaving a ledge
+    bend_cos = math.cos(math.radians(18.0))
+    i = 1
+    while i < last:
+        if deg[path[i]] >= 3:
+            j = i
+            while j + 1 < last and deg[path[j + 1]] >= 3:
+                j += 1
+            c = (i + j) // 2
+            a0, a1 = max(0, c - 6), min(last, c + 6)
+            d_in = unit_vec((path[c][0]-path[a0][0], path[c][1]-path[a0][1]))
+            d_out = unit_vec((path[a1][0]-path[c][0], path[a1][1]-path[c][1]))
+            if (d_in != (0.0, 0.0) and d_out != (0.0, 0.0)
+                    and d_in[0]*d_out[0] + d_in[1]*d_out[1] < bend_cos
+                    and all(abs(c - p) > 3 for p in cuts)):
+                cuts.append(c)
+            i = j + 1
+        else:
+            i += 1
+    bounds = sorted({0, last} | {c for c in cuts if 0 < c < last})
+    turns_set = set(turns)
+
+    def is_reversal_cut(c):
+        """A cut where the pen genuinely stops and reverses (stem feet, the z
+        corner, v/w vertices) — kept as a hard V. Everything else is a chain
+        handoff and gets stitched smoothly."""
+        return (c in turns_set and deg[path[c]] < 3 and not in_zone(path[c]))
 
     def end_ext(idx, back_idx):
         if deg[path[idx]] != 1:
             return None
-        d = unit_vec((path[idx][0] - path[back_idx][0], path[idx][1] - path[back_idx][1]))
+        d = unit_vec((path[idx][0] - path[back_idx][0],
+                      path[idx][1] - path[back_idx][1]))
         return ray_extend(path[idx], d, mask, radius)
 
-    # Per-turn excursion: into-the-wedge points the pen visits and backtracks.
+    # --- excursions: only at true reversals (not at branch junctions) ------
     excursion = {}
     midline_reversals = 0
     for i in turns:
         d_in = unit_vec((path[i][0] - path[i - k][0], path[i][1] - path[i - k][1]))
         d_out = unit_vec((path[i + k][0] - path[i][0], path[i + k][1] - path[i][1]))
         d = unit_vec((d_in[0] - d_out[0], d_in[1] - d_out[1]))
+        if deg[path[i]] >= 3 or in_zone(path[i]):
+            continue  # branch departure, not a pen reversal
         ex = wedge_detour(path[i], d, route_set, sk)
         if (ex is None and deg[path[i]] == 2
                 and d_in[0] * d_out[0] + d_in[1] * d_out[1] < -0.86):
@@ -323,28 +411,321 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             if ray:
                 excursion[i] = [ray]
 
-    bounds = [0] + turns + [last]
-    pieces = []
+    # --- per-section geometry ----------------------------------------------
+    # fresh sections: smoothed once; retraced sections: replay the source.
+    sec_of = {}          # path index of a fresh pixel -> (section idx, arc frac)
+    sections = []        # per section: dict(kind, pts) — pts in font units
     for s, e in zip(bounds, bounds[1:]):
-        seg = list(path[s:e + 1])
-        if s == 0:
-            r = end_ext(0, min(8, last))
-            if r:
-                seg = [r] + seg
-        if e == last:
-            r = end_ext(last, max(0, last - 8))
-            if r:
-                seg = seg + [r]
-        pieces.append(seg)
-        if e != last and e in excursion:
-            ex = excursion[e]
-            pieces.append([path[e]] + ex)
-            pieces.append(list(reversed(ex)) + [path[e]])
+        idxs = list(range(s, e + 1))
+        n_re = sum(1 for i in idxs if revisit[i])
+        if n_re > len(idxs) * 0.6:
+            sections.append(dict(kind="re", s=s, e=e))
+            continue
+        seg = [path[i] for i in idxs]
+        # excise crotch-zone interiors; keep the pinned ends
+        keep = [seg[0]] + [p for p in seg[1:-1] if not in_zone(p)] + [seg[-1]]
+        ext_head = end_ext(0, min(8, last)) if s == 0 else None
+        ext_tail = end_ext(last, max(0, last - 8)) if e == last else None
+        raw = ([ext_head] if ext_head else []) + keep + ([ext_tail] if ext_tail else [])
+        pts = smooth_resample(raw, to_units, resample, smooth_win)
+        # arc mapping over the *original* pixel run (chord length)
+        chord = [0.0]
+        for a, b in zip(seg, seg[1:]):
+            chord.append(chord[-1] + math.hypot(b[0]-a[0], b[1]-a[1]))
+        total = chord[-1] or 1.0
+        for j, i in enumerate(idxs):
+            if not revisit[i]:
+                sec_of[first_seen[path[i]]] = (len(sections), chord[j] / total)
+        sections.append(dict(kind="fresh", pts=pts,
+                             head_ext=bool(ext_head), tail_ext=bool(ext_tail)))
+
+    def clip(pts, f0, f1):
+        """Sub-polyline of pts between arc fractions f0..f1 (may be reversed)."""
+        seg_l = [math.hypot(b[0]-a[0], b[1]-a[1]) for a, b in zip(pts, pts[1:])]
+        arc = [0.0]
+        for L in seg_l:
+            arc.append(arc[-1] + L)
+        total = arc[-1] or 1.0
+        lo, hi = sorted((f0 * total, f1 * total))
+        def at(t):
+            for i in range(len(seg_l)):
+                if arc[i + 1] >= t or i == len(seg_l) - 1:
+                    u = (t - arc[i]) / (seg_l[i] or 1.0)
+                    return (pts[i][0] + (pts[i+1][0]-pts[i][0]) * u,
+                            pts[i][1] + (pts[i+1][1]-pts[i][1]) * u)
+        out = [at(lo)]
+        out += [p for t, p in zip(arc, pts) if lo < t < hi]
+        out.append(at(hi))
+        if f0 > f1:
+            out.reverse()
+        return out
+
+    # inverse of to_units (it is affine in (row, col)) for inside-ink checks
+    _u00 = to_units((0.0, 0.0))
+    _sx = to_units((0.0, 1.0))[0] - _u00[0]
+    def _inside(u):
+        c = int(round((u[0] - _u00[0]) / _sx))
+        r = int(round((_u00[1] - u[1]) / _sx))
+        return 0 <= r < mask.shape[0] and 0 <= c < mask.shape[1] and mask[r, c]
+
+    def _arcs(pts):
+        arc = [0.0]
+        for a, b in zip(pts, pts[1:]):
+            arc.append(arc[-1] + math.hypot(b[0]-a[0], b[1]-a[1]))
+        return arc
+
+    def _circ_arc(p0, p1, t1):
+        """The unique constant-curvature path from `p0` to `p1` arriving
+        along unit tangent `t1`: a circular arc (or a straight segment when
+        p0 sits on the tangent line). Returns (samples p0->p1, |curvature|)
+        or None for a degenerate/wrap-around configuration."""
+        d = (p0[0] - p1[0], p0[1] - p1[1])
+        chord = math.hypot(*d)
+        if chord < 1e-9:
+            return None
+        n_l = (-t1[1], t1[0])  # left normal of the arrival tangent
+        nd = n_l[0]*d[0] + n_l[1]*d[1]
+        if abs(nd) < 1e-6 * chord:  # collinear: straight diagonal
+            k = max(2, int(round(chord / resample)))
+            return ([(p0[0] + (p1[0]-p0[0]) * i / k,
+                      p0[1] + (p1[1]-p0[1]) * i / k) for i in range(k + 1)], 0.0)
+        r = (chord * chord) / (2.0 * nd)   # signed: + = center on the left
+        c = (p1[0] + n_l[0]*r, p1[1] + n_l[1]*r)
+        a0 = math.atan2(p0[1]-c[1], p0[0]-c[0])
+        a1 = math.atan2(p1[1]-c[1], p1[0]-c[0])
+        # arrival velocity along the circle at p1 is +-r*(-sin a1, cos a1);
+        # sweep in the rotation sense whose end velocity matches +t1
+        ccw_v = (-math.sin(a1), math.cos(a1))
+        sense = 1.0 if ccw_v[0]*t1[0] + ccw_v[1]*t1[1] > 0 else -1.0
+        sweep = (a1 - a0) * sense
+        while sweep < 0:
+            sweep += 2 * math.pi
+        if sweep > math.pi * 1.2:  # would loop the long way round — reject
+            return None
+        k = max(2, int(round(abs(r) * sweep / resample)))
+        pts = [(c[0] + abs(r) * math.cos(a0 + sense * sweep * i / k) * 1.0,
+                c[1] + abs(r) * math.sin(a0 + sense * sweep * i / k) * 1.0)
+               for i in range(k + 1)]
+        # radius sign got folded into c; regenerate from actual endpoints
+        pts[0], pts[-1] = p0, p1
+        return pts, 1.0 / abs(r)
+
+    def _max_dev(pts, ref):
+        """Max distance from samples `pts` to polyline `ref` (vertex metric)."""
+        if not ref:
+            return float("inf")
+        ra = np.asarray(ref, dtype=float)
+        worst = 0.0
+        for p in pts:
+            d = float(np.min(np.hypot(ra[:, 0] - p[0], ra[:, 1] - p[1])))
+            worst = max(worst, d)
+        return worst
+
+    def blend_into(p0, nxt_pts, replay_pts, corridor):
+        """Sweep from the reversal point `p0` into the polyline `nxt_pts` as a
+        single circular arc that arrives tangentially — constant curvature,
+        so the up-line does not change curvature mid-flight. The join point
+        is chosen where the arc's curvature best matches the branch's own
+        local curvature (so arc + branch read as one continuous arc), among
+        joins whose sweep stays inside the ink.
+
+        The sweep must also make sense against the literal retrace
+        (`replay_pts`): it is kept only when it either hugs that line
+        (~straight, e.g. y's descent) or clearly leaves the stroke's
+        corridor (m's crotch sweep). An in-between bow — d's stem descent
+        arcing a few units off the straight stem — reads as a sloppy line,
+        not a join, so it is rejected in favour of the exact replay.
+        Returns (samples, join_fraction) or None."""
+        arc = _arcs(nxt_pts)
+        total = arc[-1]
+        if total < 4 * resample:
+            return None
+        best = None
+        for i in range(2, len(nxt_pts) - 2):
+            if arc[i] < 3 * resample:
+                continue
+            if arc[i] > 0.55 * total:
+                break
+            p1 = nxt_pts[i]
+            t1 = unit_vec((nxt_pts[i+1][0] - nxt_pts[i-1][0],
+                           nxt_pts[i+1][1] - nxt_pts[i-1][1]))
+            got = _circ_arc(p0, p1, t1)
+            if got is None:
+                continue
+            pts, kappa = got
+            if not all(_inside(p) for p in pts[1:-1]):
+                continue
+            dev = _max_dev(pts, replay_pts)
+            if not (dev < 1.6 * resample or dev > corridor):
+                continue
+            # branch curvature at the join, from the circumcircle of a
+            # local point triple
+            a, b, cc = nxt_pts[i-2], nxt_pts[i], nxt_pts[i+2]
+            ab = math.hypot(b[0]-a[0], b[1]-a[1])
+            bc = math.hypot(cc[0]-b[0], cc[1]-b[1])
+            ca = math.hypot(a[0]-cc[0], a[1]-cc[1])
+            area2 = abs((b[0]-a[0])*(cc[1]-a[1]) - (b[1]-a[1])*(cc[0]-a[0]))
+            k_branch = (2.0 * area2 / (ab * bc * ca)) if area2 > 1e-9 else 0.0
+            score = abs(kappa - k_branch)
+            if best is None or score < best[0]:
+                best = (score, pts, arc[i] / total)
+        if best is None:
+            return None
+        return best[1], best[2]
+
+    def _trim_tail(pts, t):
+        """(shortened pts, endpoint, unit tangent at the new end)."""
+        arc = _arcs(pts)
+        tgt = max(arc[-1] - t, arc[-1] * 0.6, 2.0 * resample)
+        tgt = min(tgt, arc[-1])
+        i = next((j for j in range(len(arc)) if arc[j] >= tgt), len(arc) - 1)
+        i = max(1, min(i, len(pts) - 1))
+        head = pts[:i + 1]
+        tan = unit_vec((head[-1][0] - head[max(0, len(head)-3)][0],
+                        head[-1][1] - head[max(0, len(head)-3)][1]))
+        return head, head[-1], tan
+
+    def _trim_head(pts, t):
+        arc = _arcs(pts)
+        tgt = min(t, arc[-1] * 0.4)
+        i = next((j for j in range(len(arc)) if arc[j] >= tgt), 0)
+        i = max(0, min(i, len(pts) - 2))
+        tail = pts[i:]
+        tan = unit_vec((tail[min(2, len(tail)-1)][0] - tail[0][0],
+                        tail[min(2, len(tail)-1)][1] - tail[0][1]))
+        return tail, tail[0], tan
+
+    def _biarc(p0, t0, p1, t1):
+        """G1 pair of circular arcs from (p0, t0) to (p1, t1) — the classic
+        equal-tangent-length construction. Returns samples or None."""
+        A = (p1[0]-p0[0], p1[1]-p0[1])
+        u = (t0[0]+t1[0], t0[1]+t1[1])
+        qa = u[0]*u[0] + u[1]*u[1] - 4.0
+        qb = -2.0 * (A[0]*u[0] + A[1]*u[1])
+        qc = A[0]*A[0] + A[1]*A[1]
+        if qc < (0.5 * resample) ** 2:
+            return None
+        if abs(qa) < 1e-9:
+            if abs(qb) < 1e-12:
+                return None
+            L = -qc / qb
+        else:
+            disc = qb*qb - 4*qa*qc
+            if disc < 0:
+                return None
+            r1 = (-qb + math.sqrt(disc)) / (2*qa)
+            r2 = (-qb - math.sqrt(disc)) / (2*qa)
+            L = min((x for x in (r1, r2) if x > 1e-9), default=None)
+            if L is None:
+                return None
+        m0 = (p0[0] + L*t0[0], p0[1] + L*t0[1])
+        m1 = (p1[0] - L*t1[0], p1[1] - L*t1[1])
+        jn = ((m0[0]+m1[0])/2.0, (m0[1]+m1[1])/2.0)
+        g1 = _circ_arc(jn, p0, (-t0[0], -t0[1]))
+        g2 = _circ_arc(jn, p1, t1)
+        if g1 is None or g2 is None:
+            return None
+        first = list(reversed(g1[0]))
+        return first + g2[0][1:]
+
+    def stitch(tail_pts, head_pts, r_junction):
+        """Join two chain geometries around a junction with a trimmed biarc;
+        fall back to plain concatenation when no inside-ink biarc exists."""
+        base = max(1.6 * r_junction, 3.0 * resample)
+        for f in (1.0, 0.7, 0.5, 0.3, 0.15):
+            t = base * f
+            trimmed, p0, t0 = _trim_tail(tail_pts, t)
+            rest, p1, t1 = _trim_head(head_pts, t)
+            if t0 == (0.0, 0.0) or t1 == (0.0, 0.0):
+                continue
+            mid = _biarc(p0, t0, p1, t1)
+            if mid is None:
+                continue
+            if all(_inside(p) for p in mid[1:-1]):
+                return trimmed, mid, rest
+        return tail_pts, None, head_pts
+
+    def replay_of(sec):
+        """Literal replay geometry of a retraced section: the source pass's
+        smoothed polyline over the retraced pixel range, grouped by source
+        section (a retrace can span a junction)."""
+        pts = []
+        i = sec["s"]
+        while i <= sec["e"]:
+            src0 = sec_of.get(first_seen.get(path[i]))
+            if src0 is None:
+                i += 1
+                continue
+            j = i
+            run = [first_seen[path[i]]]
+            while j + 1 <= sec["e"]:
+                nxt_src = sec_of.get(first_seen.get(path[j + 1]))
+                if nxt_src is None or nxt_src[0] != src0[0]:
+                    break
+                j += 1
+                run.append(first_seen[path[j]])
+            piece = clip(sections[src0[0]]["pts"],
+                         sec_of[run[0]][1], sec_of[run[-1]][1])
+            pts.extend(piece[1:] if pts else piece)
+            i = j + 1
+        return pts
+
+    # --- assemble runs, then stitch the handoffs -----------------------------
+    # runs[i] = [pts, kind_of_boundary_after, already_tangent_joined_to_next]
+    runs = []
+    skip_frac = {}
+    for si, (s, e) in enumerate(zip(bounds, bounds[1:])):
+        sec = sections[si]
+        joined = False
+        if sec["kind"] == "fresh":
+            f = skip_frac.get(si, 0.0)
+            pts = clip(sec["pts"], f, 1.0) if f > 0 else list(sec["pts"])
+        else:
+            replay = replay_of(sec)
+            pts = replay
+            nxt = sections[si + 1] if si + 1 < len(sections) else None
+            prev_end = (runs[-1][0][-1] if runs and runs[-1][0]
+                        else (replay[0] if replay else None))
+            if (nxt and nxt["kind"] == "fresh" and len(nxt["pts"]) >= 4
+                    and prev_end is not None):
+                corridor = 2.2 * float(radius[path[s]]) * _sx
+                res = blend_into(prev_end, nxt["pts"], replay, corridor)
+                if res:
+                    pts = res[0]
+                    skip_frac[si + 1] = res[1]
+                    joined = True
+        kind = "end" if e == last else ("rev" if is_reversal_cut(e) else "smooth")
+        runs.append([pts, kind, joined, e])
 
     out = []
-    for seg in pieces:
-        pts = smooth_resample(seg, to_units, resample, smooth_win)
-        out.extend(pts[1:] if out else pts)
+    def emit(pts):
+        if not pts:
+            return
+        out.extend(pts[1:] if out else list(pts))
+
+    for i, (pts, kind, joined, e) in enumerate(runs):
+        if not pts or not out:
+            emit(pts)
+        else:
+            prev_kind, prev_joined, prev_e = runs[i-1][1], runs[i-1][2], runs[i-1][3]
+            if prev_kind == "rev" or prev_joined:
+                emit(pts)
+            else:
+                # smooth chain handoff: round the junction with a trimmed
+                # biarc sized to the crotch's half-width
+                r_j = float(radius[path[prev_e]]) * abs(_sx)
+                trimmed_prev, mid, rest = stitch(out, pts, r_j)
+                out[:] = trimmed_prev
+                if mid is not None:
+                    emit(mid)
+                emit(rest)
+        # excursion at a reversal cut: the pen dips into the wedge and back
+        if kind == "rev" and e in excursion:
+            ex = excursion[e]
+            raw = [path[e]] + list(ex)
+            ex_pts = smooth_resample(raw, to_units, resample, smooth_win)
+            emit(ex_pts)
+            emit(list(reversed(ex_pts)))
     return out, midline_reversals
 
 

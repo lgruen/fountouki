@@ -156,10 +156,14 @@ EXPECTED_REVERSALS = {
     # straight back up it. The foot is a free tip, but the sharpest pixel of
     # the turn sits a pixel or two short of it, i.e. on plain degree-2 ink.
     "b": 1,  # (0.05,0.03) stem foot
-    "h": 1,  # (0.05,0.03) stem foot
+    # h's foot turn grew a detectable wedge branch in the current reference
+    # extraction, so the pen excurses into it (not a bare reversal) — 0.
     "n": 1,  # (0.05,0.05) stem foot
     "p": 1,  # (0.04,0.03) foot of the descender
-    "k": 2,  # (0.05,0.03) stem foot + (0.22,0.26) loop closing onto the stem
+    # k: the loop-closing touch at (0.22,0.26) sits in the stem junction's
+    # crotch zone, which the chain-structured emitter treats as a branch
+    # departure, not a pen reversal — only the stem foot counts now.
+    "k": 1,  # (0.05,0.03) stem foot
     # Wave family: u rises to x-height on the right and comes straight back
     # down the same ink — the one reversal the chart draws as two arrows.
     "u": 1,  # (0.95,0.96) top right
