@@ -533,7 +533,101 @@ def repair_terminals(strokes, ext):
 # 7. Stroke expansion.
 # ---------------------------------------------------------------------------
 
-def expand(strokes, dots, pen):
+def pen_position_strokes(strokes, pen):
+    """Turn traced strokes into outline-generator *pen positions*.
+
+    The traced strokes walk their free tips and cusp dips to ~the ink edge —
+    right for the tracing pen, whose dot must reach the visible tip — but a
+    round-capped extrusion adds half a pen beyond every end and spike, which
+    would grow each terminal by pen/2. So pull back by pen/2 (arc length):
+
+    - every out-and-back spike (the reversal-cusp dips at stem feet, v/w
+      valleys, closure tops), detected as a near-180 deg turn, and
+    - every *free* stroke end. An end that closes onto other ink (o's
+      closure onto its own start, the b/p bowls landing on their stems)
+      is left alone — trimming it would open a notch in the join.
+
+    The trim is 0.85 * pen/2: the traces' tip and dip walks deliberately
+    stop 15% short of the ink edge, so the slightly-shy trim lands the cap
+    on the edge itself (a full pen/2 left the built x-height ~3 units
+    short)."""
+    t = 0.85 * pen / 2.0
+    all_pts = [p for s in strokes for p in s]
+
+    def free_end(s, at_start):
+        p = s[0] if at_start else s[-1]
+        arc = 0.0
+        near = []
+        walk = s if at_start else s[::-1]
+        for a, b in zip(walk, walk[1:]):
+            arc += math.dist(a, b)
+            if arc > 3.0 * pen:
+                break
+            near.append(b)
+        near_set = set(map(id, near)) | {id(p)}
+        for q in all_pts:
+            if id(q) in near_set:
+                continue
+            if math.dist(p, q) < pen * 0.9:
+                return False
+        return True
+
+    def despike(pts):
+        arc = [0.0]
+        for a, b in zip(pts, pts[1:]):
+            arc.append(arc[-1] + math.dist(a, b))
+        drop = []
+        for i in range(1, len(pts) - 1):
+            a = (pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1])
+            b = (pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1])
+            la, lb = math.hypot(*a), math.hypot(*b)
+            if la < 1e-9 or lb < 1e-9:
+                continue
+            if (a[0]*b[0] + a[1]*b[1]) / (la * lb) < -0.8:
+                drop.append((arc[i] - t, arc[i] + t))
+        if not drop:
+            return pts
+        return [p for p, s in zip(pts, arc)
+                if not any(lo < s < hi for lo, hi in drop)]
+
+    def trim_end(pts, at_start):
+        walk = pts if at_start else pts[::-1]
+        arc = 0.0
+        out = []
+        for j, p in enumerate(walk):
+            if j > 0:
+                arc += math.dist(walk[j-1], p)
+            if arc >= t:
+                # interpolate the exact cut point on this segment
+                over = arc - t
+                a, b = walk[j-1], p
+                d = math.dist(a, b) or 1.0
+                u = 1.0 - over / d
+                out = [(a[0] + (b[0]-a[0]) * u, a[1] + (b[1]-a[1]) * u)]
+                out.extend(walk[j:])
+                break
+        else:
+            return pts  # shorter than the trim — leave it
+        return out if at_start else out[::-1]
+
+    out = []
+    for s in strokes:
+        if len(s) < 2:
+            out.append(list(s))
+            continue
+        pts = despike([tuple(p) for p in s])
+        if len(pts) < 2:
+            out.append([tuple(p) for p in s])
+            continue
+        if free_end(s, True):
+            pts = trim_end(pts, True)
+        if free_end(s, False):
+            pts = trim_end(pts, False)
+        out.append(pts)
+    return out
+
+
+def expand(strokes, dots, pen, join_style=2):
     geoms = []
     for pts in strokes:
         pts = [p for i, p in enumerate(pts)
@@ -542,9 +636,14 @@ def expand(strokes, dots, pen):
             if pts:
                 geoms.append(Point(pts[0]).buffer(pen / 2, resolution=BUF_RES))
             continue
-        # round caps at the terminals, mitred joins through the corners: a
-        # round join would blunt every V/W/X/Z vertex by half a pen width.
-        geoms.append(LineString(pts).buffer(pen / 2, cap_style=1, join_style=2,
+        # Extraction centerlines: round caps at the terminals, mitred joins
+        # through the corners — a round join would blunt every V/W/X/Z vertex
+        # by half a pen width. Traced pen strokes pass join_style=1 (round)
+        # instead: their reversal dips already reach into every vertex tip,
+        # and a mitre join on a dip's ~180 deg turnaround shoots a
+        # MITRE_LIMIT-long spike out of the letter.
+        geoms.append(LineString(pts).buffer(pen / 2, cap_style=1,
+                                            join_style=join_style,
                                             mitre_limit=MITRE_LIMIT,
                                             resolution=BUF_RES))
     for (cx, cy), r in dots:
@@ -1144,13 +1243,18 @@ def main():
             poly = expand(strokes[ch], dots[ch], pen)
             assert poly is not None and not poly.is_empty, f"{ch!r}: empty outline"
             if trace_strokes and ch in trace_strokes:
-                # stage 2: the letter's ink is the pen sweep along its traced
-                # strokes — no junction blobs — clipped to the stage-1
-                # silhouette so caps and terminals stay where the calibrated
-                # extraction put them
-                ext = expand(trace_strokes[ch], dots[ch], pen)
-                poly = ext.intersection(poly).buffer(0)
-                assert not poly.is_empty, f"{ch!r}: empty trace-clipped outline"
+                # stage 2: the letter's ink is the pure pen sweep along its
+                # traced strokes, so every edge runs parallel to the pen path
+                # (clipping to the stage-1 silhouette was tried and rejected:
+                # wherever the traced path deviates from the reference's own
+                # path — exactly at the redesigned joins — the clip hands the
+                # boundary back to the old blobby outline, a visible wiggle).
+                # The strokes are converted to *pen positions* first, so the
+                # round caps land on the trace tips instead of pen/2 past them.
+                poly = expand(pen_position_strokes(trace_strokes[ch], pen),
+                              dots[ch], pen, join_style=1)
+                assert poly is not None and not poly.is_empty, \
+                    f"{ch!r}: empty trace-extruded outline"
             if ch in DIGITS + AUTHORED:
                 poly = affinity.translate(poly, xoff=digit_bearing(ch) - poly.bounds[0])
             polys[ch] = polygons(poly, pen)

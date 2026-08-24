@@ -2,19 +2,19 @@
 // Pen-stroke centerlines for Fountouki Handwriting, in font units (y up, origin at
 // the pen position on the baseline). Stroke order and direction follow
 // the Tasmanian handwriting charts (tools/handwriting_font/*.png).
-// source font fnv1a64 = 0x420640f32eaff9d4
+// source font fnv1a64 = 0x5918ccc220aed7b1
 use crate::tracing::GlyphTrace;
 
 pub const UPEM: f32 = 1000.0;
-pub const X_HEIGHT: f32 = 399.4;
-pub const ASCENT: f32 = 776.4;
+pub const X_HEIGHT: f32 = 397.5;
+pub const ASCENT: f32 = 774.4;
 pub const DESCENT: f32 = -387.7;
 /// Width of the pen these centerlines were measured with — the
 /// stroke the built font paints over them is this thick.
 pub const PEN_WIDTH: f32 = 36.7;
 /// FNV-1a-64 of the handwriting.ttf these traces were baked
 /// from; a mismatch means the data is stale.
-pub const SOURCE_FONT_FNV1A64: u64 = 0x420640f32eaff9d4;
+pub const SOURCE_FONT_FNV1A64: u64 = 0x5918ccc220aed7b1;
 
 pub static GLYPHS: [GlyphTrace; 26] = [
     GlyphTrace {
