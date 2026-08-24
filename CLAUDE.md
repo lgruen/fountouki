@@ -28,6 +28,13 @@ whole reason the rewrite exists; don't reintroduce platform-delegated layout.
     form factor — this is the consistency cure; keep layout ours.
   - Fonts (own-authored Tasmanian-style handwriting + Varela Round UI) + Twemoji
     emoji sprites are `include_bytes!`-baked (see `ATTRIBUTION.md`).
+  - **Font/tracing letterform questions → the official reference**: the
+    Tasmanian Handwriting Guidelines PDF at
+    <https://publicdocumentcentre.education.tas.gov.au/library/Shared%20Documents/Handwriting.pdf>
+    is ground truth for every glyph shape (charts + the embedded reference
+    fonts the build extracts). Full pipeline docs + the two chart URLs:
+    `tools/handwriting_font/README.md`. If the URL is egress-blocked, ask the
+    maintainer to attach the PDF.
 - **`web/`** = PWA shell (index.html + macroquad `mq_js_bundle.js` + `sw.js` +
   manifest/icons); the built `fountouki.wasm` is dropped in by CI.
 - **`server/`** = Cloudflare Worker sync (unchanged). `docs/port-spec/` = the

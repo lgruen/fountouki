@@ -77,13 +77,17 @@ pub fn card(x: f32, y: f32, w: f32, h: f32, surface: Color) {
     rounded_rect(x, y, w, h, palette::RADIUS, surface);
 }
 
-/// Thick round-capped stroked polyline.
+/// Thick round-capped stroked polyline. Joints and caps are drawn with
+/// adaptive high-segment discs (like `arc`) — macroquad's `draw_circle` is a
+/// 20-gon whose facets read as lumps at tracing-ink widths.
 pub fn stroke_path(pts: &[Vec2], width: f32, color: Color) {
     for w in pts.windows(2) {
         draw_line(w[0].x, w[0].y, w[1].x, w[1].y, width, color);
     }
+    let r = width / 2.0;
+    let n = ((std::f32::consts::TAU * r / 6.0).ceil() as u8).clamp(24, 128);
     for p in pts {
-        draw_circle(p.x, p.y, width / 2.0, color);
+        draw_poly(p.x, p.y, n, r, 0.0, color);
     }
 }
 

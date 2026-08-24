@@ -467,10 +467,12 @@ def _terminal(pts, deg, res, pen_px, r_ref, at_start):
     going after the ink has become thinner than the stroke, and a round pen
     laid on that part paints a fat stub sticking out of the letter.
 
-    *Extend* what is left along the ink: a skeleton stops about one pen radius
-    short of a stroke end, so push the tip out until the round cap lands on the
-    reference ink boundary. For a tapered terminal the two steps cancel and the
-    tip ends up where it started; at an apex only the trim applies."""
+    *Extend* what is left along the ink — but only when nothing was trimmed: a
+    skeleton stops about one pen radius short of a stroke end, so push the tip
+    out until the round cap lands on the reference ink boundary. A trimmed end
+    is deliberately never re-extended (see the comment below), which keeps the
+    A/N/M apexes from growing stubs but also swallows a long gradual exit
+    taper whole — a casualty gets an explicit TERMINAL_EXTEND repair instead."""
     seq = list(pts) if at_start else list(pts)[::-1]
     p = seq[0]
     if not (isinstance(p[0], (int, np.integer)) and deg[p] == 1):
@@ -495,11 +497,137 @@ def _terminal(pts, deg, res, pen_px, r_ref, at_start):
     return seq if at_start else seq[::-1]
 
 
+# Explicit terminal repairs, in final font units (applied after the built-x
+# rescale). `_terminal` trims a free end back out of sub-pen-width ink and
+# never re-extends a trimmed end — right for the A/N/M apexes, but a long
+# gradual exit taper is swallowed whole by that trim (the '2' base lost 109
+# units of centerline). Each entry re-extends the glyph's *lowest* free
+# stroke end along its own end tangent, calibrated against the reference:
+# walk a corridor (half-width = the stroke's own half-width) along the end
+# direction to the taper ink's farthest extent, land the cap edge there
+# (extent - pen/2). On the '2' this matches the best-shift silhouette
+# overlay's zero-mismatch point exactly. An audit of every free end found
+# these five; the other ~80 trims are apexes / angled cuts within a few
+# units (A/M/V apexes and the ',' tail must stay blunt — re-extending them
+# regrows the stubs the trim exists to prevent). The coverage assert at the
+# end of the build is the regression guard.
+TERMINAL_EXTEND = {"2": 108.0, "d": 50.0, "e": 36.0, "l": 27.0, "q": 26.0,
+                   "c": 7.0}
+
+
+def repair_terminals(strokes, ext):
+    """Extend the lowest stroke end (start or tip) of one glyph by `ext` units
+    along the local end direction. `strokes` is mutated in place."""
+    ends = [(s[i][1], si, i) for si, s in enumerate(strokes) if len(s) >= 2
+            for i in (0, -1)]
+    _y, si, i = min(ends)
+    s = strokes[si]
+    a = s[i]
+    b = s[min(8, len(s) - 1)] if i == 0 else s[max(-9, -len(s))]
+    d = trace.unit_vec((a[0] - b[0], a[1] - b[1]))
+    p = (a[0] + d[0] * ext, a[1] + d[1] * ext)
+    s.insert(0, p) if i == 0 else s.append(p)
+
+
 # ---------------------------------------------------------------------------
 # 7. Stroke expansion.
 # ---------------------------------------------------------------------------
 
-def expand(strokes, dots, pen):
+def pen_position_strokes(strokes, pen):
+    """Turn traced strokes into outline-generator *pen positions*.
+
+    The traced strokes walk their free tips and cusp dips to ~the ink edge —
+    right for the tracing pen, whose dot must reach the visible tip — but a
+    round-capped extrusion adds half a pen beyond every end and spike, which
+    would grow each terminal by pen/2. So pull back by pen/2 (arc length):
+
+    - every out-and-back spike (the reversal-cusp dips at stem feet, v/w
+      valleys, closure tops), detected as a near-180 deg turn, and
+    - every *free* stroke end. An end that closes onto other ink (o's
+      closure onto its own start, the b/p bowls landing on their stems)
+      is left alone — trimming it would open a notch in the join.
+
+    The trim is 0.85 * pen/2: the traces' tip and dip walks deliberately
+    stop 15% short of the ink edge, so the slightly-shy trim lands the cap
+    on the edge itself (a full pen/2 left the built x-height ~3 units
+    short)."""
+    t = 0.85 * pen / 2.0
+    all_pts = [p for s in strokes for p in s]
+
+    def free_end(s, at_start):
+        p = s[0] if at_start else s[-1]
+        arc = 0.0
+        near = []
+        walk = s if at_start else s[::-1]
+        for a, b in zip(walk, walk[1:]):
+            arc += math.dist(a, b)
+            if arc > 3.0 * pen:
+                break
+            near.append(b)
+        near_set = set(map(id, near)) | {id(p)}
+        for q in all_pts:
+            if id(q) in near_set:
+                continue
+            if math.dist(p, q) < pen * 0.9:
+                return False
+        return True
+
+    def despike(pts):
+        arc = [0.0]
+        for a, b in zip(pts, pts[1:]):
+            arc.append(arc[-1] + math.dist(a, b))
+        drop = []
+        for i in range(1, len(pts) - 1):
+            a = (pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1])
+            b = (pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1])
+            la, lb = math.hypot(*a), math.hypot(*b)
+            if la < 1e-9 or lb < 1e-9:
+                continue
+            if (a[0]*b[0] + a[1]*b[1]) / (la * lb) < -0.8:
+                drop.append((arc[i] - t, arc[i] + t))
+        if not drop:
+            return pts
+        return [p for p, s in zip(pts, arc)
+                if not any(lo < s < hi for lo, hi in drop)]
+
+    def trim_end(pts, at_start):
+        walk = pts if at_start else pts[::-1]
+        arc = 0.0
+        out = []
+        for j, p in enumerate(walk):
+            if j > 0:
+                arc += math.dist(walk[j-1], p)
+            if arc >= t:
+                # interpolate the exact cut point on this segment
+                over = arc - t
+                a, b = walk[j-1], p
+                d = math.dist(a, b) or 1.0
+                u = 1.0 - over / d
+                out = [(a[0] + (b[0]-a[0]) * u, a[1] + (b[1]-a[1]) * u)]
+                out.extend(walk[j:])
+                break
+        else:
+            return pts  # shorter than the trim — leave it
+        return out if at_start else out[::-1]
+
+    out = []
+    for s in strokes:
+        if len(s) < 2:
+            out.append(list(s))
+            continue
+        pts = despike([tuple(p) for p in s])
+        if len(pts) < 2:
+            out.append([tuple(p) for p in s])
+            continue
+        if free_end(s, True):
+            pts = trim_end(pts, True)
+        if free_end(s, False):
+            pts = trim_end(pts, False)
+        out.append(pts)
+    return out
+
+
+def expand(strokes, dots, pen, join_style=2):
     geoms = []
     for pts in strokes:
         pts = [p for i, p in enumerate(pts)
@@ -508,9 +636,14 @@ def expand(strokes, dots, pen):
             if pts:
                 geoms.append(Point(pts[0]).buffer(pen / 2, resolution=BUF_RES))
             continue
-        # round caps at the terminals, mitred joins through the corners: a
-        # round join would blunt every V/W/X/Z vertex by half a pen width.
-        geoms.append(LineString(pts).buffer(pen / 2, cap_style=1, join_style=2,
+        # Extraction centerlines: round caps at the terminals, mitred joins
+        # through the corners — a round join would blunt every V/W/X/Z vertex
+        # by half a pen width. Traced pen strokes pass join_style=1 (round)
+        # instead: their reversal dips already reach into every vertex tip,
+        # and a mitre join on a dip's ~180 deg turnaround shoots a
+        # MITRE_LIMIT-long spike out of the letter.
+        geoms.append(LineString(pts).buffer(pen / 2, cap_style=1,
+                                            join_style=join_style,
                                             mitre_limit=MITRE_LIMIT,
                                             resolution=BUF_RES))
     for (cx, cy), r in dots:
@@ -854,6 +987,10 @@ def write_sheet(path, ttf_path, metrics):
 # ---------------------------------------------------------------------------
 
 def emit_traces(out_path, ttf_path, fingerprint, pen_width):
+    """Route + emit the pen strokes over `ttf_path`'s raster. Writes
+    tracing_data to `out_path`, or only computes (returning the stroke
+    geometry) when `out_path` is None — main() uses that compute-only pass
+    to *build* the final outlines from the strokes (see stage 2 there)."""
     face = trace.load_face(ttf_path, TRACE_PPEM)
     upem = face.units_per_EM
     px2u = upem / TRACE_PPEM
@@ -882,7 +1019,7 @@ def emit_traces(out_path, ttf_path, fingerprint, pen_width):
         rows_a, _ = np.where(mask)
         extremes[ch] = (to_units((rows_a.max(), 0))[1], to_units((rows_a.min(), 0))[1])
 
-        strokes, reversals = [], 0
+        strokes, raw_paths, reversals = [], [], 0
         for spec in routes.ROUTES[ch]:
             if spec == "dot":
                 if not dots:
@@ -900,28 +1037,33 @@ def emit_traces(out_path, ttf_path, fingerprint, pen_width):
             pts, rev = trace.process_stroke(path, big, radius, sk, to_units,
                                             smooth_win, resample)
             strokes.append(pts)
+            raw_paths.append(path)
             reversals += rev
         if reversals != routes.EXPECTED_REVERSALS.get(ch, 0):
             warnings.append(f"{ch}: {reversals} mid-line reversals "
                             f"(expected {routes.EXPECTED_REVERSALS.get(ch, 0)})")
-        covers[ch] = route_cover(sk, strokes, routes.ROUTES[ch], left, top,
-                                 px2u, resample)
+        covers[ch] = route_cover(sk, raw_paths, resample / px2u)
         outside = points_outside_ink(strokes, mask, left, top, px2u)
         if outside:
             warnings.append(f"{ch}: {outside} baked point(s) outside the ink")
         glyphs.append((ch, adv_px * px2u, strokes))
         cells.append((ch, mask, left, top, strokes))
 
-    header = [
+    if out_path is not None:
+        trace.write_rust(out_path, glyphs, upem, extremes["x"][1],
+                         extremes["l"][1], extremes["g"][0], pen_width,
+                         fingerprint, traces_header(fingerprint))
+    return warnings, covers, cells, px2u, glyphs
+
+
+def traces_header(fingerprint):
+    return [
         "// @generated by tools/handwriting_font/build.py --traces — do not edit.",
         f"// Pen-stroke centerlines for {FAMILY}, in font units (y up, origin at",
         "// the pen position on the baseline). Stroke order and direction follow",
         "// the Tasmanian handwriting charts (tools/handwriting_font/*.png).",
         f"// source font fnv1a64 = 0x{fingerprint:016x}",
     ]
-    trace.write_rust(out_path, glyphs, upem, extremes["x"][1], extremes["l"][1],
-                     extremes["g"][0], pen_width, fingerprint, header)
-    return warnings, covers, cells, px2u
 
 
 def points_outside_ink(strokes, mask, left, top, px2u):
@@ -939,19 +1081,19 @@ def points_outside_ink(strokes, mask, left, top, px2u):
     return n
 
 
-def route_cover(sk, strokes, specs, left, top, px2u, resample):
-    """Fraction of the glyph's skeleton pixels the routed pen passes over.
-    Below ~0.95 means the route skipped part of the letter (a branch never
-    visited, a loop cut short)."""
-    route_px = [(top - uy / px2u - 0.5, ux / px2u - left - 0.5)
-                for spec, st in zip(specs, strokes) if spec != "dot"
-                for ux, uy in st]
+def route_cover(sk, raw_paths, resample_px):
+    """Fraction of the glyph's skeleton pixels the *routed pixel path* passes
+    over. Below ~0.95 means the route skipped part of the letter (a branch
+    never visited, a loop cut short). Measured on the raw route, not the
+    emitted geometry: the retrace-into-branch blend deliberately sweeps off
+    the skeleton, but the route itself must still have visited everything."""
+    route_px = [p for path in raw_paths for p in path]
     skp = np.argwhere(sk)
     if not route_px or not len(skp):
         return 0.0
-    rp = np.array(route_px)
+    rp = np.array(route_px, dtype=float)
     d2 = ((skp[:, None, :] - rp[None, :, :]) ** 2).sum(-1).min(1)
-    return float((d2 < (resample / px2u * 1.5) ** 2).mean())
+    return float((d2 < (resample_px * 1.5) ** 2).mean())
 
 
 # ---------------------------------------------------------------------------
@@ -1059,6 +1201,10 @@ def main():
             for ch, v in dots.items()}
     log(f"  built-x correction {c:.5f} -> k = {k:.6f}, pen {pen:.2f}")
 
+    for ch, ext in TERMINAL_EXTEND.items():
+        repair_terminals(strokes[ch], ext)
+        log(f"  terminal repair {ch!r}: +{ext:.0f} units")
+
     # slope from the 'l' stem
     slope = measure_slope(strokes["l"])
     log(f"  stem slope {slope:.2f} deg (rightward)")
@@ -1081,109 +1227,185 @@ def main():
         dots[ch] = [(p, dot_radius) for p in dt_pts]
         advances[ch] = 0.0
 
-    log("== outlines")
-    polys, bounds = {}, {}
-    for ch in COVERAGE:
-        poly = expand(strokes[ch], dots[ch], pen)
-        assert poly is not None and not poly.is_empty, f"{ch!r}: empty outline"
-        if ch in DIGITS + AUTHORED:
-            poly = affinity.translate(poly, xoff=digit_bearing(ch) - poly.bounds[0])
-        polys[ch] = polygons(poly, pen)
-        bounds[ch] = poly.bounds
+    # The font is built twice. Stage 1 expands the *extraction* centerlines
+    # into outlines — those centerlines carry medial-axis junction artifacts,
+    # so their buffer union grows small blobs at every join. That font is only
+    # the routing scaffold: the pen-route emitter traces it, and stage 2
+    # rebuilds every traced letter's outline as the pen extrusion of its own
+    # traced strokes, clipped to the stage-1 silhouette (which keeps the
+    # calibrated caps/terminals and guarantees nothing pokes past the
+    # reference-gated ink). The shipped glyph ink and the tracing-game
+    # template are then the same drawing.
+    def assemble(trace_strokes=None):
+        log("== outlines")
+        polys, bounds = {}, {}
+        for ch in COVERAGE:
+            poly = expand(strokes[ch], dots[ch], pen)
+            assert poly is not None and not poly.is_empty, f"{ch!r}: empty outline"
+            if trace_strokes and ch in trace_strokes:
+                # stage 2: the letter's ink is the pure pen sweep along its
+                # traced strokes, so every edge runs parallel to the pen path
+                # (clipping to the stage-1 silhouette was tried and rejected:
+                # wherever the traced path deviates from the reference's own
+                # path — exactly at the redesigned joins — the clip hands the
+                # boundary back to the old blobby outline, a visible wiggle).
+                # The strokes are converted to *pen positions* first, so the
+                # round caps land on the trace tips instead of pen/2 past them.
+                poly = expand(pen_position_strokes(trace_strokes[ch], pen),
+                              dots[ch], pen, join_style=1)
+                assert poly is not None and not poly.is_empty, \
+                    f"{ch!r}: empty trace-extruded outline"
+            if ch in DIGITS + AUTHORED:
+                poly = affinity.translate(poly, xoff=digit_bearing(ch) - poly.bounds[0])
+            polys[ch] = polygons(poly, pen)
+            bounds[ch] = poly.bounds
 
-    glyphs = {".notdef": TTGlyphPen(None).glyph()}
-    order = [".notdef", "space"]
-    cmap = {0x20: "space"}
-    metrics = {".notdef": (SPACE_ADVANCE, 0), "space": (SPACE_ADVANCE, 0)}
-    glyphs["space"] = TTGlyphPen(None).glyph()
-    ref_adv = ref_advances(ref["regular"], LOWER + UPPER + PUNCT)
-    for ch in COVERAGE:
-        name = glyph_name(ch)
-        g = glyph_from_polys(polys[ch], pen)
-        assert g.numberOfContours >= 1, f"{ch!r}: no contours"
-        gx = [p[0] for p in g.coordinates]
-        gy = [p[1] for p in g.coordinates]
-        bx0, by0, bx1, by1 = bounds[ch]
-        slack = 4 * pen
-        assert (min(gx) > bx0 - slack and max(gx) < bx1 + slack
-                and min(gy) > by0 - slack and max(gy) < by1 + slack), (
-            f"{ch!r}: fitted control points escape the outline "
-            f"({min(gx)},{min(gy)})..({max(gx)},{max(gy)}) vs {bounds[ch]}")
-        glyphs[name] = g
-        order.append(name)
-        cmap[ord(ch)] = name
-        x0, _y0, x1, _y1 = bounds[ch]
-        if ch in DIGITS + AUTHORED:
-            adv = int(round(x1 - x0 + 2 * digit_bearing(ch)))
-        else:
-            adv = int(round(ref_adv[ch] * k))
-        metrics[name] = (adv, int(round(x0)))
-        assert adv > 0, f"{ch!r}: advance {adv}"
+        glyphs = {".notdef": TTGlyphPen(None).glyph()}
+        order = [".notdef", "space"]
+        cmap = {0x20: "space"}
+        metrics = {".notdef": (SPACE_ADVANCE, 0), "space": (SPACE_ADVANCE, 0)}
+        glyphs["space"] = TTGlyphPen(None).glyph()
+        ref_adv = ref_advances(ref["regular"], LOWER + UPPER + PUNCT)
+        for ch in COVERAGE:
+            name = glyph_name(ch)
+            g = glyph_from_polys(polys[ch], pen)
+            assert g.numberOfContours >= 1, f"{ch!r}: no contours"
+            gx = [p[0] for p in g.coordinates]
+            gy = [p[1] for p in g.coordinates]
+            bx0, by0, bx1, by1 = bounds[ch]
+            slack = 4 * pen
+            assert (min(gx) > bx0 - slack and max(gx) < bx1 + slack
+                    and min(gy) > by0 - slack and max(gy) < by1 + slack), (
+                f"{ch!r}: fitted control points escape the outline "
+                f"({min(gx)},{min(gy)})..({max(gx)},{max(gy)}) vs {bounds[ch]}")
+            glyphs[name] = g
+            order.append(name)
+            cmap[ord(ch)] = name
+            x0, _y0, x1, _y1 = bounds[ch]
+            if ch in DIGITS + AUTHORED:
+                adv = int(round(x1 - x0 + 2 * digit_bearing(ch)))
+            else:
+                adv = int(round(ref_adv[ch] * k))
+            metrics[name] = (adv, int(round(x0)))
+            assert adv > 0, f"{ch!r}: advance {adv}"
 
-    # measured extremes of what we actually built
-    x_height = bounds["x"][3]
-    cap_built = max(bounds[c][3] for c in UPPER)
-    ascender = max(bounds[c][3] for c in "bdfhklt")
-    descender = min(bounds[c][1] for c in "gjpqy")
-    y_max = max(b[3] for b in bounds.values())
-    y_min = min(b[1] for b in bounds.values())
-    log(f"  x-height {x_height:.1f} cap {cap_built:.1f} asc {ascender:.1f} "
-        f"desc {descender:.1f}  (ink {y_min:.1f}..{y_max:.1f})")
-    assert abs(x_height - X_HEIGHT) <= 3, f"x-height {x_height:.1f} != 400+-3"
-    assert 770 <= ascender <= 800, f"ascender {ascender:.1f} outside 770..800"
-    assert 770 <= cap_built <= 800, f"cap height {cap_built:.1f} outside 770..800"
-    assert -410 <= descender <= -380, f"descender {descender:.1f} outside -380..-410"
+        # measured extremes of what we actually built
+        x_height = bounds["x"][3]
+        cap_built = max(bounds[c][3] for c in UPPER)
+        ascender = max(bounds[c][3] for c in "bdfhklt")
+        descender = min(bounds[c][1] for c in "gjpqy")
+        y_max = max(b[3] for b in bounds.values())
+        y_min = min(b[1] for b in bounds.values())
+        log(f"  x-height {x_height:.1f} cap {cap_built:.1f} asc {ascender:.1f} "
+            f"desc {descender:.1f}  (ink {y_min:.1f}..{y_max:.1f})")
+        assert abs(x_height - X_HEIGHT) <= 3, f"x-height {x_height:.1f} != 400+-3"
+        assert 770 <= ascender <= 800, f"ascender {ascender:.1f} outside 770..800"
+        assert 770 <= cap_built <= 800, f"cap height {cap_built:.1f} outside 770..800"
+        assert -410 <= descender <= -380, f"descender {descender:.1f} outside -380..-410"
 
-    log("== font")
-    asc_i, desc_i = int(math.ceil(y_max)), int(math.floor(y_min))
-    fb = FontBuilder(UPEM, isTTF=True)
-    fb.font.recalcTimestamp = False
-    fb.setupGlyphOrder(order)
-    fb.setupCharacterMap(cmap)
-    fb.setupGlyf(glyphs)
-    fb.setupHorizontalMetrics(metrics)
-    fb.setupHorizontalHeader(ascent=asc_i, descent=desc_i, lineGap=0)
-    fb.setupNameTable({
-        "familyName": FAMILY,
-        "styleName": SUBFAMILY,
-        "uniqueFontIdentifier": f"{FAMILY} {VERSION}; fountouki",
-        "fullName": f"{FAMILY} {SUBFAMILY}",
-        "psName": "FountoukiHandwriting-Regular",
-        "version": f"Version {VERSION}",
-        "description": ATTRIBUTION,
-        "licenseDescription": ATTRIBUTION,
-        "licenseInfoURL": CC_BY_URL,
-    })
-    fb.setupOS2(version=4, sTypoAscender=asc_i, sTypoDescender=desc_i,
-                sTypoLineGap=0, usWinAscent=asc_i, usWinDescent=-desc_i,
-                sxHeight=int(round(x_height)), sCapHeight=int(round(cap_built)),
-                usWeightClass=400, usWidthClass=5, fsType=0, fsSelection=0x40,
-                achVendID="NONE", ulCodePageRange1=1)
-    try:
-        fb.font["OS/2"].recalcUnicodeRanges(fb.font)
-    except Exception:  # pragma: no cover - cosmetic only
-        pass
-    fb.setupPost(keepGlyphNames=True)
-    fb.updateHead(created=FIXED_TIMESTAMP, modified=FIXED_TIMESTAMP,
-                  fontRevision=1.0, lowestRecPPEM=8)
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    fb.save(args.out)
+        log("== font")
+        asc_i, desc_i = int(math.ceil(y_max)), int(math.floor(y_min))
+        fb = FontBuilder(UPEM, isTTF=True)
+        fb.font.recalcTimestamp = False
+        fb.setupGlyphOrder(order)
+        fb.setupCharacterMap(cmap)
+        fb.setupGlyf(glyphs)
+        fb.setupHorizontalMetrics(metrics)
+        fb.setupHorizontalHeader(ascent=asc_i, descent=desc_i, lineGap=0)
+        fb.setupNameTable({
+            "familyName": FAMILY,
+            "styleName": SUBFAMILY,
+            "uniqueFontIdentifier": f"{FAMILY} {VERSION}; fountouki",
+            "fullName": f"{FAMILY} {SUBFAMILY}",
+            "psName": "FountoukiHandwriting-Regular",
+            "version": f"Version {VERSION}",
+            "description": ATTRIBUTION,
+            "licenseDescription": ATTRIBUTION,
+            "licenseInfoURL": CC_BY_URL,
+        })
+        fb.setupOS2(version=4, sTypoAscender=asc_i, sTypoDescender=desc_i,
+                    sTypoLineGap=0, usWinAscent=asc_i, usWinDescent=-desc_i,
+                    sxHeight=int(round(x_height)), sCapHeight=int(round(cap_built)),
+                    usWeightClass=400, usWidthClass=5, fsType=0, fsSelection=0x40,
+                    achVendID="NONE", ulCodePageRange1=1)
+        try:
+            fb.font["OS/2"].recalcUnicodeRanges(fb.font)
+        except Exception:  # pragma: no cover - cosmetic only
+            pass
+        fb.setupPost(keepGlyphNames=True)
+        fb.updateHead(created=FIXED_TIMESTAMP, modified=FIXED_TIMESTAMP,
+                      fontRevision=1.0, lowestRecPPEM=8)
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        fb.save(args.out)
 
-    with open(args.out, "rb") as f:
-        blob = f.read()
-    fp = fnv1a64(blob)
-    log(f"  wrote {args.out} ({len(blob)} bytes)  fnv1a64 = 0x{fp:016x}")
+        with open(args.out, "rb") as f:
+            blob = f.read()
+        fp = fnv1a64(blob)
+        log(f"  wrote {args.out} ({len(blob)} bytes)  fnv1a64 = 0x{fp:016x}")
 
-    # round-trip + render checks
-    rt = TTFont(args.out)
-    assert set(rt.getBestCmap()) >= {ord(c) for c in COVERAGE} | {0x20}, "cmap gap"
-    rt.close()
-    check = trace.load_face(args.out, 64)
-    for ch in COVERAGE:
-        m, _, _, adv = trace.render(check, ch)
-        assert m.any(), f"{ch!r} renders blank"
-        assert adv > 0, f"{ch!r} zero advance"
-    log("  round-trip + freetype render OK")
+        # round-trip + render checks
+        rt = TTFont(args.out)
+        assert set(rt.getBestCmap()) >= {ord(c) for c in COVERAGE} | {0x20}, "cmap gap"
+        rt.close()
+        check = trace.load_face(args.out, 64)
+        for ch in COVERAGE:
+            m, _, _, adv = trace.render(check, ch)
+            assert m.any(), f"{ch!r} renders blank"
+            assert adv > 0, f"{ch!r} zero advance"
+        log("  round-trip + freetype render OK")
+        return dict(fp=fp, bounds=bounds, metrics=metrics, x_height=x_height,
+                    cap_built=cap_built, ascender=ascender,
+                    descender=descender)
+
+    assemble()
+
+    log("== pen traces")
+    warns, covers, cells, px, tglyphs = emit_traces(None, args.out, 0, pen)
+    for ch, cov in covers.items():
+        log(f"    {ch}: strokes={len(routes.ROUTES[ch])} cover={cov:.3f}"
+            + ("  <-- low" if cov < 0.95 else ""))
+    for w in warns:
+        log(f"    !! {w}")
+    assert not warns, f"{len(warns)} tracing warning(s)"
+    worst = min(covers.values())
+    assert worst >= 0.95, f"route coverage {worst:.3f} too low"
+    trace_strokes = {ch: [s for s in st if len(s) >= 2]
+                     for ch, _m, _l, _t, st in cells}
+
+    art = assemble(trace_strokes)
+    fp = art["fp"]
+    bounds, metrics = art["bounds"], art["metrics"]
+    x_height, cap_built = art["x_height"], art["cap_built"]
+    ascender, descender = art["ascender"], art["descender"]
+
+    # Built-vs-reference silhouette gate: every glyph with a reference must
+    # match its silhouette to within ~a pen radius. This is what catches a
+    # swallowed terminal (the truncated '2' scored 0.959 here) or any future
+    # trim/fit regression; `!?` are authored and have no reference.
+    val_ppem = 256
+    # the reference upem is 3000 and its letters sit at a different fraction
+    # of the em than ours — render it at a k-scaled ppem so px/unit matches
+    ref_ppem = int(round(val_ppem * upem_ref * k / UPEM))
+    f_built = trace.load_face(args.out, val_ppem)
+    f_ref = {"regular": trace.load_face(ref["regular"], ref_ppem),
+             "regnum": trace.load_face(stripped, ref_ppem),
+             "bold": trace.load_face(ref["bold"], ref_ppem)}
+    tol = val_ppem * 0.02
+    built_cov = {}
+    for ch in LOWER + UPPER + DIGITS + PUNCT:
+        _iou, built_cov[ch] = silhouette_match(
+            trace.render(f_ref[src[ch]], ch)[0],
+            trace.render(f_built, ch)[0], tol)
+    worst = min(built_cov, key=built_cov.get)
+    log(f"  built vs reference: coverage min {built_cov[worst]:.4f} "
+        f"({worst!r}) mean {np.mean(list(built_cov.values())):.4f}")
+    for ch, cov in built_cov.items():
+        # ',' tapers to a point sharper than the pen (like the A apex, a
+        # known limitation) and legitimately sits at ~0.95.
+        floor = 0.94 if ch == "," else 0.97
+        assert cov >= floor, (
+            f"built {ch!r} drifted from the reference silhouette "
+            f"({cov:.3f} < {floor}) — check its terminals/fit")
 
     m = dict(x_height=x_height, cap=cap_built, ascender=ascender,
              descender=descender, pen=pen, slope=slope)
@@ -1200,22 +1422,23 @@ def main():
     if args.traces or dry:
         path = TRACES_RS if args.traces else dry
         log(f"== tracing data -> {path}")
-        warns, covers, cells, px = emit_traces(path, args.out, fp, pen)
-        for ch, cov in covers.items():
-            n = len(routes.ROUTES[ch])
-            log(f"    {ch}: strokes={n} cover={cov:.3f}"
-                + ("  <-- low" if cov < 0.95 else ""))
-        for w in warns:
-            log(f"    !! {w}")
-        trace.write_debug(args.trace_debug, cells, px)
+        # the final font IS the extrusion of these strokes; bake them with
+        # the final fingerprint, and re-render the final ink for the shipped
+        # extremes + the debug sheet's grey underlay
+        face_f = trace.load_face(args.out, TRACE_PPEM)
+        p2u = UPEM / TRACE_PPEM
+        cells_f, extr = [], {}
+        for ch, _mask, _left, _top, st in cells:
+            mask, left, top, _adv = trace.render(face_f, ch)
+            rows_a, _ = np.where(mask)
+            extr[ch] = ((top - rows_a.max() - 0.5) * p2u,
+                        (top - rows_a.min() - 0.5) * p2u)
+            cells_f.append((ch, mask, left, top, st))
+        trace.write_rust(path, tglyphs, UPEM, extr["x"][1], extr["l"][1],
+                         extr["g"][0], pen, fp, traces_header(fp))
+        trace.write_debug(args.trace_debug, cells_f, px)
         log(f"    wrote {args.trace_debug} — eyeball it against "
             "tas-beginners-chart.png")
-        # Assert *after* the sheet: a failure is exactly when you want to look
-        # at it. Worst real coverage is ~0.98 (a knot bridge the pen steps
-        # around); anything under 0.95 is a branch the route never visited.
-        assert not warns, f"{len(warns)} tracing warning(s)"
-        worst = min(covers.values())
-        assert worst >= 0.95, f"route coverage {worst:.3f} too low"
 
     log(f"done in {time.time() - t0:.1f}s")
 

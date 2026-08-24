@@ -50,9 +50,12 @@ ROUTES = {
     # Oval segment only: 2 o'clock, anticlockwise, out to the right.
     "c": [[(0.87, 0.85), (0.06, 0.39), (0.95, 0.32)]],
     # Oval, then on UP the closing side to the ascender, then all the way down
-    # and out through the exit flick.
+    # and out through the exit flick. The closing-side waypoint sits a little
+    # way up the stem, ABOVE the bowl/tail junction: at (0.64, 0.24) it
+    # snapped past the junction onto tail-side ink, sending the pen a few
+    # pixels down the wrong branch and back (a visible spur).
     "d": [[(0.73, 0.45), (0.27, 0.45), (0.05, 0.21), (0.28, 0.03),
-           (0.64, 0.24), (0.96, 0.97), (0.96, 0.12)]],
+           (0.64, 0.35), (0.96, 0.97), (0.96, 0.12)]],
     # Starts low, on the crossbar: up to the right, round the loop
     # anticlockwise, back through the start and out along the bottom.
     "e": [[(0.13, 0.47), (0.66, 0.57), (0.91, 0.92), (0.37, 0.82),
@@ -156,10 +159,23 @@ EXPECTED_REVERSALS = {
     # straight back up it. The foot is a free tip, but the sharpest pixel of
     # the turn sits a pixel or two short of it, i.e. on plain degree-2 ink.
     "b": 1,  # (0.05,0.03) stem foot
-    "h": 1,  # (0.05,0.03) stem foot
+    # h's foot turn grew a detectable wedge branch in the current reference
+    # extraction, so the pen excurses into it (not a bare reversal) — 0.
     "n": 1,  # (0.05,0.05) stem foot
     "p": 1,  # (0.04,0.03) foot of the descender
-    "k": 2,  # (0.05,0.03) stem foot + (0.22,0.26) loop closing onto the stem
+    # k: the loop-closing touch at (0.22,0.26) sits in the stem junction's
+    # crotch zone, which the chain-structured emitter treats as a branch
+    # departure, not a pen reversal — only the stem foot counts now.
+    "k": 1,  # (0.05,0.03) stem foot
+    # Anticlockwise family: the closure-top cusp — the pen closes the bowl,
+    # touches the top of the closing side and runs straight back down the
+    # same ink. On q that cusp sits on plain degree-2 ink, so it registers
+    # here; on a and g the same cusp lands on the junction knot (degree >= 3)
+    # and is not counted, and d's turn is at the ascender tip (degree 1) —
+    # also not counted. (d used to register 1 here, but that was the
+    # waypoint-overshoot spur its old (0.64, 0.24) closing-side waypoint
+    # caused, not the letterform.)
+    "q": 1,  # (0.92,0.90) closure top
     # Wave family: u rises to x-height on the right and comes straight back
     # down the same ink — the one reversal the chart draws as two arrows.
     "u": 1,  # (0.95,0.96) top right

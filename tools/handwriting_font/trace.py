@@ -282,32 +282,198 @@ def wedge_detour(t, d, route_set, sk):
 
 
 def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
-    """Split the routed path at sharp turns, send each turn down its retrace
-    wedge (the unvisited skeleton branch + a raycast to the ink boundary),
-    extend the route ends to the ink boundary, and smooth each piece with its
-    ends pinned — so reversals stay sharp and reach the bottom of their wedge
-    instead of being rounded off early. Also returns the count of mid-line
-    reversals (~180 deg turns on a degree-2 pixel with no wedge beyond), for
-    the EXPECTED_REVERSALS overshoot check."""
+    """Phase-structured pen geometry for one routed stroke.
+
+    These letterforms are, by design, a tiny number of pen *phases*
+    separated only by full stops of the pen: reversal cusps (stem feet,
+    the a/d/g/q closure tops, u's top) and hard corners (v/w vertices,
+    z's corners). Within one phase the pen's tangent angle turns one way
+    or not at all — it never inflects (the s is the single designed
+    exception, with exactly one inflection; k's loop-and-leg pinch is the
+    other single-peak phase). Earlier emitters tried to *repair*
+    curvature-sign flips join by join; this one makes them impossible by
+    construction:
+
+    - The path is cut ONLY at sharp turns / mitred vertices. Everything
+      between two cuts is one phase — junction pass-throughs, retraces
+      and branch departures included.
+    - Per phase, junction-crotch pixels (nearer a degree>=3 skeleton
+      pixel than ~its local ink half-width) are excised — the medial
+      axis is a crotch artifact there, not the stroke's centerline — and
+      the phase bridges straight across.
+    - The phase's tangent angle theta(s) is replaced by its best
+      *monotone* fit (weighted isotonic regression via pool-adjacent-
+      violators, both directions), so curvature = d theta/ds cannot
+      change sign anywhere inside a phase. A phase whose theta genuinely
+      rises then falls (s; k) falls back to the best single-peak fit —
+      one inflection, no more. Near-constant runs of the fitted angle
+      are flattened outright: a stem inside a phase (d's descent) is a
+      dead-straight line, not a monotone wander. The rebuild keeps the
+      original segment lengths, distributes the endpoint error along arc
+      length, and reverts to the input if it would leave the ink.
+    - A phase that *starts* at a reversal and re-inks a long run of
+      prior ink before branching off (the m/n/h arches, the b/p/k bowls)
+      may replace that literal retrace with one tangential sweep — a
+      biarc launched along the retrace direction, joining the branch
+      where the curvature step is smallest — but only when the sweep
+      clearly leaves the retrace's corridor (m's crotch cut) AND stays
+      inside the ink; otherwise the retrace is drawn literally (the
+      a/d/g/q/u/y descents, which coincide with the pass they re-ink).
+    - Reversal cusps get a straight out-and-back dip along the turn's
+      bisector so the pen touches the actual ink tip the skeleton stops
+      short of; a free stroke end gets a tangential tip extension, and a
+      stroke ending against an earlier line (b's bowl onto its stem)
+      lands exactly on the drawn line.
+
+    Returns (points, midline_reversal_count) as before."""
     k = TURN_LOOKAHEAD
     deg = degree_map(sk)
-    turns = turns_and_vertices(path)
     route_set = set(path)
     last = len(path) - 1
 
-    def end_ext(idx, back_idx):
-        if deg[path[idx]] != 1:
-            return None
-        d = unit_vec((path[idx][0] - path[back_idx][0], path[idx][1] - path[back_idx][1]))
-        return ray_extend(path[idx], d, mask, radius)
+    # --- junction crotch zones ---------------------------------------------
+    junctions = [p for p in route_set if deg[p] >= 3]
 
-    # Per-turn excursion: into-the-wedge points the pen visits and backtracks.
+    def in_zone(p):
+        if not junctions:
+            return False
+        r = 1.5 * float(radius[p]) + 1.0
+        return any((p[0]-j[0])**2 + (p[1]-j[1])**2 <= r*r for j in junctions)
+
+    # --- retrace map + phase cuts ------------------------------------------
+    first_seen = {}
+    revisit = []
+    for i, p in enumerate(path):
+        revisit.append(p in first_seen)
+        if p not in first_seen:
+            first_seen[p] = i
+    turns = turns_and_vertices(path)
+    bounds = sorted({0, last} | {c for c in turns if 0 < c < last})
+    turns_set = set(turns)
+
+    def _turn_dot(c):
+        a0, a1 = max(0, c - k), min(last, c + k)
+        d_in = unit_vec((path[c][0]-path[a0][0], path[c][1]-path[a0][1]))
+        d_out = unit_vec((path[a1][0]-path[c][0], path[a1][1]-path[c][1]))
+        return d_in[0]*d_out[0] + d_in[1]*d_out[1]
+
+    def is_reversal_cut(c):
+        """A cut where the pen genuinely stops and reverses — kept as a hard
+        V. That is any sharp turn away from a junction (stem feet, the z
+        corner, v/w vertices), and, ON a junction, a near-total direction
+        flip into a *retrace* (the a/d/g/q closure tops: up the closing side
+        and straight back down the same ink). A junction turn into fresh ink
+        (b peeling off its stem into the bowl) is a phase handoff however
+        sharp it looks in the raw path."""
+        if c not in turns_set:
+            return False
+        if deg[path[c]] < 3 and not in_zone(path[c]):
+            return True
+        # the turn index can sit a few pixels off the actual flip pixel, so
+        # look a few pixels out on both sides
+        into_retrace = (any(revisit[min(c + j, last)] for j in (2, 4, 6))
+                        and not revisit[max(c - 4, 0)])
+        return into_retrace and _turn_dot(c) < -0.7
+
+    # inverse of to_units (it is affine in (row, col)) for inside-ink checks
+    _u00 = to_units((0.0, 0.0))
+    _sx = to_units((0.0, 1.0))[0] - _u00[0]
+
+    def _px_of(u):
+        return (int(round((_u00[1] - u[1]) / _sx)),
+                int(round((u[0] - _u00[0]) / _sx)))
+
+    def _inside(u):
+        r, c = _px_of(u)
+        return 0 <= r < mask.shape[0] and 0 <= c < mask.shape[1] and mask[r, c]
+
+    # --- shared straight lines ---------------------------------------------
+    # Every >=10 px retrace in these letterforms re-inks a straight stem or
+    # riser (the d/a/g/q stems, the u/y risers, the b/p/k/m/n/h stem feet).
+    # Both passes must draw the SAME line — two independent fits of the same
+    # pixels diverge by a few units, which renders as a split line — so fit
+    # the line once per reversal and pin both passes' pixels onto it.
+    pin_of = {}
+    for c in bounds[1:-1]:
+        if not is_reversal_cut(c):
+            continue
+        pref = 0
+        while c + pref + 1 <= last and revisit[c + pref + 1]:
+            pref += 1
+        if pref < 10:
+            continue
+        pix = [path[c]] + [path[i] for i in range(c + 1, c + pref + 1)]
+        U = [to_units(p) for p in pix]
+        mx = sum(u[0] for u in U) / len(U)
+        my = sum(u[1] for u in U) / len(U)
+        sxx = sum((u[0]-mx)**2 for u in U)
+        syy = sum((u[1]-my)**2 for u in U)
+        sxy = sum((u[0]-mx)*(u[1]-my) for u in U)
+        ang = 0.5 * math.atan2(2.0*sxy, sxx - syy)
+        dvec = (math.cos(ang), math.sin(ang))
+        if max(abs((u[0]-mx)*dvec[1] - (u[1]-my)*dvec[0]) for u in U) > 8.0:
+            continue  # not the straight retrace these letterforms use
+        for p, u in zip(pix, U):
+            t = (u[0]-mx)*dvec[0] + (u[1]-my)*dvec[1]
+            pin_of[p] = (mx + t*dvec[0], my + t*dvec[1])
+
+    def _to_units_pinned(p):
+        return pin_of.get(p) or to_units(p)
+
+    def _inside_soft(u):
+        """Like `_inside` but tolerant of one pixel of boundary rasteriz-
+        ation — the monotone rebuild moves samples a unit or two, which
+        must not disqualify a rebuild that merely grazes the outline."""
+        r, c = _px_of(u)
+        return any(0 <= r+dr < mask.shape[0] and 0 <= c+dc < mask.shape[1]
+                   and mask[r+dr, c+dc]
+                   for dr in (-1, 0, 1) for dc in (-1, 0, 1))
+
+    def tangent_ext(pts, at_start, land_on=None):
+        """Tangential tip extension of a smoothed polyline: continue along
+        its own end tangent to just short of the ink boundary. Doubles as
+        the tangential landing for a stroke that ends against another
+        stroke's line (b's bowl closing onto its stem)."""
+        if len(pts) < 3:
+            return None
+        # the immediate end segment, so the joint itself cannot kink (a
+        # longer tangent baseline disagrees with it on a curling tip)
+        if at_start:
+            a, b = pts[0], pts[1]
+        else:
+            a, b = pts[-1], pts[-2]
+        t = unit_vec((a[0] - b[0], a[1] - b[1]))
+        if t == (0.0, 0.0):
+            return None
+        r_px, c_px = _px_of(a)
+        if not (0 <= r_px < mask.shape[0] and 0 <= c_px < mask.shape[1]):
+            return None
+        cap = max(3.0, float(radius[r_px, c_px]) * 2.4) * abs(_sx)
+        step = abs(_sx)
+        run, d = 0.0, 0.0
+        while d + step <= cap:
+            d += step
+            q = (a[0] + t[0] * d, a[1] + t[1] * d)
+            if not _inside(q):
+                break
+            if land_on is not None:
+                for lp in land_on:
+                    if math.hypot(q[0]-lp[0], q[1]-lp[1]) < 3.5:
+                        return q  # touch the drawn line exactly
+            run = d
+        if run <= step:
+            return None
+        return (a[0] + t[0] * run * 0.85, a[1] + t[1] * run * 0.85)
+
+    # --- excursions: only at true reversals (not at branch junctions) ------
     excursion = {}
     midline_reversals = 0
     for i in turns:
         d_in = unit_vec((path[i][0] - path[i - k][0], path[i][1] - path[i - k][1]))
         d_out = unit_vec((path[i + k][0] - path[i][0], path[i + k][1] - path[i][1]))
         d = unit_vec((d_in[0] - d_out[0], d_in[1] - d_out[1]))
+        if not is_reversal_cut(i):
+            continue  # branch departure, not a pen reversal
         ex = wedge_detour(path[i], d, route_set, sk)
         if (ex is None and deg[path[i]] == 2
                 and d_in[0] * d_out[0] + d_in[1] * d_out[1] < -0.86):
@@ -323,28 +489,384 @@ def process_stroke(path, mask, radius, sk, to_units, smooth_win, resample):
             if ray:
                 excursion[i] = [ray]
 
-    bounds = [0] + turns + [last]
-    pieces = []
-    for s, e in zip(bounds, bounds[1:]):
-        seg = list(path[s:e + 1])
-        if s == 0:
-            r = end_ext(0, min(8, last))
-            if r:
-                seg = [r] + seg
-        if e == last:
-            r = end_ext(last, max(0, last - 8))
-            if r:
-                seg = seg + [r]
-        pieces.append(seg)
-        if e != last and e in excursion:
-            ex = excursion[e]
-            pieces.append([path[e]] + ex)
-            pieces.append(list(reversed(ex)) + [path[e]])
+    def _arcs(pts):
+        arc = [0.0]
+        for a, b in zip(pts, pts[1:]):
+            arc.append(arc[-1] + math.hypot(b[0]-a[0], b[1]-a[1]))
+        return arc
 
+    def clip(pts, f0, f1):
+        """Sub-polyline of pts between arc fractions f0..f1 (may be reversed)."""
+        seg_l = [math.hypot(b[0]-a[0], b[1]-a[1]) for a, b in zip(pts, pts[1:])]
+        arc = [0.0]
+        for L in seg_l:
+            arc.append(arc[-1] + L)
+        total = arc[-1] or 1.0
+        lo, hi = sorted((f0 * total, f1 * total))
+        def at(t):
+            for i in range(len(seg_l)):
+                if arc[i + 1] >= t or i == len(seg_l) - 1:
+                    u = (t - arc[i]) / (seg_l[i] or 1.0)
+                    return (pts[i][0] + (pts[i+1][0]-pts[i][0]) * u,
+                            pts[i][1] + (pts[i+1][1]-pts[i][1]) * u)
+        out = [at(lo)]
+        out += [p for t, p in zip(arc, pts) if lo < t < hi]
+        out.append(at(hi))
+        if f0 > f1:
+            out.reverse()
+        return out
+
+    def _circ_arc(p0, p1, t1):
+        """The unique constant-curvature path from `p0` to `p1` arriving
+        along unit tangent `t1`: a circular arc (or a straight segment when
+        p0 sits on the tangent line). Returns (samples p0->p1, |curvature|)
+        or None for a degenerate/wrap-around configuration."""
+        d = (p0[0] - p1[0], p0[1] - p1[1])
+        chord = math.hypot(*d)
+        if chord < 1e-9:
+            return None
+        n_l = (-t1[1], t1[0])  # left normal of the arrival tangent
+        nd = n_l[0]*d[0] + n_l[1]*d[1]
+        if abs(nd) < 1e-6 * chord:  # collinear: straight diagonal
+            k = max(2, int(round(chord / resample)))
+            return ([(p0[0] + (p1[0]-p0[0]) * i / k,
+                      p0[1] + (p1[1]-p0[1]) * i / k) for i in range(k + 1)], 0.0)
+        r = (chord * chord) / (2.0 * nd)   # signed: + = center on the left
+        c = (p1[0] + n_l[0]*r, p1[1] + n_l[1]*r)
+        a0 = math.atan2(p0[1]-c[1], p0[0]-c[0])
+        a1 = math.atan2(p1[1]-c[1], p1[0]-c[0])
+        # arrival velocity along the circle at p1 is +-r*(-sin a1, cos a1);
+        # sweep in the rotation sense whose end velocity matches +t1
+        ccw_v = (-math.sin(a1), math.cos(a1))
+        sense = 1.0 if ccw_v[0]*t1[0] + ccw_v[1]*t1[1] > 0 else -1.0
+        sweep = (a1 - a0) * sense
+        while sweep < 0:
+            sweep += 2 * math.pi
+        if sweep > math.pi * 1.2:  # would loop the long way round — reject
+            return None
+        k = max(2, int(round(abs(r) * sweep / resample)))
+        pts = [(c[0] + abs(r) * math.cos(a0 + sense * sweep * i / k) * 1.0,
+                c[1] + abs(r) * math.sin(a0 + sense * sweep * i / k) * 1.0)
+               for i in range(k + 1)]
+        # radius sign got folded into c; regenerate from actual endpoints
+        pts[0], pts[-1] = p0, p1
+        # signed curvature w.r.t. the sampled traversal: left turn positive
+        return pts, sense / abs(r)
+
+    def _max_dev(pts, ref):
+        """Max distance from samples `pts` to polyline `ref` (vertex metric)."""
+        if not ref:
+            return float("inf")
+        ra = np.asarray(ref, dtype=float)
+        worst = 0.0
+        for p in pts:
+            d = float(np.min(np.hypot(ra[:, 0] - p[0], ra[:, 1] - p[1])))
+            worst = max(worst, d)
+        return worst
+
+    def _biarc(p0, t0, p1, t1):
+        """G1 pair of circular arcs from (p0, t0) to (p1, t1) — the classic
+        equal-tangent-length construction. Returns (samples, k1, k2) with the
+        two signed curvatures along the traversal, or None."""
+        A = (p1[0]-p0[0], p1[1]-p0[1])
+        u = (t0[0]+t1[0], t0[1]+t1[1])
+        qa = u[0]*u[0] + u[1]*u[1] - 4.0
+        qb = -2.0 * (A[0]*u[0] + A[1]*u[1])
+        qc = A[0]*A[0] + A[1]*A[1]
+        if qc < (0.5 * resample) ** 2:
+            return None
+        if abs(qa) < 1e-9:
+            if abs(qb) < 1e-12:
+                return None
+            L = -qc / qb
+        else:
+            disc = qb*qb - 4*qa*qc
+            if disc < 0:
+                return None
+            r1 = (-qb + math.sqrt(disc)) / (2*qa)
+            r2 = (-qb - math.sqrt(disc)) / (2*qa)
+            L = min((x for x in (r1, r2) if x > 1e-9), default=None)
+            if L is None:
+                return None
+        m0 = (p0[0] + L*t0[0], p0[1] + L*t0[1])
+        m1 = (p1[0] - L*t1[0], p1[1] - L*t1[1])
+        jn = ((m0[0]+m1[0])/2.0, (m0[1]+m1[1])/2.0)
+        g1 = _circ_arc(jn, p0, (-t0[0], -t0[1]))
+        g2 = _circ_arc(jn, p1, t1)
+        if g1 is None or g2 is None:
+            return None
+        first = list(reversed(g1[0]))
+        # g1 was sampled jn->p0; traversing it reversed flips its sign
+        return first + g2[0][1:], -g1[1], g2[1]
+
+    FLAT_K = 1.0 / 1200.0
+
+    def _sign_ok(k, k_ref):
+        """A transition arc's curvature is acceptable when it is essentially
+        flat, its reference is flat, or the two curve the same way."""
+        return abs(k) < FLAT_K or abs(k_ref) < FLAT_K or k * k_ref > 0
+
+    def _local_sign(pts, i, w=4):
+        """Signed curvature of a polyline around vertex i (circumcircle of a
+        spread triple)."""
+        a = pts[max(0, i - w)]
+        b = pts[i]
+        c = pts[min(len(pts) - 1, i + w)]
+        ab = math.hypot(b[0]-a[0], b[1]-a[1])
+        bc = math.hypot(c[0]-b[0], c[1]-b[1])
+        ca = math.hypot(a[0]-c[0], a[1]-c[1])
+        if ab * bc * ca < 1e-9:
+            return 0.0
+        cross = (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+        return 2.0 * cross / (ab * bc * ca)
+
+    def blend_into(p0, t_launch, nxt_pts, replay_pts, corridor):
+        """Sweep from the reversal point `p0` into the polyline `nxt_pts`,
+        leaving tangentially along `t_launch` (the line the pen just drew —
+        the sweep peels off the stem, it does not break away at an angle)
+        and arriving tangentially on the branch: a biarc, G1 at both ends.
+        The join point is chosen to make the biarc closest to a single arc
+        (min curvature step between its halves), among joins whose sweep
+        stays inside the ink and curves the way the branch curves.
+
+        The sweep must also make sense against the literal retrace
+        (`replay_pts`): it is kept only when it clearly leaves the stroke's
+        corridor (m's crotch sweep). A sweep that merely bows a few units
+        off the retrace reads as a sloppy line, not a join, so it is
+        rejected in favour of the exact retrace.
+        Returns (samples, join_fraction) or None."""
+        arc = _arcs(nxt_pts)
+        total = arc[-1]
+        if total < 4 * resample:
+            return None
+        best = None
+        for i in range(2, len(nxt_pts) - 2):
+            if arc[i] < 3 * resample:
+                continue
+            if arc[i] > 0.6 * total:
+                break
+            p1 = nxt_pts[i]
+            t1 = unit_vec((nxt_pts[i+1][0] - nxt_pts[i-1][0],
+                           nxt_pts[i+1][1] - nxt_pts[i-1][1]))
+            got = _biarc(p0, t_launch, p1, t1)
+            if got is None:
+                continue
+            pts, k1, k2 = got
+            # the whole sweep must curve the way the branch it joins curves
+            # (or be flat): a wrong-sign half is a visible S-flick at launch
+            kb = _local_sign(nxt_pts, i)
+            if not (_sign_ok(k1, kb) and _sign_ok(k2, kb)):
+                continue
+            if not all(_inside(p) for p in pts[1:-1]):
+                continue
+            dev = _max_dev(pts, replay_pts)
+            if dev <= corridor:
+                # anything short of a clear corridor departure is drawn as
+                # the exact retrace — a subtly bowed sweep splits visibly
+                # from the pass it should coincide with
+                continue
+            score = abs(k1 - k2)
+            if best is None or score < best[0]:
+                best = (score, pts, arc[i] / total)
+        if best is None:
+            return None
+        return best[1], best[2]
+
+    # --- monotone tangent angle --------------------------------------------
+    def _pava(y, w, sign):
+        """Weighted isotonic regression by pool-adjacent-violators: the
+        closest (weighted L2) nondecreasing (sign=+1) or nonincreasing
+        (sign=-1) sequence to y."""
+        vals, wts, cnts = [], [], []
+        for v, wt in zip(y, w):
+            vals.append(sign * v)
+            wts.append(wt)
+            cnts.append(1)
+            while len(vals) > 1 and vals[-2] > vals[-1]:
+                tw = wts[-2] + wts[-1]
+                nv = (vals[-2] * wts[-2] + vals[-1] * wts[-1]) / tw
+                vals[-2:] = [nv]
+                wts[-2:] = [tw]
+                cnts[-2:] = [cnts[-2] + cnts[-1]]
+        fit = []
+        for v, c in zip(vals, cnts):
+            fit.extend([sign * v] * c)
+        return fit
+
+    def _mono_theta(pts):
+        """Monotone-curvature rebuild of one phase: fit the tangent angle
+        with the best monotone (or, failing that, single-peak) sequence,
+        flatten near-constant runs to dead straight, and rebuild the
+        polyline with the original segment lengths. Bails back to the
+        input when the rebuild leaves the ink or shifts the endpoint too
+        far (a fit that bad means the phase model is wrong here)."""
+        if len(pts) < 6:
+            return pts
+        P = [tuple(p) for p in pts]
+        segs = [(b[0]-a[0], b[1]-a[1]) for a, b in zip(P, P[1:])]
+        L = [math.hypot(*sg) for sg in segs]
+        if min(L) < 1e-9:
+            return pts
+        theta = np.unwrap(np.arctan2([sg[1] for sg in segs],
+                                     [sg[0] for sg in segs])).tolist()
+
+        def sse(fit):
+            return sum(wt * (a - b) ** 2 for a, b, wt in zip(fit, theta, L))
+
+        best = None
+        for sign in (1.0, -1.0):
+            fit = _pava(theta, L, sign)
+            s_ = sse(fit)
+            if best is None or s_ < best[0]:
+                best = (s_, fit)
+        if best[0] > 0.02 * sum(L):
+            # a genuine one-inflection phase (the s; k's loop-and-leg):
+            # best rise-then-fall / fall-then-rise split, searched coarsely
+            n = len(theta)
+            for cut in range(4, n - 4, 3):
+                for s0 in (1.0, -1.0):
+                    fit = (_pava(theta[:cut], L[:cut], s0)
+                           + _pava(theta[cut:], L[cut:], -s0))
+                    s_ = sse(fit)
+                    if s_ < best[0]:
+                        best = (s_, fit)
+        fit = best[1]
+        # flatten near-constant runs: a straight limb inside a phase (d's
+        # stem descent, the v/w arms) must be a line, not a monotone
+        # wander; pooling a run to its weighted mean preserves monotonicity
+        # (the mean sits between the run's extremes, which sit between the
+        # neighbouring fitted values)
+        i0, n = 0, len(fit)
+        while i0 < n:
+            i1 = i0
+            lo = hi = fit[i0]
+            arc_run = L[i0]
+            while i1 + 1 < n:
+                nlo, nhi = min(lo, fit[i1+1]), max(hi, fit[i1+1])
+                if nhi - nlo > 0.06:
+                    break
+                lo, hi = nlo, nhi
+                i1 += 1
+                arc_run += L[i1]
+            if i1 > i0 and arc_run > 50.0:
+                tw = sum(L[i0:i1+1])
+                mean = sum(f * wt for f, wt in zip(fit[i0:i1+1], L[i0:i1+1])) / tw
+                for j in range(i0, i1 + 1):
+                    fit[j] = mean
+            i0 = i1 + 1
+        # rebuild with original segment lengths; close the endpoint gap by
+        # distributing it along arc length
+        piece = [P[0]]
+        for th, ln in zip(fit, L):
+            piece.append((piece[-1][0] + math.cos(th) * ln,
+                          piece[-1][1] + math.sin(th) * ln))
+        arc = _arcs(P)
+        total = arc[-1] or 1.0
+        err = (P[-1][0] - piece[-1][0], P[-1][1] - piece[-1][1])
+        if math.hypot(*err) > 0.15 * total:
+            return pts
+        rebuilt = [(p[0] + err[0] * t / total, p[1] + err[1] * t / total)
+                   for p, t in zip(piece, arc)]
+        if not all(_inside_soft(p) for p in rebuilt[1:-1]):
+            return pts
+        return rebuilt
+
+    # --- emit phase by phase -----------------------------------------------
     out = []
-    for seg in pieces:
-        pts = smooth_resample(seg, to_units, resample, smooth_win)
-        out.extend(pts[1:] if out else pts)
+
+    def emit(pts):
+        if not pts:
+            return
+        out.extend(pts[1:] if out else list(pts))
+
+    for s, e in zip(bounds, bounds[1:]):
+        seg = [path[i] for i in range(s, e + 1)]
+        # excise crotch-zone interiors; keep the pinned ends — except a
+        # stroke END landing on a junction (b's bowl closing onto its stem):
+        # there the knot pin kinks, so drop it and land tangentially below
+        keep = [seg[0]] + [p for p in seg[1:-1] if not in_zone(p)] + [seg[-1]]
+        land_tail = e == last and (deg[seg[-1]] >= 3 or in_zone(seg[-1]))
+        if land_tail and len(keep) > 3:
+            keep = keep[:-1]
+            # also shed tail points already riding on an earlier phase's
+            # line (the b bowl-close curling over its stem) so the landing
+            # walk meets it cleanly instead of looping
+            while len(keep) > 4:
+                u = to_units(keep[-1])
+                if any(math.hypot(u[0]-lp[0], u[1]-lp[1]) < 10.0
+                       for lp in out[::2]):
+                    keep.pop()
+                else:
+                    break
+        pts = _mono_theta(smooth_resample(keep, _to_units_pinned, resample,
+                                          smooth_win))
+        # sweep: a phase that starts at a reversal and re-inks a long run
+        # of prior ink before branching off may replace the retrace with
+        # one tangential arc into the branch
+        if s != 0 and is_reversal_cut(s):
+            pref = 0
+            while s + pref + 1 <= e and revisit[s + pref + 1]:
+                pref += 1
+            if pref >= 10 and len(pts) >= 8:
+                u_end = _to_units_pinned(path[s + pref])
+                j = min(range(len(pts)),
+                        key=lambda a: (pts[a][0]-u_end[0])**2
+                                      + (pts[a][1]-u_end[1])**2)
+                prefix, rest = pts[:j+1], pts[j:]
+                if len(prefix) >= 3 and len(rest) >= 4:
+                    med_r = float(np.median([radius[path[i]]
+                                             for i in range(s, s + pref + 1)]))
+                    corridor = 3.2 * med_r * abs(_sx)
+                    t_launch = unit_vec((pts[2][0]-pts[0][0],
+                                         pts[2][1]-pts[0][1]))
+                    res = (blend_into(pts[0], t_launch, rest, prefix, corridor)
+                           if t_launch != (0.0, 0.0) else None)
+                    if res:
+                        pts = res[0] + clip(rest, res[1], 1.0)[1:]
+        # tangential tip extensions along the *smoothed* end directions
+        if s == 0 and deg[seg[0]] == 1:
+            tip = tangent_ext(pts, at_start=True)
+            if tip:
+                pts = [tip] + pts
+        if e == last and (deg[seg[-1]] == 1 or land_tail):
+            prior = out[::2] if land_tail else None
+            already = prior and any(
+                math.hypot(pts[-1][0]-lp[0], pts[-1][1]-lp[1]) < 4.0
+                for lp in prior)
+            tip = None if already else tangent_ext(pts, at_start=False,
+                                                   land_on=prior)
+            if tip:
+                pts = pts + [tip]
+        emit(pts)
+        # cusp dip at a reversal: straight out-and-back along the turn's
+        # bisector — the skeleton wedge branch curls sideways, the pen
+        # should not
+        if e != last and e in excursion and len(out) >= 4:
+            a0, a1 = max(0, e - k), min(last, e + k)
+            di = unit_vec((path[e][0]-path[a0][0], path[e][1]-path[a0][1]))
+            do = unit_vec((path[a1][0]-path[e][0], path[a1][1]-path[e][1]))
+            bis = unit_vec((di[0]-do[0], di[1]-do[1]))
+            # pixel (row, col) -> unit direction (x right, y up)
+            t_dir = unit_vec((bis[1], -bis[0]))
+            tips = []
+            if t_dir != (0.0, 0.0):
+                r_px = int(round((_u00[1] - out[-1][1]) / _sx))
+                c_px = int(round((out[-1][0] - _u00[0]) / _sx))
+                cap = 0.0
+                if 0 <= r_px < mask.shape[0] and 0 <= c_px < mask.shape[1]:
+                    cap = max(3.0, float(radius[r_px, c_px]) * 2.4) * abs(_sx)
+                step = max(1.5, resample * 0.5)
+                dwalk = 0.0
+                while dwalk + step <= cap:
+                    dwalk += step
+                    q = (out[-1][0] + t_dir[0]*dwalk,
+                         out[-1][1] + t_dir[1]*dwalk)
+                    if not _inside(q):
+                        break
+                    tips.append(q)
+                tips = tips[:int(len(tips) * 0.85)]
+            emit(tips)
+            emit(list(reversed(tips)))
     return out, midline_reversals
 
 

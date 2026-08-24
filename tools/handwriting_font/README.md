@@ -83,6 +83,10 @@ Per glyph, `build.py`:
    own width (a skeleton keeps going into a taper, and a round pen laid there
    paints a stub), otherwise push it out so the round cap lands on the reference
    ink boundary — a skeleton stops about one pen radius short of a stroke end.
+   A trimmed end is never re-extended (that guard keeps the A/N/M apexes
+   blunt instead of stubby), so a long gradual exit taper is swallowed whole;
+   the known casualty — the `2` base bar — is re-extended explicitly via
+   `TERMINAL_EXTEND`, in final font units along the end tangent.
 5. **Smooth** (boxcar) and resample at a fixed arc-length step.
 6. **Normalize** to upem 1000 with a single scale `k`, pinned so the *built*
    `x` has an ink top of exactly 400. (Stroke expansion is a Minkowski sum, so
@@ -91,6 +95,14 @@ Per glyph, `build.py`:
    centerline; dots keep their measured radius.
 8. **Stroke-expand**: shapely `buffer` per centerline — round caps, mitred
    joins — unioned per glyph.
+   For `a`–`z` this expansion happens **twice**: the extraction centerlines
+   carry medial-axis junction artifacts, so their buffer union grows small
+   blobs at every join. That stage-1 font is only the routing scaffold — the
+   tracing emitter (below) traces it, and stage 2 rebuilds each traced
+   letter's outline as the pen extrusion of its *traced strokes*, clipped to
+   the stage-1 silhouette (keeps the calibrated caps/terminals, and nothing
+   can poke past the reference-gated ink). The shipped glyph ink and the
+   tracing-game template are therefore the same drawing.
 9. **Outline fit**: split each ring at its corners (tangents measured over an
    arc-length window well under the pen radius, or the round caps read as
    corners), least-squares cubic Béziers (Schneider), then `cu2qu` → `glyf`.
