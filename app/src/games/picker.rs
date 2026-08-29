@@ -17,6 +17,7 @@ pub const GAMES: &[(&str, &str)] = &[
     ("singback", "sing back"),
     ("clock", "clock"),
     ("compare", "compare"),
+    ("counting", "counting"),
 ];
 
 pub struct PickerScene {
@@ -256,6 +257,28 @@ fn draw_icon(id: &str, r: Rect, ctx: &Ctx) {
                 text::draw_centered(val, pc.x, pc.y + ch / 2.0, (ch * 0.36) as u16, &ctx.fonts.handwriting, palette::INK);
             }
             draw::disc(piv.x, piv.y, hb * 0.16, palette::hex(0xf6b73c));
+        }
+        "counting" => {
+            // The mechanic in one glance: 1 2 3 marching up in size (counting
+            // climbs), each on its own rainbow color.
+            let s = r.w * 0.20;
+            let gap = s * 1.05;
+            let x0 = cx - gap;
+            for (i, (num, col)) in
+                [("1", palette::RAINBOW[0]), ("2", palette::RAINBOW[3]), ("3", palette::RAINBOW[5])]
+                    .iter()
+                    .enumerate()
+            {
+                let grow = 1.0 + 0.35 * i as f32;
+                text::draw_centered(
+                    num,
+                    x0 + i as f32 * gap,
+                    cy,
+                    (s * grow) as u16,
+                    &ctx.fonts.handwriting,
+                    *col,
+                );
+            }
         }
         _ => {}
     }
