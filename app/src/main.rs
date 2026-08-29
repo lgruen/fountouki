@@ -24,6 +24,7 @@ mod text;
 
 use games::clock::ClockScene;
 use games::compare::CompareScene;
+use games::counting::CountingScene;
 use games::patterns::PatternsScene;
 use games::phonics::PhonicsScene;
 use games::picker::PickerScene;
@@ -78,6 +79,7 @@ fn build_game(id: &str, db: &Db, now: i64) -> Box<dyn Scene> {
         "singback" => Box::new(SingbackScene::new(db.clone(), now as u32 ^ 0x5126_acc0, now)),
         "clock" => Box::new(ClockScene::new(db.clone(), now as u32 ^ 0xc10c_c10c, now)),
         "compare" => Box::new(CompareScene::new(db.clone(), now as u32 ^ 0xc011_a2e5, now)),
+        "counting" => Box::new(CountingScene::new(db.clone(), now as u32 ^ 0x1230_c0de, now)),
         _ => Box::new(PhonicsScene::new(db.clone(), now as u32 ^ 0x5bd1_e995, now)),
     }
 }
@@ -530,6 +532,26 @@ async fn main() {
                     _ => CaptureState::Choose, // "compare"
                 };
                 Box::new(CompareScene::capture(db.clone(), 99, now, cap, &ctx0))
+            }
+            "counting" | "counting-teens" | "counting-done" => {
+                let frame = Frame::new(w as f32, h as f32, Insets::default());
+                let idle = Pointer::default();
+                let mut sc = CountingScene::new(db.clone(), 99, now);
+                match which {
+                    "counting-teens" => sc.debug_set_count(13), // two-digit render
+                    "counting-done" => {
+                        let ctx = Ctx { dt: 0.016, time: 0.4, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                        sc.debug_finish(&ctx);
+                        // Settle a few frames so the golden catches the burst
+                        // mid-air with the rain starting.
+                        for _ in 0..6 {
+                            let ctx = Ctx { dt: 0.1, time: 0.4, now, pointer: &idle, frame, fonts: &fonts, audio: &audio };
+                            sc.update(&ctx);
+                        }
+                    }
+                    _ => {} // "counting": a fresh session showing 1
+                }
+                Box::new(sc)
             }
             _ => {
                 let mut sc = PhonicsScene::new(db.clone(), 7, now);
@@ -1854,6 +1876,58 @@ async fn main() {
                 println!("PASS compare-start-over");
             } else {
                 println!("FAIL compare-start-over (earned={earned}, after_reset={})", fresh.best_level());
+                fails += 1;
+            }
+        }
+        // counting: starts at 1; each tap advances by exactly one (a rapid
+        // same-spot double tap is debounced to one count); the count never
+        // passes 30; the tap on a shown 30 opens the confetti finale, whose
+        // (invisible) topbar is dead; corner replay restarts the count at 1.
+        {
+            let mut sc = CountingScene::new(Db::mem(), 7, now);
+            let started_at_one = sc.count() == 1;
+            let target = sc.tap_target(&frame);
+            let mut clk = 0.0f32;
+            // One real tap, then a bounce edge inside the debounce window.
+            clk += 0.3;
+            let ptr = tap(target);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            clk += 0.05; // < TAP_DEBOUNCE_S
+            let ptr = tap(target);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let debounced = sc.count() == 2;
+            // Count all the way up; the tap on the shown 30 enters the finale.
+            let mut guard = 0;
+            while !sc.in_finale() && guard < 40 {
+                clk += 0.3;
+                let ptr = tap(target);
+                let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                guard += 1;
+            }
+            let finished = sc.in_finale() && sc.count() == 30 && guard == 29;
+            // The (invisible) topbar must be dead during the finale.
+            let tb = chrome::topbar(&frame);
+            clk += 0.3;
+            let ptr = tap(tb.home.0);
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            let nav = sc.update(&ctx);
+            let topbar_dead = matches!(nav, Nav::Stay) && sc.in_finale();
+            // Corner replay restarts the count at 1.
+            clk += 0.3;
+            let ptr = tap(sc.replay_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let restarted = !sc.in_finale() && sc.count() == 1;
+            if started_at_one && debounced && finished && topbar_dead && restarted {
+                println!("PASS counting-session");
+            } else {
+                println!(
+                    "FAIL counting-session (start1={started_at_one}, debounced={debounced}, finished={finished} (guard={guard}, count={}), topbar_dead={topbar_dead}, restarted={restarted})",
+                    sc.count()
+                );
                 fails += 1;
             }
         }
