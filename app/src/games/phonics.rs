@@ -26,6 +26,43 @@ const HOP_DUR: f32 = 0.45;
 const GARDEN_FLOWERS: usize = 12;
 /// How long a tapped garden flower's bloom spring lasts (seconds).
 const GARDEN_POP_S: f32 = 0.5;
+/// How long the tapped sun's ray flare lasts.
+const SUN_FLARE_S: f32 = 0.9;
+/// How long the rainbow's tapped light shimmer takes to sweep the bow.
+const RAINBOW_SHIMMER_S: f32 = 1.1;
+/// How long a tapped cloud's happy puff lasts.
+const CLOUD_PUFF_S: f32 = 0.7;
+/// How long a tapped grass tuft's springy boing lasts.
+const GRASS_BOING_S: f32 = 0.6;
+/// Grass tufts in the done-scene garden (must match `build_garden`'s loop).
+const DONE_GRASS: usize = 8;
+/// How many sky sparkles can twinkle at once (older ones recycle).
+const SPARKLES_MAX: usize = 3;
+const SPARKLE_S: f32 = 0.7;
+/// Tapping bare ground SPROUTS a brand-new plant there (the garden grows under
+/// the child's finger): how many extra sprouts stick around, and the entrance.
+const SPROUTS_MAX: usize = 6;
+const SPROUT_GROW_S: f32 = 0.6;
+
+/// The done-scene ambient clouds: (height as a fraction of the sky band, scale
+/// mult, speed px/s, phase 0..1). Shared by the draw + the finale cloud
+/// hit-test so a drifting cloud is tapped exactly where it is.
+const DONE_CLOUDS: [(f32, f32, f32, f32); 5] = [
+    (0.16, 1.15, 8.0, 0.05),
+    (0.40, 0.78, 13.0, 0.33),
+    (0.10, 0.95, 6.0, 0.56),
+    (0.52, 0.66, 17.0, 0.74),
+    (0.28, 1.0, 10.0, 0.88),
+];
+
+/// Cloud `i`'s live drift position + its base puff radius at `time`.
+fn done_cloud_pos(f: &crate::layout::Frame, gy: f32, time: f32, i: usize) -> (Vec2, f32) {
+    let cloud_r = f.vmin(0.05).max(24.0);
+    let span = f.w + cloud_r * 8.0;
+    let (hy, sc, spd, ph) = DONE_CLOUDS[i];
+    let x = (time * spd + ph * span).rem_euclid(span) - cloud_r * 4.0;
+    (vec2(x, gy * hy), cloud_r * sc)
+}
 
 #[derive(PartialEq, Clone, Copy)]
 enum Phase {
@@ -62,6 +99,28 @@ pub struct PhonicsScene {
     /// the flower's order in the (deterministic) garden. Large = idle.
     garden_flower_t: [f32; GARDEN_FLOWERS],
     garden_flower_taps: u32,
+    /// Done-scene: the tapped sun's ray flare (seconds since; large = idle).
+    sun_t: f32,
+    sun_taps: u32,
+    /// Done-scene: the rainbow's tapped light shimmer (seconds since the tap).
+    rainbow_t: f32,
+    rainbow_taps: u32,
+    /// Done-scene: per-cloud happy-puff timers + the accepted-tap count.
+    cloud_t: [f32; DONE_CLOUDS.len()],
+    cloud_taps: u32,
+    /// Done-scene: per-grass-tuft boing timers (indexed by the tuft's order in
+    /// the deterministic garden) + the accepted-tap count.
+    grass_t: [f32; DONE_GRASS],
+    grass_taps: u32,
+    /// Done-scene: sky sparkles — a recycled pool of `(center, t)` twinkle pops
+    /// wherever a sky tap landed, + the count (`sky_taps` in the hooks).
+    sparkles: [(Vec2, f32); SPARKLES_MAX],
+    sky_taps: u32,
+    /// Done-scene: plants the child SPROUTED by tapping bare ground — a
+    /// recycled pool of `(root, seconds since planted)`; the species/bloom of
+    /// sprout `k` derive from the running count so each one differs.
+    sprouts: [(Vec2, f32); SPROUTS_MAX],
+    sprout_count: u32,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
 }
@@ -97,6 +156,18 @@ impl PhonicsScene {
             garden_seed: seed ^ 0x9e37_79b9,
             garden_flower_t: [99.0; GARDEN_FLOWERS],
             garden_flower_taps: 0,
+            sun_t: 99.0,
+            sun_taps: 0,
+            rainbow_t: 99.0,
+            rainbow_taps: 0,
+            cloud_t: [99.0; DONE_CLOUDS.len()],
+            cloud_taps: 0,
+            grass_t: [99.0; DONE_GRASS],
+            grass_taps: 0,
+            sparkles: [(vec2(0.0, 0.0), 99.0); SPARKLES_MAX],
+            sky_taps: 0,
+            sprouts: [(vec2(0.0, 0.0), 99.0); SPROUTS_MAX],
+            sprout_count: 0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x00c0_ffee),
             sync,
         }
@@ -115,6 +186,18 @@ impl PhonicsScene {
         self.garden_seed = (self.rng.next_f64() * u32::MAX as f64) as u32 ^ 0x9e37_79b9;
         self.garden_flower_t = [99.0; GARDEN_FLOWERS];
         self.garden_flower_taps = 0;
+        self.sun_t = 99.0;
+        self.sun_taps = 0;
+        self.rainbow_t = 99.0;
+        self.rainbow_taps = 0;
+        self.cloud_t = [99.0; DONE_CLOUDS.len()];
+        self.cloud_taps = 0;
+        self.grass_t = [99.0; DONE_GRASS];
+        self.grass_taps = 0;
+        self.sparkles = [(vec2(0.0, 0.0), 99.0); SPARKLES_MAX];
+        self.sky_taps = 0;
+        self.sprouts = [(vec2(0.0, 0.0), 99.0); SPROUTS_MAX];
+        self.sprout_count = 0;
         self.queue = srs::build_queue(&self.state, &deck::INTRO_ORDER, now, &mut self.rng);
         srs::avoid_repeat(&mut self.queue, self.last);
         self.qi = 0;
@@ -123,6 +206,8 @@ impl PhonicsScene {
     fn update_done(&mut self, ctx: &Ctx) -> Nav {
         let (frog_c, fr, replay, home_b, br, gy) = done_layout(&ctx.frame);
         let pt = ctx.pointer;
+        let (rcx, rhoriz, rscale, rstroke) = done_rainbow(&ctx.frame, gy);
+        let on_rainbow = draw::rainbow_hit(rcx, rhoriz, rscale, rstroke, 10.0, pt.pos);
         if pt.tapped() {
             if input::hit_circle(pt.pos, replay.x, replay.y, br) {
                 self.restart_session(ctx.now);
@@ -155,6 +240,68 @@ impl PhonicsScene {
                 self.garden_flower_taps += 1;
                 ctx.audio.twinkle();
                 self.confetti.burst(bloom, 8, size * 0.7);
+            } else if input::hit_circle(
+                pt.pos,
+                ctx.frame.w * 0.17,
+                gy * 0.34,
+                ctx.frame.vmin(0.07).max(40.0) * 1.4,
+            ) {
+                // The sun: a warm ray flare bursts + spins down (patterns'
+                // finale sun answered taps; now this one does too).
+                self.sun_t = 0.0;
+                self.sun_taps += 1;
+                ctx.audio.twinkle();
+                self.confetti.burst(vec2(ctx.frame.w * 0.17, gy * 0.34), 14, 40.0);
+            } else if on_rainbow {
+                // The rainbow — the session's whole progress metaphor — answers
+                // with a light shimmer sweeping every band + the level-up
+                // fanfare + a spray of rainbow chips from the apex.
+                self.rainbow_t = 0.0;
+                self.rainbow_taps += 1;
+                ctx.audio.level_up();
+                self.confetti.burst(vec2(rcx, rhoriz - 60.0 * rscale), 40, 90.0 * rscale);
+            } else if let Some(ci) = (0..DONE_CLOUDS.len()).find(|&i| {
+                let (c, r) = done_cloud_pos(&ctx.frame, gy, ctx.time, i);
+                input::hit_circle(pt.pos, c.x, c.y, r * 2.0)
+            }) {
+                // A drifting cloud: it puffs up happily and sheds a couple of
+                // sparkles (hit-tested at its LIVE drift position).
+                self.cloud_t[ci] = 0.0;
+                self.cloud_taps += 1;
+                ctx.audio.tap();
+                let (c, r) = done_cloud_pos(&ctx.frame, gy, ctx.time, ci);
+                self.confetti.burst(vec2(c.x, c.y + r * 0.6), 6, r);
+            } else if let Some(gi) = build_garden(self.garden_seed, &ctx.frame, gy, replay, home_b, br)
+                .iter()
+                .filter(|g| matches!(g.kind, GardenLayer::Grass))
+                .take(DONE_GRASS)
+                .enumerate()
+                .find_map(|(gi, g)| {
+                    let c = vec2(g.pos.x, g.pos.y - g.size * 0.5);
+                    input::hit_circle(pt.pos, c.x, c.y, (g.size * 0.9).max(18.0)).then_some(gi)
+                })
+            {
+                // A grass tuft: a springy boing wiggle + a soft tick.
+                self.grass_t[gi] = 0.0;
+                self.grass_taps += 1;
+                ctx.audio.trace_tick(self.grass_taps % fountouki_core::audio::TRACE_TICK_STEPS);
+            } else if pt.pos.y > gy {
+                // Bare ground: a brand-new plant SPROUTS right under the finger
+                // — the garden grows with every touch (recycled pool, so the
+                // meadow never overflows). Each sprout rolls its own species +
+                // bloom color off the running count.
+                let slot = self.sprout_count as usize % SPROUTS_MAX;
+                self.sprouts[slot] = (pt.pos, 0.0);
+                self.sprout_count += 1;
+                ctx.audio.memory_tone(self.sprout_count % 7);
+                self.confetti.burst(pt.pos, 6, 24.0);
+            } else {
+                // Open sky: a twinkle-pop star right where the finger landed —
+                // no pixel of the payoff scene stays silent.
+                let slot = self.sky_taps as usize % SPARKLES_MAX;
+                self.sparkles[slot] = (pt.pos, 0.0);
+                self.sky_taps += 1;
+                ctx.audio.twinkle();
             }
         }
         Nav::Stay
@@ -166,32 +313,63 @@ impl PhonicsScene {
         draw::vgradient(0.0, 0.0, f.w, gy, palette::SKY_TOP, palette::SKY_BOT);
         // Ambient drifting clouds (behind the sun + rainbow). They wrap across
         // the sky; deterministic in goldens since ctx.time is fixed in capture.
-        let cloud_r = f.vmin(0.05).max(24.0);
-        let span = f.w + cloud_r * 8.0;
-        // (height as fraction of the sky band, scale mult, speed px/s, phase 0..1)
-        for &(hy, sc, spd, ph) in &[
-            (0.16f32, 1.15f32, 8.0f32, 0.05f32),
-            (0.40, 0.78, 13.0, 0.33),
-            (0.10, 0.95, 6.0, 0.56),
-            (0.52, 0.66, 17.0, 0.74),
-            (0.28, 1.0, 10.0, 0.88),
-        ] {
-            let x = (ctx.time * spd + ph * span).rem_euclid(span) - cloud_r * 4.0;
-            draw::cloud(x, gy * hy, cloud_r * sc);
+        // A tapped cloud puffs up on a happy half-sine impulse.
+        for i in 0..DONE_CLOUDS.len() {
+            let (c, r) = done_cloud_pos(f, gy, ctx.time, i);
+            let puff = if self.cloud_t[i] < CLOUD_PUFF_S {
+                (self.cloud_t[i] / CLOUD_PUFF_S * std::f32::consts::PI).sin() * 0.22
+            } else {
+                0.0
+            };
+            draw::cloud(c.x, c.y, r * (1.0 + puff));
         }
-        draw::sun(f.w * 0.17, gy * 0.34, f.vmin(0.07).max(40.0));
+        // The sun: rays flare + spin when tapped (fading as the flare spends).
+        let sun_c = vec2(f.w * 0.17, gy * 0.34);
+        let sun_r = f.vmin(0.07).max(40.0);
+        let sun_flare = (1.0 - self.sun_t / SUN_FLARE_S).max(0.0);
+        draw::sun_rays(sun_c.x, sun_c.y, sun_r, sun_flare, ctx.time * 1.5);
+        let sun_pop = 1.0 + 0.12 * (sun_flare * std::f32::consts::PI).sin();
+        draw::sun(sun_c.x, sun_c.y, sun_r * sun_pop);
         let (rcx, rhoriz, rscale, rstroke) = done_rainbow(f, gy);
         draw::rainbow(rcx, rhoriz, rscale, rstroke, 7);
+        // The tapped rainbow's light shimmer sweeping along every band.
+        if self.rainbow_t < RAINBOW_SHIMMER_S {
+            draw::rainbow_shimmer(rcx, rhoriz, rscale, rstroke, self.rainbow_t / RAINBOW_SHIMMER_S);
+        }
         draw::vgradient(0.0, gy, f.w, f.h - gy, palette::GROUND_TOP, palette::GROUND_BOT);
         draw_line(0.0, gy, f.w, gy, 3.0, palette::hex(0x2f7d2f));
         // The garden: a varied mix of vector plants that grows behind the frog.
         // Built from the per-session seed (deterministic) and drawn far→near so
         // foreground clumps overlap the back row; the frog (next) sits on top.
         let garden = build_garden(self.garden_seed, f, gy, replay, home_b, br);
+        // Grass tufts, indexed in the same order the tap handler uses: a tapped
+        // tuft boings — a decaying wiggle + a brief stretch.
+        let mut gi = 0usize;
         for g in &garden {
             if matches!(g.kind, GardenLayer::Grass) {
-                draw::grass_tuft(g.pos.x, g.pos.y, g.size, palette::hex(0x47a64a), (ctx.time * 0.9 + g.phase).sin() * 0.5);
+                let mut sway = (ctx.time * 0.9 + g.phase).sin() * 0.5;
+                let mut size = g.size;
+                if gi < DONE_GRASS && self.grass_t[gi] < GRASS_BOING_S {
+                    let p = self.grass_t[gi] / GRASS_BOING_S;
+                    let k = 1.0 - p;
+                    sway += (p * std::f32::consts::TAU * 2.0).sin() * 1.3 * k;
+                    size *= 1.0 + 0.18 * (p * std::f32::consts::PI).sin();
+                }
+                gi += 1;
+                draw::grass_tuft(g.pos.x, g.pos.y, size, palette::hex(0x47a64a), sway);
             }
+        }
+        // Sprouted plants (grown by ground taps): each springs up with a
+        // back-out entrance, then sways with the meadow. Species + bloom cycle
+        // off the sprout's pool slot so no two neighbours match.
+        let planted = (self.sprout_count as usize).min(SPROUTS_MAX);
+        for k in 0..planted {
+            let (root, st) = self.sprouts[k];
+            let grow = crate::anim::back_out((st / SPROUT_GROW_S).clamp(0.0, 1.0));
+            let kind = draw::GARDEN_SPECIES[k % draw::GARDEN_SPECIES.len()];
+            let color = palette::hex(BLOOM[(k + 3) % BLOOM.len()]);
+            let sway = (ctx.time * 1.1 + root.x * 0.05).sin();
+            draw::garden_plant(root.x, root.y, f.vmin(0.055) * grow, kind, color, sway);
         }
         // Plant items, in the same order `update_done` uses to index the tap
         // timers: a tapped flower springs its whole plant up (scale impulse).
@@ -215,6 +393,12 @@ impl PhonicsScene {
             idle_pose(ctx.time)
         };
         draw::frog(frog_c.x, frog_c.y, fr, palette::RAINBOW[3], pose);
+        // Sky-tap twinkle pops, blooming wherever the finger landed.
+        for &(c, st) in &self.sparkles {
+            if st < SPARKLE_S {
+                draw::twinkle_pop(c.x, c.y, f.vmin(0.035), st / SPARKLE_S, palette::GOLD);
+            }
+        }
         chrome::draw_corner_buttons(replay, home_b, br);
     }
 
@@ -312,6 +496,49 @@ impl PhonicsScene {
             .find(|g| matches!(g.kind, GardenLayer::Plant(_)))
             .map(|g| vec2(g.pos.x, g.pos.y - g.size))
     }
+    /// The done-scene sun's center (its flare tap target).
+    pub(crate) fn done_sun_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        let (.., gy) = done_layout(f);
+        vec2(f.w * 0.17, gy * 0.34)
+    }
+    pub(crate) fn sun_taps(&self) -> u32 {
+        self.sun_taps
+    }
+    /// A point ON the rainbow's outer band (its shimmer tap target).
+    pub(crate) fn done_rainbow_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        let (.., gy) = done_layout(f);
+        let (rcx, rhoriz, rscale, _) = done_rainbow(f, gy);
+        // The outer band's apex: sagitta = 65 * scale above the horizon.
+        vec2(rcx, rhoriz - 65.0 * rscale)
+    }
+    pub(crate) fn rainbow_taps(&self) -> u32 {
+        self.rainbow_taps
+    }
+    pub(crate) fn grass_taps(&self) -> u32 {
+        self.grass_taps
+    }
+    pub(crate) fn cloud_taps(&self) -> u32 {
+        self.cloud_taps
+    }
+    /// Cloud `i`'s live position at `time` (its puff tap target).
+    pub(crate) fn done_cloud_center(&self, f: &crate::layout::Frame, time: f32, i: usize) -> Vec2 {
+        let (.., gy) = done_layout(f);
+        done_cloud_pos(f, gy, time, i.min(DONE_CLOUDS.len() - 1)).0
+    }
+    /// Center of the first grass tuft (playtest tap target).
+    pub(crate) fn done_grass_center(&self, f: &crate::layout::Frame) -> Option<Vec2> {
+        let (_, _, replay, home_b, br, gy) = done_layout(f);
+        build_garden(self.garden_seed, f, gy, replay, home_b, br)
+            .iter()
+            .find(|g| matches!(g.kind, GardenLayer::Grass))
+            .map(|g| vec2(g.pos.x, g.pos.y - g.size * 0.5))
+    }
+    pub(crate) fn sprout_count(&self) -> u32 {
+        self.sprout_count
+    }
+    pub(crate) fn sky_taps(&self) -> u32 {
+        self.sky_taps
+    }
     /// Force the current card to a specific letter (capture/playtest only) so a
     /// golden can show a chosen exemplar (e.g. the drawn igloo for 'i').
     pub(crate) fn debug_set_letter(&mut self, c: char) {
@@ -327,6 +554,20 @@ impl Scene for PhonicsScene {
         self.frog_t += ctx.dt;
         for t in &mut self.garden_flower_t {
             *t += ctx.dt;
+        }
+        self.sun_t += ctx.dt;
+        self.rainbow_t += ctx.dt;
+        for t in &mut self.cloud_t {
+            *t += ctx.dt;
+        }
+        for t in &mut self.grass_t {
+            *t += ctx.dt;
+        }
+        for s in &mut self.sparkles {
+            s.1 += ctx.dt;
+        }
+        for s in &mut self.sprouts {
+            s.1 += ctx.dt;
         }
         if let Some(t) = self.advance_in {
             let t = t - ctx.dt;

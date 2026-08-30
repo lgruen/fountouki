@@ -206,9 +206,25 @@ pub fn checker_flag(pole_x: f32, by: f32, flag_top: f32, w: f32, h: f32, time: f
     }
 }
 
+/// How long a [`bunting_wave`] excitement wave takes to run its course; scenes
+/// park their wave timer at/after this and pass `None` once it's spent.
+pub const BUNTING_WAVE_S: f32 = 1.1;
+
 /// A festive bunting swag of triangular pennants strung between `x0..x1` at top
 /// edge `y`, dipping by `sag` at center; pennants cycle the rainbow + flutter.
-pub fn bunting(x0: f32, x1: f32, y: f32, sag: f32, n: usize, time: f32) {
+/// An optional excitement WAVE `wave = (origin_x, t)` makes a flutter pulse
+/// ripple outward along the string from `origin_x` (`t` seconds since the tap)
+/// — pennants kick up + swell as the front passes, then settle. The whole wave
+/// decays over [`BUNTING_WAVE_S`]; pass `None` for a calm swag.
+pub fn bunting_wave(
+    x0: f32,
+    x1: f32,
+    y: f32,
+    sag: f32,
+    n: usize,
+    time: f32,
+    wave: Option<(f32, f32)>,
+) {
     const SEG: usize = 40;
     let yat = |t: f32| y + sag * 4.0 * t * (1.0 - t);
     let mut line = Vec::with_capacity(SEG + 1);
@@ -219,6 +235,11 @@ pub fn bunting(x0: f32, x1: f32, y: f32, sag: f32, n: usize, time: f32) {
     stroke_path(&line, 3.0, palette::hexa(0x6f5a4a, 0.8));
     let span = h_span(n);
     let dx = x1 - x0;
+    // The wave front races from the origin to the far end within the wave's
+    // life; each pennant's kick is a gaussian of its distance to the front,
+    // decaying as the wave spends itself.
+    let front_speed = dx.abs().max(1.0) / (BUNTING_WAVE_S * 0.6);
+    let sigma = (dx.abs() / n.max(1) as f32) * 1.2;
     for i in 0..n {
         let t = (i as f32 + 0.5) / n as f32;
         let x = x0 + dx * t;
@@ -230,8 +251,18 @@ pub fn bunting(x0: f32, x1: f32, y: f32, sag: f32, n: usize, time: f32) {
         let slope = sag * 4.0 * (1.0 - 2.0 * t);
         let (sn, cs) = slope.atan2(dx).sin_cos();
         let rot = |lx: f32, ly: f32| vec2(x + lx * cs - ly * sn, yy + lx * sn + ly * cs);
-        let flutter = (time * 2.0 + i as f32 * 0.7).sin() * 0.08;
-        let s = span;
+        let mut flutter = (time * 2.0 + i as f32 * 0.7).sin() * 0.08;
+        let mut s = span;
+        if let Some((ox, wt)) = wave {
+            if (0.0..BUNTING_WAVE_S).contains(&wt) {
+                let d = (x - ox).abs() - front_speed * wt;
+                let kick = (-(d * d) / (2.0 * sigma * sigma)).exp()
+                    * (1.0 - wt / BUNTING_WAVE_S);
+                // The passing front makes the pennant swing hard + swell.
+                flutter += kick * 0.55 * (wt * 22.0 + i as f32).sin();
+                s *= 1.0 + 0.3 * kick;
+            }
+        }
         let col = palette::RAINBOW[i % 7];
         draw_triangle(rot(-s, 0.0), rot(s, 0.0), rot(flutter * s, s * 2.2), col);
     }

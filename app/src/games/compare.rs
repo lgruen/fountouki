@@ -73,6 +73,36 @@ const STAR_TWINKLE_S: f32 = 0.6;
 const FACE_WINK_S: f32 = 0.9;
 const FRIEND_HOP_S: f32 = 0.8;
 const SUN_FLARE_S: f32 = 0.9;
+/// How long a tapped numbered pennant's swing-and-swell lasts.
+const PENNANT_SWING_S: f32 = 0.8;
+/// The trophy star's tapped supernova (swell + whirling ring + gold shell).
+const TROPHY_SUPER_S: f32 = 0.9;
+/// A tapped cloud's happy puff.
+const CLOUD_PUFF_S: f32 = 0.7;
+/// The dragonfly's tapped zip-loop dart.
+const DART_S: f32 = 0.9;
+/// A tapped cattail's springy boing.
+const CATTAIL_BOING_S: f32 = 0.7;
+/// Water-tap SPLASHES: expanding ripple rings + droplets — pool + life.
+const SPLASHES_MAX: usize = 3;
+const SPLASH_S: f32 = 0.9;
+/// Sky fireworks: shell pool + life.
+const FIREWORKS_MAX: usize = 3;
+const FIREWORK_S: f32 = 0.8;
+
+/// The finale's drifting clouds: (height as a fraction of the sky band, scale
+/// mult, speed px/s, phase 0..1) — shared by draw + hit-test.
+const FINALE_CLOUDS: [(f32, f32, f32, f32); 3] =
+    [(0.18, 1.05, 6.0, 0.15), (0.30, 0.75, 9.0, 0.6), (0.12, 0.85, 4.5, 0.9)];
+
+/// Cloud `i`'s live drift position + base puff radius at `time`.
+fn finale_cloud_pos(f: &crate::layout::Frame, water_y: f32, time: f32, i: usize) -> (Vec2, f32) {
+    let cr = f.vmin(0.05).max(22.0);
+    let span = f.w + cr * 8.0;
+    let (hy, sc, spd, ph) = FINALE_CLOUDS[i];
+    let x = (time * spd + ph * span).rem_euclid(span) - cr * 4.0;
+    (vec2(x, water_y * hy), cr * sc)
+}
 
 /// Finale tap-target ids (distinct so the per-target debounce only swallows a
 /// same-target re-fire).
@@ -80,9 +110,18 @@ const TGT_REPLAY: u32 = 1;
 const TGT_HOME: u32 = 2;
 const TGT_FACE: u32 = 3;
 const TGT_SUN: u32 = 4;
+const TGT_TROPHY: u32 = 5;
+const TGT_DRAGONFLY: u32 = 6;
 const TGT_BALLOON_BASE: u32 = 10;
 const TGT_STAR_BASE: u32 = 40;
 const TGT_FRIEND_BASE: u32 = 70;
+const TGT_PENNANT_BASE: u32 = 100;
+const TGT_CLOUD_BASE: u32 = 106;
+const TGT_CATTAIL_BASE: u32 = 110;
+/// Splashes + sky fireworks cycle `BASE + (count % pool)` so quick taps in
+/// different spots all land.
+const TGT_SPLASH_BASE: u32 = 120;
+const TGT_SKY_BASE: u32 = 130;
 
 /// The state a golden capture pins the scene into.
 #[derive(Clone, Copy)]
@@ -160,6 +199,27 @@ pub struct CompareScene {
     friend_taps: u32,
     sun_t: f32,
     sun_taps: u32,
+    /// Per-pennant swing timer (the numbered garland flags) + tap count.
+    pennant_t: [f32; GOAL as usize],
+    pennant_taps: u32,
+    /// The trophy star's supernova timer + tap count.
+    trophy_t: f32,
+    trophy_taps: u32,
+    /// Per-cloud happy-puff timer + tap count.
+    cloud_t: [f32; FINALE_CLOUDS.len()],
+    cloud_taps: u32,
+    /// The dragonfly's zip-loop dart timer + tap count.
+    dart_t: f32,
+    dragonfly_taps: u32,
+    /// Per-cattail springy-boing timer + tap count.
+    cattail_t: [f32; 2],
+    cattail_taps: u32,
+    /// Water-tap splashes: a recycled `(center, t)` pool + accepted count.
+    splashes: [(Vec2, f32); SPLASHES_MAX],
+    splash_count: u32,
+    /// Sky fireworks: a recycled `(center, t, color idx)` pool + count.
+    fireworks: [(Vec2, f32, usize); FIREWORKS_MAX],
+    sky_taps: u32,
 }
 
 /// Map the parent-chosen difficulty string to a level number.
@@ -221,6 +281,20 @@ impl CompareScene {
             friend_taps: 0,
             sun_t: IDLE,
             sun_taps: 0,
+            pennant_t: [IDLE; GOAL as usize],
+            pennant_taps: 0,
+            trophy_t: IDLE,
+            trophy_taps: 0,
+            cloud_t: [IDLE; FINALE_CLOUDS.len()],
+            cloud_taps: 0,
+            dart_t: IDLE,
+            dragonfly_taps: 0,
+            cattail_t: [IDLE; 2],
+            cattail_taps: 0,
+            splashes: [(vec2(0.0, 0.0), IDLE); SPLASHES_MAX],
+            splash_count: 0,
+            fireworks: [(vec2(0.0, 0.0), IDLE, 0); FIREWORKS_MAX],
+            sky_taps: 0,
         }
     }
 
@@ -360,6 +434,20 @@ impl CompareScene {
         self.face_taps = 0;
         self.friend_taps = 0;
         self.sun_taps = 0;
+        self.pennant_t = [IDLE; GOAL as usize];
+        self.pennant_taps = 0;
+        self.trophy_t = IDLE;
+        self.trophy_taps = 0;
+        self.cloud_t = [IDLE; FINALE_CLOUDS.len()];
+        self.cloud_taps = 0;
+        self.dart_t = IDLE;
+        self.dragonfly_taps = 0;
+        self.cattail_t = [IDLE; 2];
+        self.cattail_taps = 0;
+        self.splashes = [(vec2(0.0, 0.0), IDLE); SPLASHES_MAX];
+        self.splash_count = 0;
+        self.fireworks = [(vec2(0.0, 0.0), IDLE, 0); FIREWORKS_MAX];
+        self.sky_taps = 0;
         self.rain_acc = 0.0;
         let fl = finale_layout(&ctx.frame);
         let trophy = vec2(fl.face.x, fl.face.y - fl.face_r * 2.2);
@@ -450,6 +538,17 @@ impl CompareScene {
         step_timers(&mut self.friend_t, ctx.dt, FRIEND_HOP_S);
         step_timers(std::slice::from_mut(&mut self.face_t), ctx.dt, FACE_WINK_S);
         step_timers(std::slice::from_mut(&mut self.sun_t), ctx.dt, SUN_FLARE_S);
+        step_timers(&mut self.pennant_t, ctx.dt, PENNANT_SWING_S);
+        step_timers(std::slice::from_mut(&mut self.trophy_t), ctx.dt, TROPHY_SUPER_S);
+        step_timers(&mut self.cloud_t, ctx.dt, CLOUD_PUFF_S);
+        step_timers(std::slice::from_mut(&mut self.dart_t), ctx.dt, DART_S);
+        step_timers(&mut self.cattail_t, ctx.dt, CATTAIL_BOING_S);
+        for s in &mut self.splashes {
+            step_timers(std::slice::from_mut(&mut s.1), ctx.dt, SPLASH_S);
+        }
+        for fw in &mut self.fireworks {
+            step_timers(std::slice::from_mut(&mut fw.1), ctx.dt, FIREWORK_S);
+        }
         // Gentle confetti rain.
         self.rain_acc += ctx.dt;
         while self.rain_acc >= RAIN_INTERVAL_S {
@@ -477,6 +576,20 @@ impl CompareScene {
                 self.sun_taps += 1;
                 ctx.audio.twinkle();
                 self.confetti.burst(fl.sun_c, 18, fl.sun_r * 0.9);
+                return Nav::Stay;
+            }
+            // The trophy star: a SUPERNOVA — it swells, its orbit ring whirls,
+            // a gold shell blooms, and the level-up fanfare rings. Checked
+            // before the hero so the star always wins the overlap.
+            let trophy = vec2(fl.face.x, fl.face.y - fl.face_r * 2.3);
+            if input::hit_circle(pt.pos, trophy.x, trophy.y, fl.face_r * 1.5)
+                && self.trophy_t >= TROPHY_SUPER_S
+                && self.tap_debounce.accept(TGT_TROPHY, ctx.time)
+            {
+                self.trophy_t = 0.0;
+                self.trophy_taps += 1;
+                ctx.audio.level_up();
+                self.confetti.burst(trophy, 30, fl.face_r * 1.2);
                 return Nav::Stay;
             }
             // The hero frog cycles through three reactions (hop / spin / wink), each
@@ -521,6 +634,76 @@ impl CompareScene {
                     ctx.audio.twinkle();
                     return Nav::Stay;
                 }
+            }
+            // The numbered pennants — the session's trophies: a tapped one
+            // swings + swells and SINGS ITS NUMBER as a pitch (1 low → 6 high,
+            // the count made audible).
+            for i in 0..GOAL {
+                let (c, r) = pennant_hit(f, &fl, i);
+                if input::hit_circle(pt.pos, c.x, c.y, r)
+                    && self.tap_debounce.accept(TGT_PENNANT_BASE + i, ctx.time)
+                {
+                    self.pennant_t[i as usize] = 0.0;
+                    self.pennant_taps += 1;
+                    ctx.audio.memory_tone(i);
+                    self.confetti.burst(c, 8, r * 0.6);
+                    return Nav::Stay;
+                }
+            }
+            // A drifting cloud (hit at its LIVE position): a happy puff.
+            for i in 0..FINALE_CLOUDS.len() {
+                let (c, r) = finale_cloud_pos(f, fl.water_y, self.finale_time(), i);
+                if input::hit_circle(pt.pos, c.x, c.y, r * 2.0)
+                    && self.tap_debounce.accept(TGT_CLOUD_BASE + i as u32, ctx.time)
+                {
+                    self.cloud_t[i] = 0.0;
+                    self.cloud_taps += 1;
+                    ctx.audio.tap();
+                    return Nav::Stay;
+                }
+            }
+            // The dragonfly: a startled zip-loop dart across the water.
+            let (dc, dr) = dragonfly_pos(f, &fl, self.finale_time());
+            if input::hit_circle(pt.pos, dc.x, dc.y, dr * 2.0)
+                && self.dart_t >= DART_S
+                && self.tap_debounce.accept(TGT_DRAGONFLY, ctx.time)
+            {
+                self.dart_t = 0.0;
+                self.dragonfly_taps += 1;
+                ctx.audio.trace_tick(self.dragonfly_taps % fountouki_core::audio::TRACE_TICK_STEPS);
+                return Nav::Stay;
+            }
+            // The cattails: a springy boing along the bank.
+            for i in 0..2 {
+                let (cx, base, h) = cattail_geom(f, &fl, i);
+                if input::hit_circle(pt.pos, cx, base - h * 0.5, (h * 0.55).max(26.0))
+                    && self.tap_debounce.accept(TGT_CATTAIL_BASE + i as u32, ctx.time)
+                {
+                    self.cattail_t[i] = 0.0;
+                    self.cattail_taps += 1;
+                    ctx.audio.tap();
+                    return Nav::Stay;
+                }
+            }
+            // Open water: a SPLASH — ripple rings spread from the finger and
+            // droplets fly (a pond answers every touch).
+            if pt.pos.y > fl.water_y {
+                let slot = self.splash_count as usize % SPLASHES_MAX;
+                if self.tap_debounce.accept(TGT_SPLASH_BASE + slot as u32, ctx.time) {
+                    self.splashes[slot] = (pt.pos, 0.0);
+                    self.splash_count += 1;
+                    ctx.audio.tap();
+                    self.confetti.burst(pt.pos, 8, f.vmin(0.03));
+                }
+                return Nav::Stay;
+            }
+            // Open sky: a FIREWORK under the finger — no pixel of the carnival
+            // stays silent.
+            let slot = self.sky_taps as usize % FIREWORKS_MAX;
+            if self.tap_debounce.accept(TGT_SKY_BASE + slot as u32, ctx.time) {
+                self.fireworks[slot] = (pt.pos, 0.0, self.sky_taps as usize % 7);
+                self.sky_taps += 1;
+                ctx.audio.twinkle();
             }
         }
         Nav::Stay
@@ -600,6 +783,64 @@ impl CompareScene {
     }
     pub(crate) fn sun_taps(&self) -> u32 {
         self.sun_taps
+    }
+    /// The finale's internal clock (drives every drifting element's position)
+    /// — playtests pass it back into the moving-target center hooks.
+    pub(crate) fn finale_clock(&self) -> f32 {
+        self.finale_time()
+    }
+    /// Center of numbered pennant `i` (its swing-and-sing tap target).
+    pub(crate) fn finale_pennant_center(&self, f: &crate::layout::Frame, i: u32) -> Vec2 {
+        pennant_hit(f, &finale_layout(f), i.min(GOAL - 1)).0
+    }
+    pub(crate) fn pennant_taps(&self) -> u32 {
+        self.pennant_taps
+    }
+    /// The trophy star's center (its supernova tap target).
+    pub(crate) fn finale_trophy_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        let fl = finale_layout(f);
+        vec2(fl.face.x, fl.face.y - fl.face_r * 2.3)
+    }
+    pub(crate) fn trophy_taps(&self) -> u32 {
+        self.trophy_taps
+    }
+    pub(crate) fn cloud_taps(&self) -> u32 {
+        self.cloud_taps
+    }
+    /// Cloud `i`'s live position at `time` (its puff tap target).
+    pub(crate) fn finale_cloud_center(&self, f: &crate::layout::Frame, time: f32, i: usize) -> Vec2 {
+        finale_cloud_pos(f, finale_layout(f).water_y, time, i.min(FINALE_CLOUDS.len() - 1)).0
+    }
+    /// The dragonfly's live position at `time` (its dart tap target).
+    pub(crate) fn finale_dragonfly_center(&self, f: &crate::layout::Frame, time: f32) -> Vec2 {
+        dragonfly_pos(f, &finale_layout(f), time).0
+    }
+    pub(crate) fn dragonfly_taps(&self) -> u32 {
+        self.dragonfly_taps
+    }
+    /// Cattail `i`'s mid-stalk point (its boing tap target).
+    pub(crate) fn finale_cattail_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        let (cx, base, h) = cattail_geom(f, &finale_layout(f), i.min(1));
+        vec2(cx, base - h * 0.5)
+    }
+    pub(crate) fn cattail_taps(&self) -> u32 {
+        self.cattail_taps
+    }
+    pub(crate) fn splash_count(&self) -> u32 {
+        self.splash_count
+    }
+    /// A patch of open water (the splash tap target), clear of pads + frogs.
+    pub(crate) fn finale_water_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        let fl = finale_layout(f);
+        vec2(f.w * 0.60, (fl.water_y + f.h) / 2.0 + f.h * 0.10)
+    }
+    pub(crate) fn sky_taps(&self) -> u32 {
+        self.sky_taps
+    }
+    /// A patch of open sky (the firework tap target), clear of the pennant
+    /// band (top), the balloon drift lanes, the sun, and the waterline.
+    pub(crate) fn finale_sky_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        vec2(f.w * 0.30, f.h * 0.34)
     }
 }
 
@@ -907,11 +1148,15 @@ impl CompareScene {
         };
         draw::sun_rays(fl.sun_c.x, fl.sun_c.y, fl.sun_r, (1.0 - self.sun_t).max(0.0), time * 1.5);
         draw::sun(fl.sun_c.x, fl.sun_c.y, fl.sun_r * sun_pop);
-        let cr = f.vmin(0.05).max(22.0);
-        for &(hy, sc, spd, ph) in &[(0.18f32, 1.05f32, 6.0f32, 0.15f32), (0.30, 0.75, 9.0, 0.6), (0.12, 0.85, 4.5, 0.9)] {
-            let span = f.w + cr * 8.0;
-            let x = (time * spd + ph * span).rem_euclid(span) - cr * 4.0;
-            draw::cloud(x, fl.water_y * hy, cr * sc);
+        // Drifting clouds; a tapped one puffs up on a happy half-sine impulse.
+        for i in 0..FINALE_CLOUDS.len() {
+            let (c, r) = finale_cloud_pos(f, fl.water_y, time, i);
+            let puff = if self.cloud_t[i] < CLOUD_PUFF_S {
+                1.0 + 0.22 * (self.cloud_t[i] / CLOUD_PUFF_S * std::f32::consts::PI).sin()
+            } else {
+                1.0
+            };
+            draw::cloud(c.x, c.y, r * puff);
         }
         // Number bunting: a flag per correct compare, popping in one by one.
         self.draw_number_bunting(ctx, &fl);
@@ -919,12 +1164,32 @@ impl CompareScene {
         // The pond, with cattails along the far bank.
         draw::pond(0.0, fl.water_y, f.w, f.h - fl.water_y, time);
         draw_rectangle(0.0, fl.water_y - 5.0, f.w, 8.0, palette::hex(0x7cbf6a));
-        let reed_h = fl.face_r * 2.2;
-        draw::cattail(f.w * 0.05, fl.water_y + 6.0, reed_h, 0.15 * (time * 0.8).sin());
-        draw::cattail(f.w * 0.96, fl.water_y + 6.0, reed_h * 0.9, -0.15 * (time * 0.8).sin());
-        // A dragonfly skims the pond in the near corner (a little life on the water).
-        let dfy = fl.water_y + (f.h - fl.water_y) * 0.14 + 5.0 * (time * 1.3).sin();
-        draw::dragonfly(f.w * (0.13 + 0.02 * (time * 0.5).sin()), dfy, f.vmin(0.055).max(24.0), time * 9.0, palette::RAINBOW[5]);
+        // Cattails along the bank — a tapped one boings with a springy wiggle.
+        for i in 0..2 {
+            let (cx, base, h) = cattail_geom(f, &fl, i);
+            let dir = if i == 0 { 1.0 } else { -1.0 };
+            let mut sway = dir * 0.15 * (time * 0.8).sin();
+            if self.cattail_t[i] < CATTAIL_BOING_S {
+                let p = self.cattail_t[i] / CATTAIL_BOING_S;
+                sway += (p * std::f32::consts::TAU * 2.0).sin() * 0.55 * (1.0 - p);
+            }
+            draw::cattail(cx, base, h, sway);
+        }
+        // A dragonfly skims the pond in the near corner (a little life on the
+        // water). A tap startles it into a quick zip-loop dart, wings ablur.
+        let (dp, dr) = dragonfly_pos(f, &fl, time);
+        let (dartx, darty, wing_mul) = if self.dart_t < DART_S {
+            let p = self.dart_t / DART_S;
+            let imp = (p * std::f32::consts::PI).sin();
+            (
+                (p * std::f32::consts::TAU).sin() * f.vmin(0.06) * imp,
+                -imp * f.vmin(0.08) * (p * std::f32::consts::TAU * 1.5).cos().abs(),
+                4.0,
+            )
+        } else {
+            (0.0, 0.0, 1.0)
+        };
+        draw::dragonfly(dp.x + dartx, dp.y + darty, dr, time * 9.0 * wing_mul, palette::RAINBOW[5]);
 
         // Friend frogs, each on a lily pad. They float on a gentle bob, hop on a
         // lazy ambient cadence, and each has its OWN tap reaction (hop / spin /
@@ -996,16 +1261,50 @@ impl CompareScene {
         draw::frog(hero.x, hero.y, hr, palette::RAINBOW[3], hop);
         draw::frog_party_hat(hero.x, hero.y, hr, hop, palette::ACCENT);
 
-        // Trophy star popping above Froggy, with an orbiting sparkle ring.
+        // Trophy star popping above Froggy, with an orbiting sparkle ring. A
+        // tapped SUPERNOVA swells the star, whirls the ring, and blooms a gold
+        // shell around it.
         let pop = anim::back_out(anim::clamp01(time / STAR_POP_DUR)).min(STAR_POP_CAP);
         let throb = 1.0 + 0.05 * anim::pulse(time, 1.6);
+        let (swell, whirl) = if self.trophy_t < TROPHY_SUPER_S {
+            let p = self.trophy_t / TROPHY_SUPER_S;
+            (1.0 + 0.35 * (p * std::f32::consts::PI).sin(), 2.5 * anim::ease_out_cubic(p))
+        } else {
+            (1.0, 0.0)
+        };
         let tr = vec2(hero.x, hero.y - hr * 2.3 + hop.dy);
+        if self.trophy_t < TROPHY_SUPER_S {
+            let p = self.trophy_t / TROPHY_SUPER_S;
+            draw::firework(tr.x, tr.y, hr * 2.0, p, palette::GOLD);
+        }
         for k in 0..8 {
-            let a = k as f32 / 8.0 * TAU + time * 0.5;
-            let rr = hr * 1.4 * pop;
+            let a = k as f32 / 8.0 * TAU + time * 0.5 + whirl;
+            let rr = hr * 1.4 * pop * swell;
             draw::disc(tr.x + a.cos() * rr, tr.y + a.sin() * rr, hr * 0.09, palette::hexa(0xfff3a8, 0.9));
         }
-        draw::star(tr.x, tr.y, hr * 1.0 * pop * throb, palette::hex(0xf6b800));
+        draw::star(tr.x, tr.y, hr * 1.0 * pop * throb * swell, palette::hex(0xf6b800));
+
+        // Water-tap splashes: rings of ripple spreading from the touch.
+        for &(c, st) in &self.splashes {
+            if st < SPLASH_S {
+                let p = st / SPLASH_S;
+                let fade = 1.0 - p;
+                for k in 0..3 {
+                    let rp = (p - k as f32 * 0.14).max(0.0);
+                    if rp <= 0.0 {
+                        continue;
+                    }
+                    let rx = f.vmin(0.09) * rp;
+                    ellipse_ring(c.x, c.y, rx, rx * 0.38, 2.2, palette::hexa(0xffffff, 0.55 * fade));
+                }
+            }
+        }
+        // In-flight sky fireworks, blooming wherever the finger landed.
+        for &(c, ft, ci) in &self.fireworks {
+            if ft < FIREWORK_S {
+                draw::firework(c.x, c.y, f.vmin(0.10), ft / FIREWORK_S, palette::RAINBOW[ci]);
+            }
+        }
 
         self.confetti.draw();
         let (replay, home, br) = chrome::corner_buttons(f);
@@ -1044,13 +1343,21 @@ impl CompareScene {
             if popt <= 0.0 {
                 continue;
             }
-            let sc = anim::back_out(popt);
+            // A tapped pennant swings hard + swells while its number sings.
+            let (swing, swell) = if self.pennant_t[i as usize] < PENNANT_SWING_S {
+                let p = self.pennant_t[i as usize] / PENNANT_SWING_S;
+                ((p * std::f32::consts::TAU * 2.0).sin() * 0.5 * (1.0 - p),
+                 1.0 + 0.22 * (p * std::f32::consts::PI).sin())
+            } else {
+                (0.0, 1.0)
+            };
+            let sc = anim::back_out(popt) * swell;
             let fsw = fs * sc;
             let x = x0 + (x1 - x0) * t;
             let top = yat(t);
             // The rope's local slope + a gentle per-flag pendulum swing.
             let slope = (yat(t + 0.02) - yat(t - 0.02)).atan2((x1 - x0) * 0.04);
-            let rot = slope + 0.07 * (time * 1.3 + i as f32 * 0.7).sin();
+            let rot = slope + 0.07 * (time * 1.3 + i as f32 * 0.7).sin() + swing;
             let (sr, crot) = rot.sin_cos();
             // Local→screen: +ly points DOWN the pennant (toward its apex).
             let rp = |lx: f32, ly: f32| vec2(x + lx * crot - ly * sr, top + lx * sr + ly * crot);
@@ -1455,6 +1762,36 @@ fn finale_layout(f: &crate::layout::Frame) -> FinaleLayout {
 /// A frog's tap reaction, cycled by `kind` for variety so repeat pokes surprise:
 /// 0 = a big hop with the tongue out, 1 = a full happy spin, 2 = a wink + squish.
 /// `p` runs 0..1 through the beat; `r` is the frog's body radius.
+/// Center + tap radius of numbered pennant `i` on the finale garland — the
+/// same swag geometry `draw_number_bunting` uses (minus the breeze sway), so
+/// the tapped pennant is the one under the finger.
+fn pennant_hit(f: &crate::layout::Frame, fl: &FinaleLayout, i: u32) -> (Vec2, f32) {
+    let (x0, x1) = (f.w * 0.06, f.w * 0.94);
+    let y = f.h * 0.05;
+    let sag = f.h * 0.055;
+    let t = (i as f32 + 0.5) / GOAL as f32;
+    let top = y + sag * 4.0 * t * (1.0 - t);
+    let fs = fl.flag_s * 1.3;
+    (vec2(x0 + (x1 - x0) * t, top + fs * 0.7), fs * 0.85)
+}
+
+/// The dragonfly's live skim position + its body radius at `time` (the same
+/// drift the draw uses, minus the dart offsets).
+fn dragonfly_pos(f: &crate::layout::Frame, fl: &FinaleLayout, time: f32) -> (Vec2, f32) {
+    let dfy = fl.water_y + (f.h - fl.water_y) * 0.14 + 5.0 * (time * 1.3).sin();
+    (vec2(f.w * (0.13 + 0.02 * (time * 0.5).sin()), dfy), f.vmin(0.055).max(24.0))
+}
+
+/// Cattail `i`'s (x, base_y, height) — shared by draw + hit-test.
+fn cattail_geom(f: &crate::layout::Frame, fl: &FinaleLayout, i: usize) -> (f32, f32, f32) {
+    let reed_h = fl.face_r * 2.2;
+    if i == 0 {
+        (f.w * 0.05, fl.water_y + 6.0, reed_h)
+    } else {
+        (f.w * 0.96, fl.water_y + 6.0, reed_h * 0.9)
+    }
+}
+
 fn react_pose(kind: u8, p: f32, r: f32) -> draw::FrogPose {
     let fly = (p * std::f32::consts::PI).sin();
     match kind % 3 {
@@ -1465,6 +1802,17 @@ fn react_pose(kind: u8, p: f32, r: f32) -> draw::FrogPose {
 }
 
 /// Step in-flight timers by `dt`, parking each at [`IDLE`] once past `dur`.
+/// A thin elliptical ripple ring (a flattened water circle), stroked.
+fn ellipse_ring(cx: f32, cy: f32, rx: f32, ry: f32, w: f32, color: Color) {
+    const N: usize = 40;
+    let mut pts = Vec::with_capacity(N + 1);
+    for k in 0..=N {
+        let a = k as f32 / N as f32 * TAU;
+        pts.push(vec2(cx + a.cos() * rx, cy + a.sin() * ry));
+    }
+    draw::stroke_path(&pts, w, color);
+}
+
 fn step_timers(timers: &mut [f32], dt: f32, dur: f32) {
     for s in timers.iter_mut() {
         if *s < dur {

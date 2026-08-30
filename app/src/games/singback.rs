@@ -133,6 +133,14 @@ const TGT_FINALE_HOME: u32 = 21;
 const TGT_DANCER_BASE: u32 = 30; // dancer i → TGT_DANCER_BASE + i
 const TGT_FINALE_FROG: u32 = 40;
 const TGT_BALLOON_BASE: u32 = 50; // balloon i → TGT_BALLOON_BASE + i
+const TGT_FINALE_STAR: u32 = 41;
+const TGT_BUNTING: u32 = 42;
+/// Sky fireworks cycle `TGT_SKY_BASE + (count % FIREWORKS_MAX)` so back-to-back
+/// sky taps always land (each launch is its own debounce target).
+const TGT_SKY_BASE: u32 = 60;
+/// Floor-ripple taps cycle ids the same way — the floor is a keyboard, and a
+/// quick second note must never be swallowed as a bounce of the first.
+const TGT_FLOOR_BASE: u32 = 70;
 
 // --- finale dance party -----------------------------------------------------
 
@@ -209,6 +217,24 @@ const DANCER_TAP_BURST_SPREAD: f32 = 0.5; // × the dancer's body radius
 /// How long a tapped balloon's swing-and-bob wobble animates. Balloons never pop
 /// (errorless + endlessly re-tappable) — a tap just nudges them around.
 const BALLOON_BUMP_S: f32 = 0.7;
+/// How long the trophy star's tapped SUPERNOVA runs: the star swells, its
+/// sparkle spokes whirl, and a gold firework shell blooms around it.
+const STAR_SUPER_S: f32 = 0.9;
+/// The extra whirl the supernova adds to the sparkle spokes' rotation clock.
+const STAR_SUPER_WHIRL: f32 = 3.0;
+/// How long a tapped light-ripple takes to sweep across the dance floor.
+const FLOOR_RIPPLE_S: f32 = 0.9;
+/// How fast the ripple front travels, in floor half-widths per ripple life —
+/// the front clears the whole band comfortably within `FLOOR_RIPPLE_S`.
+const FLOOR_RIPPLE_SPAN: f32 = 2.4;
+/// How long a sky firework shell lives, and how many can be in flight at once
+/// (older shells are recycled — a tap is never refused).
+const FIREWORK_S: f32 = 0.8;
+const FIREWORKS_MAX: usize = 3;
+/// The trophy supernova's gold confetti burst.
+const STAR_TAP_BURST_N: usize = 60;
+/// The little spray a sky firework adds under the shell.
+const FIREWORK_BURST_N: usize = 12;
 
 /// Confetti-rain pump cadence: one piece every `RAIN_INTERVAL_S` of accumulated
 /// time, shared by the Reward (new-best) escalation and the Finale.
@@ -344,6 +370,26 @@ pub struct SingbackScene {
     /// direction of the current bump (set from which side of the balloon was hit).
     balloon_t: [f32; FINALE_BALLOONS],
     balloon_kick: [f32; FINALE_BALLOONS],
+    /// The trophy star's supernova timer (seconds in, `DANCE_IDLE` idle) + the
+    /// tap count (a --playtest reaction hook).
+    star_t: f32,
+    star_taps: u32,
+    /// The dance-floor light ripple: seconds since the tap (`DANCE_IDLE` idle),
+    /// where it started, and the accepted-tap count. The floor doubles as a big
+    /// keyboard — the tap's x picks the tone — so ripples are endlessly fun.
+    floor_t: f32,
+    floor_c: Vec2,
+    floor_taps: u32,
+    /// The bunting excitement wave: seconds since the tap (`DANCE_IDLE` idle),
+    /// the tapped x it radiates from, and the accepted-tap count.
+    bunting_t: f32,
+    bunting_x: f32,
+    bunting_waves: u32,
+    /// Sky fireworks: a small recycled pool of shells `(center, t, color idx)` —
+    /// `t = DANCE_IDLE` parks a slot. Any tap that hits nothing else launches
+    /// one under the finger, so EVERY tap on the party does something.
+    fireworks: [(Vec2, f32, usize); FIREWORKS_MAX],
+    sky_fireworks: u32,
 }
 
 /// How many festive balloons bob over the dance floor (tappable → pop).
@@ -396,6 +442,16 @@ impl SingbackScene {
             frog_t: DANCE_IDLE,
             balloon_t: [DANCE_IDLE; FINALE_BALLOONS],
             balloon_kick: [0.0; FINALE_BALLOONS],
+            star_t: DANCE_IDLE,
+            star_taps: 0,
+            floor_t: DANCE_IDLE,
+            floor_c: vec2(0.0, 0.0),
+            floor_taps: 0,
+            bunting_t: DANCE_IDLE,
+            bunting_x: 0.0,
+            bunting_waves: 0,
+            fireworks: [(vec2(0.0, 0.0), DANCE_IDLE, 0); FIREWORKS_MAX],
+            sky_fireworks: 0,
         };
         // Apply the easy-stage no-repeat rule to the initial sequence too.
         sc.dedupe_initial();
@@ -535,6 +591,14 @@ impl SingbackScene {
         self.frog_t = DANCE_IDLE;
         self.balloon_t = [DANCE_IDLE; FINALE_BALLOONS];
         self.balloon_kick = [0.0; FINALE_BALLOONS];
+        self.star_t = DANCE_IDLE;
+        self.star_taps = 0;
+        self.floor_t = DANCE_IDLE;
+        self.floor_taps = 0;
+        self.bunting_t = DANCE_IDLE;
+        self.bunting_waves = 0;
+        self.fireworks = [(vec2(0.0, 0.0), DANCE_IDLE, 0); FIREWORKS_MAX];
+        self.sky_fireworks = 0;
         self.rain_acc = 0.0;
         ctx.audio.finale();
         self.save();
@@ -652,6 +716,38 @@ impl SingbackScene {
     /// How many balloon nudges have been accepted this finale (a reaction proof).
     pub(crate) fn balloon_bumps(&self) -> u32 {
         self.balloon_bumps
+    }
+    /// The trophy star's center (its supernova tap target).
+    pub(crate) fn finale_trophy_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        finale_layout(f).trophy
+    }
+    pub(crate) fn star_taps(&self) -> u32 {
+        self.star_taps
+    }
+    /// A point on the bunting swag (its wave tap target).
+    pub(crate) fn finale_bunting_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        let fl = finale_layout(f);
+        vec2(f.w * 0.5, fl.bunting_y + fl.bunting_drop * 0.5)
+    }
+    pub(crate) fn bunting_waves(&self) -> u32 {
+        self.bunting_waves
+    }
+    /// A point on the dance-floor tile band clear of the DJ + dancers (the
+    /// keyboard-ripple tap target).
+    pub(crate) fn finale_floor_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        let fl = finale_layout(f);
+        vec2(f.w * 0.40, fl.floor_y + fl.floor_ry * 1.2)
+    }
+    pub(crate) fn floor_taps(&self) -> u32 {
+        self.floor_taps
+    }
+    /// A patch of open sky (the firework-launch tap target): between the
+    /// balloon band and the back dancers, off-center so it clears the trophy.
+    pub(crate) fn finale_sky_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        vec2(f.w * 0.15, f.h * 0.42)
+    }
+    pub(crate) fn sky_fireworks(&self) -> u32 {
+        self.sky_fireworks
     }
 }
 
@@ -1015,6 +1111,26 @@ impl SingbackScene {
                 self.balloon_t[i] = DANCE_IDLE;
             }
         }
+        // The one-shot effect timers: supernova, floor ripple, bunting wave,
+        // and every in-flight firework shell (parked at DANCE_IDLE when spent).
+        for (dur, tt) in [
+            (STAR_SUPER_S, &mut self.star_t),
+            (FLOOR_RIPPLE_S, &mut self.floor_t),
+            (draw::BUNTING_WAVE_S, &mut self.bunting_t),
+        ] {
+            if *tt < dur {
+                *tt += dt;
+            } else {
+                *tt = DANCE_IDLE;
+            }
+        }
+        for fw in &mut self.fireworks {
+            if fw.1 < FIREWORK_S {
+                fw.1 += dt;
+            } else {
+                fw.1 = DANCE_IDLE;
+            }
+        }
 
         // Advance the looping melody clock. Each beat the clock CROSSES fires its
         // note + lights that critter exactly once; the trailing rest gives the
@@ -1122,6 +1238,56 @@ impl SingbackScene {
                     return Nav::Stay;
                 }
             }
+            // The trophy star: a SUPERNOVA — the star swells, its sparkle spokes
+            // whirl, a gold shell blooms, and the level-up fanfare rings.
+            if input::hit_circle(pt.pos, fl.trophy.x, fl.trophy.y, fl.star_r * 1.6)
+                && self.tap_debounce.accept(TGT_FINALE_STAR, ctx.time)
+            {
+                self.star_t = 0.0;
+                self.star_taps += 1;
+                ctx.audio.level_up();
+                self.confetti.burst(fl.trophy, STAR_TAP_BURST_N, fl.star_r * 1.4);
+                return Nav::Stay;
+            }
+            // The bunting: a tap anywhere along the swag sends an excitement
+            // WAVE rippling outward from the finger — pennants kick + swell as
+            // the front passes.
+            if pt.pos.y <= bunting_band_bottom(&fl)
+                && self.tap_debounce.accept(TGT_BUNTING, ctx.time)
+            {
+                self.bunting_t = 0.0;
+                self.bunting_x = pt.pos.x;
+                self.bunting_waves += 1;
+                ctx.audio.twinkle();
+                return Nav::Stay;
+            }
+            // The dance floor is a giant KEYBOARD: a tap lights a ripple that
+            // sweeps across the tiles from the finger, pitched by where you
+            // pressed (left = low, right = high) — pure toy, endlessly playable.
+            if (pt.pos.y - fl.floor_y).abs() <= fl.floor_ry * 1.5 {
+                let slot = self.floor_taps as usize % FIREWORKS_MAX;
+                if self.tap_debounce.accept(TGT_FLOOR_BASE + slot as u32, ctx.time) {
+                    self.floor_t = 0.0;
+                    self.floor_c = pt.pos;
+                    self.floor_taps += 1;
+                    let tone = ((pt.pos.x / ctx.frame.w) * 7.0).clamp(0.0, 6.0) as u32;
+                    ctx.audio.memory_tone(tone);
+                }
+                return Nav::Stay;
+            }
+            // Anywhere else — sky, backdrop, between friends — launches a
+            // FIREWORK under the finger (a recycled shell pool, so a tap is
+            // never refused): every pixel of the party answers a touch.
+            let slot = self.sky_fireworks as usize % FIREWORKS_MAX;
+            if self.tap_debounce.accept(TGT_SKY_BASE + slot as u32, ctx.time) {
+                self.fireworks[slot] = (pt.pos, 0.0, self.sky_fireworks as usize % 7);
+                self.sky_fireworks += 1;
+                // High sparkly notes (above the choir's four) so launches sound
+                // distinct from the pads; cycle three pitches for variety.
+                ctx.audio.memory_tone(4 + self.sky_fireworks % 3);
+                self.confetti.burst(pt.pos, FIREWORK_BURST_N, fl.unit * 0.5);
+            }
+            return Nav::Stay;
         }
         Nav::Stay
     }
@@ -1142,7 +1308,10 @@ impl SingbackScene {
         // Bunting strung high across the top (a row of little triangular flags on
         // a gentle catenary), gently swaying off the finale clock. Reuses the
         // shared train bunting so the festive dressing never drifts between games.
-        draw::bunting(0.0, f.w, fl.bunting_y, fl.bunting_drop, BUNTING_FLAGS, t);
+        // A tap on the swag sends an excitement wave rippling out from the finger.
+        let wave = (self.bunting_t < draw::BUNTING_WAVE_S)
+            .then_some((self.bunting_x, self.bunting_t));
+        draw::bunting_wave(0.0, f.w, fl.bunting_y, fl.bunting_drop, BUNTING_FLAGS, t, wave);
 
         // The dance floor: a glowing ellipse pool under a band of alternating
         // rounded tiles, so the critters clearly stand ON a floor (not a row).
@@ -1150,7 +1319,8 @@ impl SingbackScene {
         // tiles without piling onto the amber base into a bright bottom band.
         let floor_glow = palette::hexa(0xffe9a8, 0.22);
         draw::fill_ellipse(f.w / 2.0, fl.floor_y, fl.floor_rx, fl.floor_ry, 0.0, floor_glow);
-        draw_dance_floor(&fl, t);
+        let ripple = (self.floor_t < FLOOR_RIPPLE_S).then_some((self.floor_c, self.floor_t));
+        draw_dance_floor(&fl, t, ripple);
 
         // The trophy star, bottom-anchored above the dancers, with a tight bright
         // core + a few radiating sparkle points + a gentle throb so it never goes
@@ -1159,8 +1329,22 @@ impl SingbackScene {
         // core plus radiating twinkles — the star reads as radiant GOLD, not muddy.
         let pop = anim::back_out((t / STAR_POP_DUR).clamp(0.0, 1.0)).min(STAR_POP_CAP);
         let throb = 1.0 + FINALE_THROB_AMP * anim::pulse(t, 0.9).max(0.0);
-        let r = fl.star_r * pop * throb;
-        draw_star_spotlight(fl.trophy.x, fl.trophy.y, r, t);
+        // A tapped SUPERNOVA: the star swells on a half-sine impulse, its
+        // sparkle spokes whirl (the spin clock jumps ahead), and a gold shell
+        // blooms around it.
+        let (super_swell, super_whirl) = if self.star_t < STAR_SUPER_S {
+            let p = self.star_t / STAR_SUPER_S;
+            let imp = (p * std::f32::consts::PI).sin();
+            (1.0 + 0.40 * imp, STAR_SUPER_WHIRL * anim::ease_out_cubic(p))
+        } else {
+            (1.0, 0.0)
+        };
+        let r = fl.star_r * pop * throb * super_swell;
+        draw_star_spotlight(fl.trophy.x, fl.trophy.y, r, t + super_whirl);
+        if self.star_t < STAR_SUPER_S {
+            let p = self.star_t / STAR_SUPER_S;
+            draw::firework(fl.trophy.x, fl.trophy.y, fl.star_r * 2.3, p, palette::GOLD);
+        }
 
         // Bobbing balloons (festive RAINBOW colours), behind the dancers. Each
         // bobs on its own phase off the party clock; a tap adds a decaying swing +
@@ -1210,6 +1394,13 @@ impl SingbackScene {
         draw::frog(fl.dj.x, fl.dj.y, fl.dj_r, palette::RAINBOW[3], djp);
         draw::frog_party_hat(fl.dj.x, fl.dj.y, fl.dj_r, djp, palette::RAINBOW[0]);
         draw::frog_headphones(fl.dj.x, fl.dj.y, fl.dj_r, djp, palette::RAINBOW[5]);
+
+        // In-flight sky fireworks: shells blooming wherever the finger landed.
+        for &(c, ft, ci) in &self.fireworks {
+            if ft < FIREWORK_S {
+                draw::firework(c.x, c.y, fl.unit * 1.6, ft / FIREWORK_S, palette::RAINBOW[ci]);
+            }
+        }
 
         self.confetti.draw();
 
@@ -1633,10 +1824,18 @@ fn soft_glow(x: f32, y: f32, r: f32, color: Color, peak: f32) {
     }
 }
 
+/// The band of the bunting swag a tap counts as "on the bunting": down to the
+/// swag's deepest dip plus a pennant's hang, so the flags themselves are easy
+/// to hit with a small finger.
+fn bunting_band_bottom(fl: &FinaleLayout) -> f32 {
+    fl.bunting_y + fl.bunting_drop + 50.0
+}
+
 /// The dance floor's checker tiles: a band of alternating rounded-rect tiles
 /// across the floor ellipse, with a subtle parallax shimmer off the party clock.
-/// Local to the finale.
-fn draw_dance_floor(fl: &FinaleLayout, t: f32) {
+/// `ripple = (origin, t)` lights a ring of tiles sweeping outward from a tap —
+/// each tile flares toward white as the front passes. Local to the finale.
+fn draw_dance_floor(fl: &FinaleLayout, t: f32, ripple: Option<(Vec2, f32)>) {
     let cols = 7usize;
     let rows = 3usize;
     let band_w = fl.floor_rx * 1.7;
@@ -1661,7 +1860,23 @@ fn draw_dance_floor(fl: &FinaleLayout, t: f32) {
             let base = if lit { FLOOR_TILE_A } else { FLOOR_TILE_B };
             // Back rows fade a touch (depth).
             let a = base.a * (1.0 - row as f32 * 0.18);
-            let col_c = Color { a, ..base };
+            let mut col_c = Color { a, ..base };
+            // The tapped light ripple: a gaussian ring of flare sweeping out from
+            // the tap point, decaying as it spends itself — a disco floor answer.
+            if let Some((oc, rt)) = ripple {
+                let p = rt / FLOOR_RIPPLE_S;
+                let front = fl.floor_rx * FLOOR_RIPPLE_SPAN * p;
+                let center = vec2(x + tw / 2.0, y + th / 2.0);
+                let d = (center - oc).length() - front;
+                let sigma = tw * 0.9;
+                let flare = (-(d * d) / (2.0 * sigma * sigma)).exp() * (1.0 - p);
+                if flare > 0.01 {
+                    col_c.r = anim::lerp(col_c.r, 1.0, flare);
+                    col_c.g = anim::lerp(col_c.g, 1.0, flare);
+                    col_c.b = anim::lerp(col_c.b, 1.0, flare);
+                    col_c.a = anim::lerp(col_c.a, 0.95, flare);
+                }
+            }
             draw::rounded_rect(x + gap / 2.0, y + gap / 2.0, bw - gap, th - gap, th * 0.18, col_c);
         }
     }

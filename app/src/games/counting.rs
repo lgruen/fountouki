@@ -5,7 +5,7 @@
 //! with the usual replay / home corner buttons. No persistence — every session
 //! counts from 1. More (quantity pictures, milestones, characters) comes later.
 use crate::{
-    anim, chrome, input,
+    anim, chrome, draw, input,
     palette,
     scene::{Ctx, Nav, Scene},
     store::Db,
@@ -20,13 +20,22 @@ const POP_DUR: f32 = 0.35;
 /// Finale confetti: opening burst + gentle sustained rain.
 const FINALE_BURST_N: usize = 150;
 const RAIN_INTERVAL_S: f32 = 0.12;
+/// How long a finale party firework shell lives, and how many can be in
+/// flight at once (older shells recycle — a tap is never refused).
+const FIREWORK_S: f32 = 0.8;
+const FIREWORKS_MAX: usize = 3;
+/// The finale numeral's tapped bounce burst.
+const NUMERAL_BURST_N: usize = 26;
 
 /// Tap-target ids for the per-target debounce (a stuttered press must not
 /// double-count, but replay/home taps are distinct targets).
 const TGT_COUNT: u32 = 1;
 const TGT_REPLAY: u32 = 2;
 const TGT_HOME: u32 = 3;
-const TGT_PARTY: u32 = 4;
+const TGT_NUMERAL: u32 = 5;
+/// Party fireworks cycle `TGT_PARTY_BASE + (count % FIREWORKS_MAX)` so quick
+/// taps in different spots all launch (only a same-slot stutter is swallowed).
+const TGT_PARTY_BASE: u32 = 10;
 
 #[derive(PartialEq, Clone, Copy)]
 enum Phase {
@@ -46,6 +55,14 @@ pub struct CountingScene {
     confetti: crate::confetti::Confetti,
     /// Accumulator for the finale's sustained confetti rain.
     rain_acc: f32,
+    /// Finale: taps on the big "30" itself — each re-pops the numeral, cycles
+    /// its color through the rainbow, and climbs the reward chime.
+    numeral_taps: u32,
+    /// Finale: party fireworks — a recycled pool of shells `(center, t, color
+    /// idx)`; `t >= FIREWORK_S` parks a slot. Plus the accepted-tap count
+    /// (also the ascending-scale step, so tapping around plays a tune).
+    fireworks: [(Vec2, f32, usize); FIREWORKS_MAX],
+    party_taps: u32,
 }
 
 impl CountingScene {
@@ -58,6 +75,9 @@ impl CountingScene {
             debounce: input::TapDebounce::new(),
             confetti: crate::confetti::Confetti::new(seed ^ 0x00c0_ffee),
             rain_acc: 0.0,
+            numeral_taps: 0,
+            fireworks: [(vec2(0.0, 0.0), FIREWORK_S, 0); FIREWORKS_MAX],
+            party_taps: 0,
         }
     }
 
@@ -66,6 +86,9 @@ impl CountingScene {
         self.phase = Phase::Count;
         self.pop_t = 0.0;
         self.rain_acc = 0.0;
+        self.numeral_taps = 0;
+        self.fireworks = [(vec2(0.0, 0.0), FIREWORK_S, 0); FIREWORKS_MAX];
+        self.party_taps = 0;
     }
 
     fn advance(&mut self, ctx: &Ctx) {
@@ -79,14 +102,16 @@ impl CountingScene {
         }
         self.n += 1;
         self.pop_t = 0.0;
-        // A rising pentatonic tick per count keeps the rhythm going; each
-        // completed ten gets a bigger fanfare + a sparkle (a mini milestone).
+        // The counts CLIMB: within each decade the tick rises strictly with the
+        // count ((n-1) % 10 walks the 9-step pentatonic ladder, never wrapping
+        // mid-decade), each completed ten lands a proper rising fanfare + a
+        // sparkle burst (a real milestone), and 30 opens the big finale.
         if self.n.is_multiple_of(10) {
-            ctx.audio.correct(self.n / 10);
+            ctx.audio.level_up();
             let f = &ctx.frame;
             self.confetti.burst(vec2(f.w / 2.0, f.h * 0.3), 30, f.w * 0.2);
         } else {
-            ctx.audio.trace_tick((self.n - 1) % fountouki_core::audio::TRACE_TICK_STEPS);
+            ctx.audio.trace_tick((self.n - 1) % 10);
         }
     }
 
@@ -104,6 +129,20 @@ impl CountingScene {
     }
     pub(crate) fn replay_center(&self, f: &crate::layout::Frame) -> Vec2 {
         chrome::corner_buttons(f).0
+    }
+    /// The finale numeral's center (its bounce tap target).
+    pub(crate) fn numeral_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        vec2(f.w / 2.0, f.h * 0.52)
+    }
+    pub(crate) fn numeral_taps(&self) -> u32 {
+        self.numeral_taps
+    }
+    /// A finale point outside the numeral + corners (the firework target).
+    pub(crate) fn party_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        vec2(f.w * 0.12, f.h * 0.15)
+    }
+    pub(crate) fn party_taps(&self) -> u32 {
+        self.party_taps
     }
     /// Pin the current number (capture only) so a golden can show any count.
     pub(crate) fn debug_set_count(&mut self, n: u32) {
@@ -128,22 +167,51 @@ impl Scene for CountingScene {
                 self.rain_acc -= RAIN_INTERVAL_S;
                 self.confetti.rain(ctx.frame.w, 0.0, 2);
             }
+            for fw in &mut self.fireworks {
+                if fw.1 < FIREWORK_S {
+                    fw.1 += ctx.dt;
+                }
+            }
             let pt = ctx.pointer;
             if pt.tapped() {
-                let (replay, home_b, br) = chrome::corner_buttons(&ctx.frame);
-                if input::hit_circle(pt.pos, replay.x, replay.y, br)
-                    && self.debounce.accept(TGT_REPLAY, ctx.time)
+                let f = &ctx.frame;
+                let (replay, home_b, br) = chrome::corner_buttons(f);
+                // Corner taps are consumed even when the debounce rejects the
+                // re-fire, so a stuttered Replay press never leaks a party
+                // burst onto the freshly restarted count screen.
+                if input::hit_circle(pt.pos, replay.x, replay.y, br) {
+                    if self.debounce.accept(TGT_REPLAY, ctx.time) {
+                        self.restart();
+                    }
+                } else if input::hit_circle(pt.pos, home_b.x, home_b.y, br) {
+                    if self.debounce.accept(TGT_HOME, ctx.time) {
+                        return Nav::Home;
+                    }
+                } else if input::hit_circle(pt.pos, f.w / 2.0, f.h * 0.52, f.h * 0.30)
+                    && self.debounce.accept(TGT_NUMERAL, ctx.time)
                 {
-                    self.restart();
-                } else if input::hit_circle(pt.pos, home_b.x, home_b.y, br)
-                    && self.debounce.accept(TGT_HOME, ctx.time)
-                {
-                    return Nav::Home;
-                } else if self.debounce.accept(TGT_PARTY, ctx.time) {
-                    // Anywhere else keeps the party going: a burst under the
-                    // finger + a twinkle — errorless, re-tappable.
-                    ctx.audio.twinkle();
-                    self.confetti.burst(pt.pos, 24, ctx.frame.vmin(0.05));
+                    // The big 30 itself: it re-pops springy, cycles its color
+                    // through the rainbow, climbs the reward chime, and throws
+                    // gold — the star of the show answers every poke.
+                    self.numeral_taps += 1;
+                    self.pop_t = 0.0;
+                    ctx.audio.correct(self.numeral_taps % 6);
+                    self.confetti.burst(
+                        vec2(f.w / 2.0, f.h * 0.40),
+                        NUMERAL_BURST_N,
+                        f.w * 0.12,
+                    );
+                } else {
+                    // Anywhere else launches a FIREWORK under the finger, each
+                    // tap a step up a little scale — errorless, re-tappable,
+                    // and no pixel of the party is dead.
+                    let slot = self.party_taps as usize % FIREWORKS_MAX;
+                    if self.debounce.accept(TGT_PARTY_BASE + slot as u32, ctx.time) {
+                        self.fireworks[slot] = (pt.pos, 0.0, self.party_taps as usize % 7);
+                        ctx.audio.memory_tone(self.party_taps % 7);
+                        self.party_taps += 1;
+                        self.confetti.burst(pt.pos, 12, f.vmin(0.04));
+                    }
                 }
             }
             return Nav::Stay;
@@ -180,7 +248,13 @@ impl Scene for CountingScene {
         } else {
             1.0
         };
-        let color = if self.phase == Phase::Finale { palette::GOLD } else { palette::INK };
+        // Finale: gold until poked, then each numeral tap steps the color
+        // around the rainbow (a small surprise that keeps the 30 alive).
+        let color = match self.phase {
+            Phase::Count => palette::INK,
+            Phase::Finale if self.numeral_taps == 0 => palette::GOLD,
+            Phase::Finale => palette::RAINBOW[(self.numeral_taps as usize - 1) % 7],
+        };
         text::draw_centered(
             &self.n.to_string(),
             f.w / 2.0,
@@ -191,6 +265,12 @@ impl Scene for CountingScene {
         );
 
         if self.phase == Phase::Finale {
+            // In-flight party fireworks, blooming wherever the finger landed.
+            for &(c, ft, ci) in &self.fireworks {
+                if ft < FIREWORK_S {
+                    draw::firework(c.x, c.y, f.vmin(0.12), ft / FIREWORK_S, palette::RAINBOW[ci]);
+                }
+            }
             let (replay, home_b, br) = chrome::corner_buttons(f);
             chrome::draw_corner_buttons(replay, home_b, br);
         }

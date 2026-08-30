@@ -624,8 +624,13 @@ fn draw_chimney(cx: f32, base_y: f32, s: f32, dx: f32, dy: f32) {
     let x = cx + CHIM_X * s - w / 2.0 + dx;
     let top = base_y + CHIM_TOP * s + dy;
     // The stack reaches down into the roof slope; the roof is drawn first so
-    // the overlap reads as "set into the roof".
-    let h = 0.34 * s;
+    // the overlap reads as "set into the roof". The height must carry the
+    // stack's DOWNHILL edge past the roof surface: at the outer edge
+    // (CHIM_X + CHIM_W/2 = 0.335) the slope sits at ROOF_APEX + 0.335/0.5 ·
+    // (ROOF_APEX − eave) ≈ −0.672, so a 0.34-tall stack (bottom −0.72) left
+    // its outer corner floating over sky. 0.42 tucks the whole base under
+    // the tiles on both sides.
+    let h = 0.42 * s;
     draw_rectangle(x, top, w, h, palette::HOUSE_BRICK);
     // Mortar joints: bed lines + staggered head joints, like the walls.
     let joint = shade(palette::HOUSE_BRICK, 0.80);
@@ -740,6 +745,28 @@ mod tests {
             let (tx, ay) = lift_spec(part);
             assert!(tx.abs() <= 0.46, "part {part}: target {tx} beyond the jib");
             assert!(ay < 0.0 && ay > site::JIB_Y, "part {part}: attach {ay} out of range");
+        }
+    }
+
+    /// The chimney stack's base must sit BELOW the roof surface at both of
+    /// its edges, so no corner ever floats over open sky (the stack reads as
+    /// set into the slope). Mirrors `draw_chimney`'s h = 0.42 and the roof's
+    /// slope geometry in `draw_roof`.
+    #[test]
+    fn chimney_base_meets_the_roof() {
+        let s = 100.0f32;
+        let apex_y = ROOF_APEX * s; // relative to base_y = 0
+        let eave_y = -WALL_H * s;
+        let hh = eave_y - apex_y;
+        // Roof surface y at a horizontal offset |x| from the centerline.
+        let surface = |x: f32| apex_y + (x.abs() / (0.50 * s)) * hh;
+        let bottom = CHIM_TOP * s + 0.42 * s;
+        for edge in [CHIM_X - CHIM_W / 2.0, CHIM_X + CHIM_W / 2.0] {
+            let roof_y = surface(edge * s);
+            assert!(
+                bottom >= roof_y,
+                "chimney base {bottom} floats above the roof surface {roof_y} at edge {edge}"
+            );
         }
     }
 
