@@ -42,6 +42,35 @@ const INSTALL_BREAK: f32 = 0.7;
 const OUTLINE_ALPHA: f32 = 0.5;
 /// How long a tapped garden flower's bloom spring lasts (seconds).
 const FLOWER_POP_S: f32 = 0.5;
+/// How long a tapped letter flag's happy flip-flutter lasts.
+const FLAG_FLIP_S: f32 = 0.7;
+/// Max letter flags we size the per-flag tap-timer array for.
+const FLAGS_MAX: usize = 12;
+/// How long a tapped cloud's puff lasts.
+const CLOUD_PUFF_S: f32 = 0.7;
+/// How long the whole house's tapped jiggle (a builder's knock) lasts.
+const HOUSE_JIGGLE_S: f32 = 0.6;
+/// Sky-tap twinkle pops: pool size + life.
+const SPARKLES_MAX: usize = 3;
+const SPARKLE_S: f32 = 0.7;
+/// Tapping bare lawn SPROUTS a garden plant there: pool + entrance spring.
+const SPROUTS_MAX: usize = 6;
+const SPROUT_GROW_S: f32 = 0.6;
+
+/// The house-warming's ambient clouds: (height as a fraction of the sky band,
+/// scale mult, speed px/s, phase 0..1) — shared by draw + hit-test so a
+/// drifting cloud is tapped exactly where it is.
+const DONE_CLOUD_SPEC: [(f32, f32, f32, f32); 3] =
+    [(0.30, 1.05, 9.0, 0.12), (0.52, 0.7, 14.0, 0.55), (0.22, 0.85, 6.5, 0.82)];
+
+/// Cloud `i`'s live drift position + base puff radius at `time`.
+fn done_cloud_pos(f: &crate::layout::Frame, ground_y: f32, time: f32, i: usize) -> (Vec2, f32) {
+    let cloud_r = f.vmin(0.045).max(22.0);
+    let span = f.w + cloud_r * 8.0;
+    let (hy, sc, spd, ph) = DONE_CLOUD_SPEC[i];
+    let x = (time * spd + ph * span).rem_euclid(span) - cloud_r * 4.0;
+    (vec2(x, ground_y * hy), cloud_r * sc)
+}
 
 /// A tap-reaction impulse: 0 → 1 → 0 over `dur`, then flat 0 once settled.
 fn pop_impulse(t: f32, dur: f32) -> f32 {
@@ -117,6 +146,24 @@ pub struct TracingScene {
     /// Seconds since each garden flower was tapped (blooms + settles); 99 = idle.
     flower_t: [f32; 2],
     flower_taps: u32,
+    /// Seconds since each letter flag was tapped (flip-flutter); 99 = idle.
+    flag_t: [f32; FLAGS_MAX],
+    flag_taps: u32,
+    /// Seconds since each drifting cloud was tapped (a happy puff); 99 = idle.
+    cloud_t: [f32; DONE_CLOUD_SPEC.len()],
+    cloud_taps: u32,
+    /// Seconds since the house body (roof/walls) was knocked (a jiggle).
+    house_t: f32,
+    house_taps: u32,
+    /// Builder-frog taps this finale (playtest hook; the timer is `frog_t`).
+    frog_taps: u32,
+    /// Sky-tap twinkle pops: a recycled `(center, t)` pool + accepted count.
+    sparkles: [(Vec2, f32); SPARKLES_MAX],
+    sky_taps: u32,
+    /// Lawn sprouts: plants the child grew by tapping bare grass — a recycled
+    /// `(root, seconds since planted)` pool + the running count.
+    sprouts: [(Vec2, f32); SPROUTS_MAX],
+    sprout_count: u32,
     confetti: crate::confetti::Confetti,
     sync: crate::net::SyncClient,
 }
@@ -160,6 +207,17 @@ impl TracingScene {
             chimney_taps: 0,
             flower_t: [99.0; 2],
             flower_taps: 0,
+            flag_t: [99.0; FLAGS_MAX],
+            flag_taps: 0,
+            cloud_t: [99.0; DONE_CLOUD_SPEC.len()],
+            cloud_taps: 0,
+            house_t: 99.0,
+            house_taps: 0,
+            frog_taps: 0,
+            sparkles: [(vec2(0.0, 0.0), 99.0); SPARKLES_MAX],
+            sky_taps: 0,
+            sprouts: [(vec2(0.0, 0.0), 99.0); SPROUTS_MAX],
+            sprout_count: 0,
             confetti: crate::confetti::Confetti::new(seed ^ 0x7e11_e77a),
             sync,
         }
@@ -203,6 +261,17 @@ impl TracingScene {
         self.chimney_taps = 0;
         self.flower_t = [99.0; 2];
         self.flower_taps = 0;
+        self.flag_t = [99.0; FLAGS_MAX];
+        self.flag_taps = 0;
+        self.cloud_t = [99.0; DONE_CLOUD_SPEC.len()];
+        self.cloud_taps = 0;
+        self.house_t = 99.0;
+        self.house_taps = 0;
+        self.frog_taps = 0;
+        self.sparkles = [(vec2(0.0, 0.0), 99.0); SPARKLES_MAX];
+        self.sky_taps = 0;
+        self.sprouts = [(vec2(0.0, 0.0), 99.0); SPROUTS_MAX];
+        self.sprout_count = 0;
     }
 
     fn start_trace(&mut self) {
@@ -350,6 +419,7 @@ impl TracingScene {
                 && self.frog_t > 0.8
             {
                 self.frog_t = 0.0;
+                self.frog_taps += 1;
                 ctx.audio.frog();
                 self.confetti.burst(vec2(dl.frog_c.x, dl.frog_c.y - dl.frog_r), 14, dl.frog_r * 0.5);
             } else if let Some(i) = (0..3).find(|&i| {
@@ -362,19 +432,70 @@ impl TracingScene {
                 ctx.audio.frog();
                 let (fc, fr) = dl.friends[i];
                 self.confetti.burst(vec2(fc.x, fc.y - fr), 10, fr * 0.5);
-            } else if !ctx.frame.is_phone() {
-                // The garden flowers (tablet only): tap → the bloom springs up
-                // with a twinkle + a little confetti.
-                if let Some(i) = (0..dl.flowers.len()).find(|&i| {
-                    let (root, size) = dl.flowers[i];
-                    input::hit_circle(pt.pos, root.x, root.y - size, (size * 0.6).max(20.0))
-                }) {
-                    self.flower_t[i] = 0.0;
-                    self.flower_taps += 1;
-                    ctx.audio.twinkle();
-                    let (root, size) = dl.flowers[i];
-                    self.confetti.burst(vec2(root.x, root.y - size), 9, size * 0.7);
-                }
+            } else if let Some(i) = (!ctx.frame.is_phone())
+                .then(|| {
+                    // The garden flowers (tablet only): tap → the bloom springs
+                    // up with a twinkle + a little confetti.
+                    (0..dl.flowers.len()).find(|&i| {
+                        let (root, size) = dl.flowers[i];
+                        input::hit_circle(pt.pos, root.x, root.y - size, (size * 0.6).max(20.0))
+                    })
+                })
+                .flatten()
+            {
+                self.flower_t[i] = 0.0;
+                self.flower_taps += 1;
+                ctx.audio.twinkle();
+                let (root, size) = dl.flowers[i];
+                self.confetti.burst(vec2(root.x, root.y - size), 9, size * 0.7);
+            } else if let Some(i) = (0..self.traced.len().min(FLAGS_MAX)).find(|&i| {
+                let (c, r) = letter_flag_hit(&dl, self.traced.len(), i);
+                input::hit_circle(pt.pos, c.x, c.y, r)
+            }) {
+                // A letter flag — the session's own trophy: it flips a happy
+                // flutter and chimes its own step up the little scale.
+                self.flag_t[i] = 0.0;
+                self.flag_taps += 1;
+                ctx.audio.trace_tick(i as u32 % fountouki_core::audio::TRACE_TICK_STEPS);
+                let (c, r) = letter_flag_hit(&dl, self.traced.len(), i);
+                self.confetti.burst(c, 8, r * 0.7);
+            } else if input::hit_rect(
+                pt.pos,
+                hc.x - hs * 0.55,
+                hc.y - draw::house_height(hs),
+                hs * 1.1,
+                draw::house_height(hs) + hs * 0.12,
+            ) {
+                // The house body (roof/walls): a builder's KNOCK — the whole
+                // house jiggles proudly and the hammer raps. Checked before the
+                // clouds (the house draws OVER them, so it wins the overlap).
+                self.house_t = 0.0;
+                self.house_taps += 1;
+                ctx.audio.hammer();
+                self.confetti.burst(vec2(hc.x, hc.y - draw::house_height(hs)), 10, hs * 0.3);
+            } else if let Some(i) = (0..DONE_CLOUD_SPEC.len()).find(|&i| {
+                let (c, r) = done_cloud_pos(&ctx.frame, dl.ground_y, ctx.time, i);
+                input::hit_circle(pt.pos, c.x, c.y, r * 2.0)
+            }) {
+                // A drifting cloud (hit at its LIVE position): a happy puff.
+                self.cloud_t[i] = 0.0;
+                self.cloud_taps += 1;
+                ctx.audio.tap();
+            } else if pt.pos.y > dl.ground_y {
+                // Bare lawn: a garden plant SPROUTS right under the finger
+                // (recycled pool — the lawn never overflows).
+                let slot = self.sprout_count as usize % SPROUTS_MAX;
+                self.sprouts[slot] = (pt.pos, 0.0);
+                self.sprout_count += 1;
+                ctx.audio.trace_tick(self.sprout_count % fountouki_core::audio::TRACE_TICK_STEPS);
+                self.confetti.burst(pt.pos, 6, 24.0);
+            } else {
+                // Open sky: a twinkle-pop star wherever the finger landed — no
+                // pixel of the house-warming stays silent.
+                let slot = self.sky_taps as usize % SPARKLES_MAX;
+                self.sparkles[slot] = (pt.pos, 0.0);
+                self.sky_taps += 1;
+                ctx.audio.twinkle();
             }
         }
         Nav::Stay
@@ -470,6 +591,47 @@ impl TracingScene {
     pub(crate) fn flower_taps(&self) -> u32 {
         self.flower_taps
     }
+    /// The builder frog's center (its jump tap target) + the tap count.
+    pub(crate) fn builder_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        done_layout(f).frog_c
+    }
+    pub(crate) fn builder_taps(&self) -> u32 {
+        self.frog_taps
+    }
+    /// Center of letter flag `i` (its flip tap target).
+    pub(crate) fn flag_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
+        letter_flag_hit(&done_layout(f), self.traced.len(), i.min(FLAGS_MAX - 1)).0
+    }
+    pub(crate) fn flag_taps(&self) -> u32 {
+        self.flag_taps
+    }
+    pub(crate) fn cloud_taps(&self) -> u32 {
+        self.cloud_taps
+    }
+    /// Cloud `i`'s live position at `time` (its puff tap target).
+    pub(crate) fn cloud_center(&self, f: &crate::layout::Frame, time: f32, i: usize) -> Vec2 {
+        done_cloud_pos(f, done_layout(f).ground_y, time, i.min(DONE_CLOUD_SPEC.len() - 1)).0
+    }
+    /// The house body's knock point: on the lower-left roof face, clear of the
+    /// window lamps (hit radius 0.16·s around ±0.245·s, −0.36·s), the door
+    /// rect, and the chimney.
+    pub(crate) fn house_body_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        let dl = done_layout(f);
+        vec2(dl.house_c.x - dl.house_s * 0.34, dl.house_c.y - dl.house_s * 0.62)
+    }
+    pub(crate) fn house_taps(&self) -> u32 {
+        self.house_taps
+    }
+    pub(crate) fn sprout_count(&self) -> u32 {
+        self.sprout_count
+    }
+    /// A patch of bare lawn (the sprout tap target), clear of frogs + house.
+    pub(crate) fn lawn_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        vec2(f.w * 0.42, done_layout(f).ground_y + (f.h - done_layout(f).ground_y) * 0.75)
+    }
+    pub(crate) fn sky_taps(&self) -> u32 {
+        self.sky_taps
+    }
     pub(crate) fn stroke_count(&self) -> usize {
         self.glyph().strokes.len()
     }
@@ -510,6 +672,19 @@ impl Scene for TracingScene {
         }
         for t in &mut self.flower_t {
             *t += ctx.dt;
+        }
+        for t in &mut self.flag_t {
+            *t += ctx.dt;
+        }
+        for t in &mut self.cloud_t {
+            *t += ctx.dt;
+        }
+        self.house_t += ctx.dt;
+        for s in &mut self.sparkles {
+            s.1 += ctx.dt;
+        }
+        for s in &mut self.sprouts {
+            s.1 += ctx.dt;
         }
         // The build stage's sound cues (digger scoops, truck beeps, brick
         // taps, the lands-home thunk + confetti…) fire as install_t crosses
@@ -848,11 +1023,11 @@ impl TracingScene {
         self.confetti.rain(f.w, -10.0, 2);
 
         // Ambient sky: drifting clouds + the sun (phonics' celebration sky).
-        let cloud_r = f.vmin(0.045).max(22.0);
-        let span = f.w + cloud_r * 8.0;
-        for &(hy, sc, spd, ph) in &[(0.30f32, 1.05f32, 9.0f32, 0.12f32), (0.52, 0.7, 14.0, 0.55), (0.22, 0.85, 6.5, 0.82)] {
-            let x = (ctx.time * spd + ph * span).rem_euclid(span) - cloud_r * 4.0;
-            draw::cloud(x, dl.ground_y * hy, cloud_r * sc);
+        // A tapped cloud puffs up on a happy half-sine impulse.
+        for i in 0..DONE_CLOUD_SPEC.len() {
+            let (c, r) = done_cloud_pos(f, dl.ground_y, ctx.time, i);
+            let puff = 1.0 + 0.22 * pop_impulse(self.cloud_t[i], CLOUD_PUFF_S);
+            draw::cloud(c.x, c.y, r * puff);
         }
         // The sun sits mid-sky on the right, clear of the letter bunting — tap
         // it and rays burst out, spinning, before settling back to a calm disc.
@@ -868,9 +1043,12 @@ impl TracingScene {
         draw::vgradient(0.0, dl.ground_y, f.w, f.h - dl.ground_y, palette::GROUND_TOP, palette::GROUND_BOT);
         draw_line(0.0, dl.ground_y, f.w, dl.ground_y, 3.0, palette::hex(0x2f7d2f));
 
-        // The finished house — a springy entrance pop, then smoke + lights.
+        // The finished house — a springy entrance pop, then smoke + lights. A
+        // knock on the body (roof/walls) jiggles the whole house proudly.
         let pop = anim::back_out(((self.done_t) / 0.5).clamp(0.0, 1.0));
-        let hs = dl.house_s * pop.max(0.05);
+        let jiggle = 1.0 + 0.05 * pop_impulse(self.house_t, HOUSE_JIGGLE_S)
+            * (self.house_t * 26.0).cos();
+        let hs = dl.house_s * pop.max(0.05) * jiggle;
         let door_open = door_swing(self.door_t);
         let lit = [self.lit_warm[0].clamp(0.0, 1.0), self.lit_warm[1].clamp(0.0, 1.0)];
         let pose = draw::HousePose {
@@ -895,6 +1073,14 @@ impl TracingScene {
                 let (root, size) = dl.flowers[i];
                 draw::plant(root.x, root.y, size, pop_impulse(self.flower_t[i], FLOWER_POP_S));
             }
+        }
+        // Lawn sprouts (planted by grass taps): spring in, then stay — the
+        // front yard fills in wherever the child touched it.
+        let planted = (self.sprout_count as usize).min(SPROUTS_MAX);
+        for k in 0..planted {
+            let (root, st) = self.sprouts[k];
+            let grow = (st / SPROUT_GROW_S).clamp(0.0, 1.0);
+            draw::plant(root.x, root.y, f.vmin(0.04) * (0.3 + 0.7 * grow), pop_impulse(st, SPROUT_GROW_S));
         }
 
         // The letters this session wrote, strung up as bunting flags — the
@@ -947,6 +1133,13 @@ impl TracingScene {
         draw::frog(dl.frog_c.x, dl.frog_c.y, dl.frog_r, palette::RAINBOW[3], fpose);
         draw::frog_hard_hat(dl.frog_c.x, dl.frog_c.y, dl.frog_r, fpose);
 
+        // Sky-tap twinkle pops, blooming wherever the finger landed.
+        for &(c, st) in &self.sparkles {
+            if st < SPARKLE_S {
+                draw::twinkle_pop(c.x, c.y, f.vmin(0.035), st / SPARKLE_S, palette::GOLD);
+            }
+        }
+
         let (replay, home_b, br) = chrome::corner_buttons(f);
         chrome::draw_corner_buttons(replay, home_b, br);
     }
@@ -970,7 +1163,16 @@ impl TracingScene {
             if popt <= 0.0 {
                 continue;
             }
-            let sc = anim::back_out(popt);
+            // A tapped flag flip-flutters: a quick decaying rotation wobble +
+            // a proud little swell.
+            let (flip, swell) = if i < FLAGS_MAX && self.flag_t[i] < FLAG_FLIP_S {
+                let p = self.flag_t[i] / FLAG_FLIP_S;
+                ((p * std::f32::consts::TAU * 2.0).sin() * 0.4 * (1.0 - p),
+                 1.0 + 0.2 * (p * std::f32::consts::PI).sin())
+            } else {
+                (0.0, 1.0)
+            };
+            let sc = anim::back_out(popt) * swell;
             let fs = dl.flag_s * sc;
             let x = x0 + (x1 - x0) * t + (ctx.time * 1.6 + i as f32 * 1.3).sin() * 2.0;
             let top = yat(t);
@@ -978,7 +1180,7 @@ impl TracingScene {
             // local tangent (downhill on the left, uphill on the right, upright
             // at the dip) so the bunting reads as one strung line, not a row of
             // upright cards.
-            let rot = (sag * 4.0 * (1.0 - 2.0 * t)).atan2(x1 - x0);
+            let rot = (sag * 4.0 * (1.0 - 2.0 * t)).atan2(x1 - x0) + flip;
             let pivot = vec2(x, top);
             draw::rounded_rect_rot(Rect::new(x - fs / 2.0, top, fs, fs * 1.22), fs * 0.12, pivot, rot, palette::CARD);
             draw::rounded_rect_rot(Rect::new(x - fs / 2.0, top, fs, fs * 0.18), fs * 0.10, pivot, rot, palette::RAINBOW[i % 7]);
@@ -1046,6 +1248,20 @@ struct DoneLayout {
     flag_s: f32,
     /// Bunting swag: x0, x1, top y, center sag.
     bunt: (f32, f32, f32, f32),
+}
+
+/// Center + tap radius of letter flag `i` of `n` on the bunting swag — the
+/// same swag/hang geometry `draw_letter_flags` uses (minus the ±2px sway),
+/// so a tapped flag is the one under the finger.
+fn letter_flag_hit(dl: &DoneLayout, n: usize, i: usize) -> (Vec2, f32) {
+    let (x0, x1, y, sag) = dl.bunt;
+    let t = (i as f32 + 0.5) / n.max(1) as f32;
+    let x = x0 + (x1 - x0) * t;
+    let top = y + sag * 4.0 * t * (1.0 - t);
+    let rot = (sag * 4.0 * (1.0 - 2.0 * t)).atan2(x1 - x0);
+    let (sr, cr) = rot.sin_cos();
+    let fs = dl.flag_s;
+    (vec2(x - fs * 0.61 * sr, top + fs * 0.61 * cr), fs * 0.75)
 }
 
 fn done_layout(f: &crate::layout::Frame) -> DoneLayout {

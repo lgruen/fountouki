@@ -656,6 +656,47 @@ async fn main() {
                 );
                 fails += 1;
             }
+            // Done scene: EVERY drawn element reacts — the sun flares, the
+            // rainbow shimmers, a drifting cloud puffs, bare ground sprouts a
+            // plant, and open sky sparkles. No dead pixels on the payoff.
+            {
+                let sun0 = sc.sun_taps();
+                let ptr = tap(sc.done_sun_center(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let rb0 = sc.rainbow_taps();
+                let ptr = tap(sc.done_rainbow_point(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let cl0 = sc.cloud_taps();
+                let ptr = tap(sc.done_cloud_center(&frame, 0.0, 1));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let sp0 = sc.sprout_count();
+                let ptr = tap(vec2(frame.w * 0.40, frame.h * 0.93));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let sk0 = sc.sky_taps();
+                let ptr = tap(vec2(frame.w * 0.08, frame.h * 0.54));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if sc.is_done()
+                    && sc.sun_taps() == sun0 + 1
+                    && sc.rainbow_taps() == rb0 + 1
+                    && sc.cloud_taps() == cl0 + 1
+                    && sc.sprout_count() == sp0 + 1
+                    && sc.sky_taps() == sk0 + 1
+                {
+                    println!("PASS phonics-done-surprises");
+                } else {
+                    println!(
+                        "FAIL phonics-done-surprises (sun {}->{}, rainbow {}->{}, cloud {}->{}, sprout {}->{}, sky {}->{})",
+                        sun0, sc.sun_taps(), rb0, sc.rainbow_taps(), cl0, sc.cloud_taps(),
+                        sp0, sc.sprout_count(), sk0, sc.sky_taps()
+                    );
+                    fails += 1;
+                }
+            }
         }
         // patterns: the correct choice scores a star.
         {
@@ -943,6 +984,41 @@ async fn main() {
                     fails += 1;
                 }
             }
+            // Every OTHER drawn element reacts too: the bunting waves, the track
+            // knocks a sleeper ripple, bare meadow sprouts a flower, and open
+            // sky launches a firework — no dead pixels on the celebration.
+            {
+                let bw0 = sc.bunting_waves();
+                let ptr = tap(sc.finale_bunting_point(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let tk0 = sc.track_taps();
+                let ptr = tap(sc.finale_track_point(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let sp0 = sc.sprout_count();
+                let ptr = tap(sc.finale_meadow_point(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                let sk0 = sc.sky_taps();
+                let ptr = tap(sc.finale_sky_point(&frame));
+                let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+                sc.update(&ctx);
+                if sc.in_finale()
+                    && sc.bunting_waves() == bw0 + 1
+                    && sc.track_taps() == tk0 + 1
+                    && sc.sprout_count() == sp0 + 1
+                    && sc.sky_taps() == sk0 + 1
+                {
+                    println!("PASS patterns-finale-surprises");
+                } else {
+                    println!(
+                        "FAIL patterns-finale-surprises (bunting {}->{}, track {}->{}, sprout {}->{}, sky {}->{})",
+                        bw0, sc.bunting_waves(), tk0, sc.track_taps(), sp0, sc.sprout_count(), sk0, sc.sky_taps()
+                    );
+                    fails += 1;
+                }
+            }
             // Replay returns to a fresh game at level 1 (stars reset).
             let ptr = tap(sc.replay_center(&frame));
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
@@ -1064,6 +1140,42 @@ async fn main() {
             let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let flower_ok = sc.flower_taps() == 1;
+            // Every remaining element reacts too: a letter flag flips, a
+            // drifting cloud puffs, the house body knocks, the builder jumps,
+            // bare lawn sprouts a plant, and open sky sparkles.
+            let ptr = tap(sc.flag_center(&frame, 0));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let ptr = tap(sc.cloud_center(&frame, 0.0, 0));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let ptr = tap(sc.house_body_point(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let ptr = tap(sc.builder_center(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let ptr = tap(sc.lawn_point(&frame));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let ptr = tap(vec2(frame.w * 0.10, frame.h * 0.42));
+            let ctx = Ctx { dt: 0.1, time: 0.0, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let surprises_ok = sc.flag_taps() == 1
+                && sc.cloud_taps() == 1
+                && sc.house_taps() == 1
+                && sc.builder_taps() == 1
+                && sc.sprout_count() == 1
+                && sc.sky_taps() == 1;
+            if surprises_ok {
+                println!("PASS tracing-housewarming-surprises");
+            } else {
+                println!(
+                    "FAIL tracing-housewarming-surprises (flag={}, cloud={}, house={}, builder={}, sprout={}, sky={})",
+                    sc.flag_taps(), sc.cloud_taps(), sc.house_taps(), sc.builder_taps(), sc.sprout_count(), sc.sky_taps()
+                );
+                fails += 1;
+            }
             let idle2 = Pointer::default();
             let ctx = Ctx { dt: 2.0, time: 0.0, now, pointer: &idle2, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
@@ -1428,6 +1540,45 @@ async fn main() {
                 && matches!(bnav2, Nav::Stay)
                 && sc.in_finale()
                 && sc.balloon_bumps() == 2;
+            // EVERY remaining element of the party reacts: the trophy star
+            // supernovas, the bunting waves, the dance floor plays a pitched
+            // light ripple, and any open patch of the backdrop launches a
+            // firework — no dead pixels anywhere on the celebration.
+            // (Deltas per tap: an earlier incidental hit — e.g. the topbar-dead
+            // tap landing on the bunting band — must not fail the assert.)
+            let st0 = sc.star_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_trophy_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let star_ok = sc.star_taps() == st0 + 1;
+            let bw0 = sc.bunting_waves();
+            clk += 0.3;
+            let ptr = tap(sc.finale_bunting_point(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let bunting_ok = sc.bunting_waves() == bw0 + 1;
+            let fl0 = sc.floor_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_floor_point(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let floor_ok = sc.floor_taps() == fl0 + 1;
+            let sk0 = sc.sky_fireworks();
+            clk += 0.3;
+            let ptr = tap(sc.finale_sky_point(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let sky_ok = sc.sky_fireworks() == sk0 + 1;
+            let surprises_ok = sc.in_finale() && star_ok && bunting_ok && floor_ok && sky_ok;
+            if surprises_ok {
+                println!("PASS singback-finale-surprises");
+            } else {
+                println!(
+                    "FAIL singback-finale-surprises (star={star_ok}, bunting={bunting_ok}, floor={floor_ok}, sky={sky_ok})"
+                );
+                fails += 1;
+            }
             // Corner replay restarts the session. Find the corner replay center.
             let (rc, _home, _br) = chrome::corner_buttons(&frame);
             clk += 0.3;
@@ -1700,6 +1851,45 @@ async fn main() {
             let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             let flnav = sc.update(&ctx);
             let fly_ok = matches!(flnav, Nav::Stay) && sc.in_finale() && sc.fly_taps() == 1;
+            // Every remaining element of the night reacts: the trophy star
+            // supernovas, a knock on the cottage rings the doorbell, an open
+            // patch of meadow blooms a glow-pop, and open sky launches a
+            // SHOOTING STAR — no dead pixels on the bedtime scene.
+            // (Deltas per tap: the earlier topbar-dead tap lands in open sky
+            // and legitimately launches its own shooting star.)
+            let tr0 = sc.trophy_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_trophy_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let trophy_ok = sc.trophy_taps() == tr0 + 1;
+            let ct0 = sc.cottage_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_cottage_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let cottage_ok = sc.cottage_taps() == ct0 + 1;
+            let gl0 = sc.glow_count();
+            clk += 0.3;
+            let ptr = tap(sc.finale_meadow_point(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let glow_ok = sc.glow_count() == gl0 + 1;
+            let sh0 = sc.shoot_count();
+            clk += 0.3;
+            let ptr = tap(vec2(frame.w * 0.30, frame.h * 0.40));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let shoot_ok = sc.shoot_count() == sh0 + 1;
+            let surprises_ok = sc.in_finale() && trophy_ok && cottage_ok && glow_ok && shoot_ok;
+            if surprises_ok {
+                println!("PASS clock-finale-surprises");
+            } else {
+                println!(
+                    "FAIL clock-finale-surprises (trophy={trophy_ok}, cottage={cottage_ok}, glow={glow_ok}, shoot={shoot_ok})"
+                );
+                fails += 1;
+            }
             // Corner replay restarts the day.
             clk += 0.3;
             let ptr = tap(sc.replay_center(&frame));
@@ -1841,6 +2031,70 @@ async fn main() {
             let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             sc.update(&ctx);
             let friend_ok = sc.in_finale() && sc.friend_taps() == 1;
+            // Every remaining element of the carnival reacts: a numbered
+            // pennant sings its pitch, the trophy supernovas, a drifting cloud
+            // puffs, the dragonfly darts, a cattail boings, open water
+            // splashes, and open sky fires a firework.
+            // (Deltas per tap: earlier incidental hits — e.g. the topbar-dead
+            // tap grazing a drifting cloud — must not fail the assert.)
+            let pn0 = sc.pennant_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_pennant_center(&frame, 2));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let pennant_ok = sc.pennant_taps() == pn0 + 1;
+            let tr0 = sc.trophy_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_trophy_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let trophy_ok = sc.trophy_taps() == tr0 + 1;
+            let cl0 = sc.cloud_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_cloud_center(&frame, sc.finale_clock(), 0));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let cloud_ok = sc.cloud_taps() == cl0 + 1;
+            let df0 = sc.dragonfly_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_dragonfly_center(&frame, sc.finale_clock()));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let dragonfly_ok = sc.dragonfly_taps() == df0 + 1;
+            let ca0 = sc.cattail_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_cattail_center(&frame, 0));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let cattail_ok = sc.cattail_taps() == ca0 + 1;
+            let sp0 = sc.splash_count();
+            clk += 0.3;
+            let ptr = tap(sc.finale_water_point(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let splash_ok = sc.splash_count() == sp0 + 1;
+            let sk0 = sc.sky_taps();
+            clk += 0.3;
+            let ptr = tap(sc.finale_sky_point(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let sky_ok = sc.sky_taps() == sk0 + 1;
+            let surprises_ok = sc.in_finale()
+                && pennant_ok
+                && trophy_ok
+                && cloud_ok
+                && dragonfly_ok
+                && cattail_ok
+                && splash_ok
+                && sky_ok;
+            if surprises_ok {
+                println!("PASS compare-finale-surprises");
+            } else {
+                println!(
+                    "FAIL compare-finale-surprises (pennant={pennant_ok}, trophy={trophy_ok}, cloud={cloud_ok}, dragonfly={dragonfly_ok}, cattail={cattail_ok}, splash={splash_ok}, sky={sky_ok})"
+                );
+                fails += 1;
+            }
             clk += 0.3;
             let ptr = tap(sc.replay_center(&frame));
             let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
@@ -1915,6 +2169,27 @@ async fn main() {
             let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
             let nav = sc.update(&ctx);
             let topbar_dead = matches!(nav, Nav::Stay) && sc.in_finale();
+            // The finale's own toys: the big 30 bounces + recolors on its own
+            // tap, and any open patch launches a party firework (the earlier
+            // topbar-area tap already fired one — every pixel answers).
+            clk += 0.3;
+            let ptr = tap(sc.numeral_center(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            clk += 0.3;
+            let ptr = tap(sc.party_point(&frame));
+            let ctx = Ctx { dt: 0.05, time: clk, now, pointer: &ptr, frame, fonts: &fonts, audio: &audio };
+            sc.update(&ctx);
+            let toys_ok = sc.in_finale() && sc.numeral_taps() == 1 && sc.party_taps() == 2;
+            if toys_ok {
+                println!("PASS counting-finale-toys");
+            } else {
+                println!(
+                    "FAIL counting-finale-toys (numeral={}, party={})",
+                    sc.numeral_taps(), sc.party_taps()
+                );
+                fails += 1;
+            }
             // Corner replay restarts the count at 1.
             clk += 0.3;
             let ptr = tap(sc.replay_center(&frame));

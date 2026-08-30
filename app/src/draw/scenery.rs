@@ -35,6 +35,52 @@ pub fn rainbow(cx: f32, horizon_y: f32, scale: f32, stroke: f32, filled: usize) 
     }
 }
 
+/// A celebratory SHIMMER sweeping along a completed rainbow: a bright pulse of
+/// light travels every band left→right as `p` runs 0..1 (no-op outside), fading
+/// in and out at the ends. Same band geometry as [`rainbow`], so the highlight
+/// rides exactly on the stripes.
+pub fn rainbow_shimmer(cx: f32, horizon_y: f32, scale: f32, stroke: f32, p: f32) {
+    if !(0.0..1.0).contains(&p) {
+        return;
+    }
+    let theta_c = -RAD75 + 2.0 * RAD75 * p;
+    let half = RAD75 * 0.18;
+    let fade = (p * std::f32::consts::PI).sin();
+    for i in 0..7 {
+        let t = i as f32 / 6.0;
+        let sagitta = (65.0 - 40.0 * t) * scale;
+        let r = sagitta / (1.0 - COS75);
+        let center_y = horizon_y - sagitta + r;
+        const N: usize = 12;
+        let mut pts = Vec::with_capacity(N + 1);
+        for k in 0..=N {
+            let theta = (theta_c - half + 2.0 * half * (k as f32 / N as f32))
+                .clamp(-RAD75, RAD75);
+            pts.push(vec2(cx + r * theta.sin(), center_y - r * theta.cos()));
+        }
+        stroke_path(&pts, stroke * 0.8, Color::new(1.0, 1.0, 1.0, 0.7 * fade));
+    }
+}
+
+/// Whether point `p` lies ON the rainbow's stripes (any of the 7 bands, above
+/// the horizon) — the hit test for tapping the bow. Mirrors [`rainbow`]'s
+/// geometry; `slop` widens each band's stroke for small fingers.
+pub fn rainbow_hit(cx: f32, horizon_y: f32, scale: f32, stroke: f32, slop: f32, p: Vec2) -> bool {
+    if p.y > horizon_y {
+        return false;
+    }
+    for i in 0..7 {
+        let t = i as f32 / 6.0;
+        let sagitta = (65.0 - 40.0 * t) * scale;
+        let r = sagitta / (1.0 - COS75);
+        let center = vec2(cx, horizon_y - sagitta + r);
+        if ((p - center).length() - r).abs() <= stroke * 0.5 + slop {
+            return true;
+        }
+    }
+    false
+}
+
 /// A pale "to be filled" rainbow: all 7 bands washed toward the background, so
 /// the meter's shape is visible from zero stars and fills over it in color.
 /// Opaque (mixed, not alpha) — translucent stroked paths would self-overlap

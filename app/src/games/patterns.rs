@@ -75,6 +75,14 @@ const FLAG_WAVE_S: f32 = 0.8;
 const CAR_BOUNCE_S: f32 = 0.5;
 const BALLOON_BOB_S: f32 = 0.8;
 const FLOWER_POP_S: f32 = 0.5;
+/// How long a tapped track's sleeper knock-wave runs.
+const TRACK_KNOCK_S: f32 = 0.9;
+/// Tapping bare meadow SPROUTS a flower there: pool size + entrance spring.
+const SPROUTS_MAX: usize = 6;
+const SPROUT_GROW_S: f32 = 0.6;
+/// Sky fireworks: shell life + how many fly at once (older shells recycle).
+const FIREWORK_S: f32 = 0.8;
+const FIREWORKS_MAX: usize = 3;
 
 /// Finale tap-target ids (distinct so the per-target debounce only swallows a
 /// same-target re-fire — a fast tap on a different target always lands).
@@ -83,9 +91,15 @@ const TGT_HOME: u32 = 2;
 const TGT_ENGINE: u32 = 3;
 const TGT_SUN: u32 = 4;
 const TGT_FLAG: u32 = 5;
+const TGT_BUNTING: u32 = 6;
+const TGT_TRACK: u32 = 7;
 const TGT_CAR_BASE: u32 = 20;
 const TGT_BALLOON_BASE: u32 = 50;
 const TGT_FLOWER_BASE: u32 = 80;
+/// Sprouts + sky fireworks cycle `BASE + (count % pool)` so rapid taps in
+/// different spots all land.
+const TGT_SPROUT_BASE: u32 = 90;
+const TGT_SKY_BASE: u32 = 100;
 
 /// Which scene we're in: the round-by-round game, or the train celebration that
 /// crowns mastering the final level.
@@ -148,6 +162,24 @@ pub struct PatternsScene {
     /// Meadow flowers (tap → the bloom springs up); park at `IDLE_T`.
     flower_t: [f32; FINALE_FLOWERS],
     flower_taps: u32,
+    /// Bunting excitement wave: seconds since the tap (`IDLE_T` idle), the
+    /// tapped x it radiates from, and the accepted-tap count.
+    bunting_t: f32,
+    bunting_x: f32,
+    bunting_waves: u32,
+    /// Track knock-wave: a tap on the rails HAMMERS a hop rippling down the
+    /// sleepers from the tapped spot; parks at `IDLE_T`.
+    track_t: f32,
+    track_x: f32,
+    track_taps: u32,
+    /// Meadow sprouts: flowers the child planted by tapping bare ground —
+    /// a recycled pool of `(root, seconds since planted)`.
+    sprouts: [(Vec2, f32); SPROUTS_MAX],
+    sprout_count: u32,
+    /// Sky fireworks: a recycled pool of `(center, t, color idx)` shells so any
+    /// tap that hits nothing else still answers with a bang.
+    fireworks: [(Vec2, f32, usize); FIREWORKS_MAX],
+    sky_taps: u32,
     // --- level-up drive-by (a mini Pattern Train crosses the bottom) ---
     /// Seconds since a level-up fired the drive-by; `None` when parked offstage.
     drive_t: Option<f32>,
@@ -202,6 +234,16 @@ impl PatternsScene {
             balloon_taps: 0,
             flower_t: [IDLE_T; FINALE_FLOWERS],
             flower_taps: 0,
+            bunting_t: IDLE_T,
+            bunting_x: 0.0,
+            bunting_waves: 0,
+            track_t: IDLE_T,
+            track_x: 0.0,
+            track_taps: 0,
+            sprouts: [(vec2(0.0, 0.0), IDLE_T); SPROUTS_MAX],
+            sprout_count: 0,
+            fireworks: [(vec2(0.0, 0.0), IDLE_T, 0); FIREWORKS_MAX],
+            sky_taps: 0,
             drive_t: None,
             drive_items: Vec::new(),
         }
@@ -298,6 +340,14 @@ impl PatternsScene {
         self.balloon_taps = 0;
         self.flower_t = [IDLE_T; FINALE_FLOWERS];
         self.flower_taps = 0;
+        self.bunting_t = IDLE_T;
+        self.bunting_waves = 0;
+        self.track_t = IDLE_T;
+        self.track_taps = 0;
+        self.sprouts = [(vec2(0.0, 0.0), IDLE_T); SPROUTS_MAX];
+        self.sprout_count = 0;
+        self.fireworks = [(vec2(0.0, 0.0), IDLE_T, 0); FIREWORKS_MAX];
+        self.sky_taps = 0;
         self.build_cars();
         ctx.audio.finale();
         let f = &ctx.frame;
@@ -387,6 +437,14 @@ impl PatternsScene {
         step_timers(&mut self.flower_t, ctx.dt, FLOWER_POP_S);
         step_timers(std::slice::from_mut(&mut self.sun_t), ctx.dt, SUN_FLARE_S);
         step_timers(std::slice::from_mut(&mut self.flag_t), ctx.dt, FLAG_WAVE_S);
+        step_timers(std::slice::from_mut(&mut self.bunting_t), ctx.dt, draw::BUNTING_WAVE_S);
+        step_timers(std::slice::from_mut(&mut self.track_t), ctx.dt, TRACK_KNOCK_S);
+        for s in &mut self.sprouts {
+            step_timers(std::slice::from_mut(&mut s.1), ctx.dt, SPROUT_GROW_S);
+        }
+        for fw in &mut self.fireworks {
+            step_timers(std::slice::from_mut(&mut fw.1), ctx.dt, FIREWORK_S);
+        }
 
         let pt = ctx.pointer;
         if !pt.tapped() {
@@ -420,8 +478,17 @@ impl PatternsScene {
             return Nav::Stay;
         }
         // The finish flag → an excited flutter + a finial pop + confetti + toot.
+        // The POLE counts too (a rect from finial to track), so no part of the
+        // flag assembly is dead.
         let flag_c = fl.flag_center();
-        if input::hit_circle(pt.pos, flag_c.x, flag_c.y, fl.flag_w)
+        if (input::hit_circle(pt.pos, flag_c.x, flag_c.y, fl.flag_w)
+            || input::hit_rect(
+                pt.pos,
+                fl.flag_x - fl.flag_w * 0.3,
+                fl.flag_top - fl.flag_h * 0.5,
+                fl.flag_w * 0.6,
+                fl.ground_y - fl.flag_top + fl.flag_h * 0.5,
+            ))
             && self.tap_debounce.accept(TGT_FLAG, ctx.time)
         {
             self.flag_t = 0.0;
@@ -440,12 +507,22 @@ impl PatternsScene {
             self.confetti.burst(fl.sun_c, 18, fl.sun_r * 0.9);
             return Nav::Stay;
         }
-        // The cars → poke your own mastered pattern; each piece boings up.
+        // The cars → poke your own mastered pattern; each piece boings up. The
+        // whole car counts — seat circle OR chassis rect — so a toddler-low tap
+        // on the wheels lands too.
         let tdx = train_offset(self.finale_t, &fl);
         let n_cars = fl.n_cars.min(self.cars.len()).min(FINALE_MAX_CARS);
         for i in 0..n_cars {
             let c = fl.car_seat(i, tdx);
-            if input::hit_circle(pt.pos, c.x, c.y, fl.seat * 0.7)
+            let cx = fl.leftmost_cx + i as f32 * fl.car_pitch + tdx;
+            let body_hit = input::hit_rect(
+                pt.pos,
+                cx - fl.car_w / 2.0,
+                fl.ground_y - fl.wheel_r - fl.car_h,
+                fl.car_w,
+                fl.car_h + fl.wheel_r,
+            );
+            if (input::hit_circle(pt.pos, c.x, c.y, fl.seat * 0.7) || body_hit)
                 && self.tap_debounce.accept(TGT_CAR_BASE + i as u32, ctx.time)
             {
                 self.car_t[i] = 0.0;
@@ -454,10 +531,14 @@ impl PatternsScene {
                 return Nav::Stay;
             }
         }
-        // Party balloons in the sky → a pop-wobble.
+        // Party balloons in the sky → a pop-wobble. The trailing string counts
+        // too (a slim band below the body), so string taps aren't dead.
         for i in 0..FINALE_BALLOONS {
             let p = fl.balloon(i, self.finale_t);
-            if input::hit_circle(pt.pos, p.x, p.y, fl.balloon_r * 1.25)
+            let string_hit = (pt.pos.x - p.x).abs() <= fl.balloon_r * 0.6
+                && pt.pos.y > p.y
+                && pt.pos.y <= p.y + fl.balloon_r * 2.8;
+            if (input::hit_circle(pt.pos, p.x, p.y, fl.balloon_r * 1.25) || string_hit)
                 && self.tap_debounce.accept(TGT_BALLOON_BASE + i as u32, ctx.time)
             {
                 self.balloon_t[i] = 0.0;
@@ -480,6 +561,52 @@ impl PatternsScene {
                     return Nav::Stay;
                 }
             }
+        }
+        let f = &ctx.frame;
+        let content = f.content();
+        // The bunting (tablet only, matching the draw) → an excitement wave
+        // ripples down the swag from the tapped spot.
+        if fl.show_bunting
+            && pt.pos.y <= f.h * 0.12 + f.h * 0.055 + 50.0
+            && self.tap_debounce.accept(TGT_BUNTING, ctx.time)
+        {
+            self.bunting_t = 0.0;
+            self.bunting_x = pt.pos.x;
+            self.bunting_waves += 1;
+            ctx.audio.twinkle();
+            return Nav::Stay;
+        }
+        // The track → a KNOCK: the builder's hammer raps and a hop ripples down
+        // the sleepers from the tapped spot.
+        if (pt.pos.y - fl.ground_y).abs() <= (fl.r_boiler * 0.6).max(24.0)
+            && self.tap_debounce.accept(TGT_TRACK, ctx.time)
+        {
+            self.track_t = 0.0;
+            self.track_x = pt.pos.x;
+            self.track_taps += 1;
+            ctx.audio.hammer();
+            return Nav::Stay;
+        }
+        // Bare meadow below the track → a flower SPROUTS right under the finger
+        // (a recycled pool, so the meadow never overflows).
+        if pt.pos.y > fl.ground_y {
+            let slot = self.sprout_count as usize % SPROUTS_MAX;
+            if self.tap_debounce.accept(TGT_SPROUT_BASE + slot as u32, ctx.time) {
+                self.sprouts[slot] = (pt.pos, 0.0);
+                self.sprout_count += 1;
+                ctx.audio.trace_tick(self.sprout_count % fountouki_core::audio::TRACE_TICK_STEPS);
+                self.confetti.burst(pt.pos, 6, 24.0);
+            }
+            return Nav::Stay;
+        }
+        // Anywhere else in the sky → a FIREWORK under the finger; no pixel of
+        // the celebration is dead.
+        let slot = self.sky_taps as usize % FIREWORKS_MAX;
+        if self.tap_debounce.accept(TGT_SKY_BASE + slot as u32, ctx.time) {
+            self.fireworks[slot] = (pt.pos, 0.0, self.sky_taps as usize % 7);
+            self.sky_taps += 1;
+            ctx.audio.twinkle();
+            self.confetti.burst(pt.pos, 10, content.w * 0.02);
         }
         Nav::Stay
     }
@@ -509,16 +636,37 @@ impl PatternsScene {
         draw::vgradient(0.0, by, f.w, f.h - by, palette::HILL_NEAR, palette::GROUND_BOT);
         draw::fill_ellipse(f.w * 0.5, by + f.h * 0.10, f.w * 0.7, f.h * 0.12, 0.0, palette::HILL_NEAR);
 
-        // Track: sleepers tiled across, then a darker rail line on top.
+        // Track: sleepers tiled across, then a darker rail line on top. A tap
+        // on the track KNOCKS a little hop rippling down the sleepers outward
+        // from the tapped spot (gaussian front, decaying as it spends).
         let s_pitch = (fl.car_pitch * 0.5).max(28.0);
         let sw = s_pitch * 0.32;
         let sh = (r * 0.5).max(10.0);
+        let knock = (self.track_t < TRACK_KNOCK_S).then(|| {
+            let p = self.track_t / TRACK_KNOCK_S;
+            (f.w * 1.2 * p, s_pitch * 1.2, 1.0 - p)
+        });
         let mut sx = content.x.rem_euclid(s_pitch) - s_pitch;
         while sx < f.w + s_pitch {
-            draw::rounded_rect(sx - sw / 2.0, by - sh * 0.18, sw, sh, sw * 0.3, palette::RAIL);
+            let mut hop = 0.0;
+            if let Some((front, sigma, decay)) = knock {
+                let d = (sx - self.track_x).abs() - front;
+                hop = (-(d * d) / (2.0 * sigma * sigma)).exp() * decay * sh * 0.9;
+            }
+            draw::rounded_rect(sx - sw / 2.0, by - sh * 0.18 - hop, sw, sh, sw * 0.3, palette::RAIL);
             sx += s_pitch;
         }
         draw_line(0.0, by, f.w, by, (r * 0.12).max(3.0), Color::new(0.40, 0.34, 0.28, 1.0));
+
+        // Sprouted flowers (planted by meadow taps): spring in with a bloom
+        // impulse, then stand with the rest of the meadow.
+        let planted = (self.sprout_count as usize).min(SPROUTS_MAX);
+        for k in 0..planted {
+            let (root, st) = self.sprouts[k];
+            let pop = if st < SPROUT_GROW_S { (st / SPROUT_GROW_S * pi).sin() } else { 0.0 };
+            let grow = (st / SPROUT_GROW_S).clamp(0.0, 1.0);
+            draw::plant(root.x, root.y, f.vmin(0.045) * (0.3 + 0.7 * grow), pop);
+        }
 
         // A few cheerful meadow flowers in the foreground (tablet only — a phone
         // foreground is too short and would crowd the buttons). Tap → the bloom
@@ -535,9 +683,12 @@ impl PatternsScene {
             }
         }
 
-        // Bunting (tablet only) high in the sky.
+        // Bunting (tablet only) high in the sky; a tap ripples an excitement
+        // wave down the swag from the finger.
         if fl.show_bunting {
-            draw::bunting(content.x, content.x + content.w, f.h * 0.12, f.h * 0.055, 12, ctx.time);
+            let wave = (self.bunting_t < draw::BUNTING_WAVE_S)
+                .then_some((self.bunting_x, self.bunting_t));
+            draw::bunting_wave(content.x, content.x + content.w, f.h * 0.12, f.h * 0.055, 12, ctx.time, wave);
         }
 
         // Party balloons drifting in the sky (tap → pop-wobble). Each sways on
@@ -636,6 +787,13 @@ impl PatternsScene {
             draw::star(fl.flag_x, fl.flag_top - fl.flag_h * 0.22, fl.flag_h * 0.2 * (1.0 + 0.6 * a), palette::GOLD);
         }
 
+        // In-flight sky fireworks, blooming wherever the finger landed.
+        for &(c, ft, ci) in &self.fireworks {
+            if ft < FIREWORK_S {
+                draw::firework(c.x, c.y, f.vmin(0.10), ft / FIREWORK_S, palette::RAINBOW[ci]);
+            }
+        }
+
         // Replay / Home (phonics-identical placement for cross-finale predictability).
         chrome::draw_corner_buttons(fl.replay, fl.home, fl.btn_r);
     }
@@ -723,6 +881,38 @@ impl PatternsScene {
     }
     pub(crate) fn flower_taps(&self) -> u32 {
         self.flower_taps
+    }
+    pub(crate) fn bunting_waves(&self) -> u32 {
+        self.bunting_waves
+    }
+    /// A point on the bunting swag (tablet finale; the wave tap target).
+    pub(crate) fn finale_bunting_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        vec2(f.w * 0.5, f.h * 0.12 + f.h * 0.03)
+    }
+    pub(crate) fn track_taps(&self) -> u32 {
+        self.track_taps
+    }
+    /// A point on the track clear of the train + flag (the knock tap target):
+    /// just left of the leftmost car's chassis.
+    pub(crate) fn finale_track_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        let fl = finale_layout(f, self.car_period);
+        vec2((fl.leftmost_cx - fl.car_w * 0.5 - 20.0).max(6.0), fl.ground_y)
+    }
+    pub(crate) fn sprout_count(&self) -> u32 {
+        self.sprout_count
+    }
+    /// A patch of bare meadow below the track (the sprout tap target).
+    pub(crate) fn finale_meadow_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        let fl = finale_layout(f, self.car_period);
+        vec2(f.w * 0.30, (fl.ground_y + f.h) / 2.0)
+    }
+    pub(crate) fn sky_taps(&self) -> u32 {
+        self.sky_taps
+    }
+    /// A patch of open sky clear of sun/flag/balloons/bunting (the firework
+    /// tap target): low-left sky, under the sun, left of the balloon band.
+    pub(crate) fn finale_sky_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        vec2(f.w * 0.08, f.h * 0.36)
     }
     pub(crate) fn finale_flower_center(&self, f: &crate::layout::Frame, i: usize) -> Vec2 {
         let (root, size) = finale_flower(f, finale_layout(f, self.car_period).ground_y, i);

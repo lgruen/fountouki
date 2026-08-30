@@ -97,15 +97,27 @@ const TGT_FINALE_REPLAY: u32 = 1;
 const TGT_FINALE_HOME: u32 = 2;
 const TGT_FINALE_FROG: u32 = 3;
 const TGT_FINALE_MOON: u32 = 4;
+const TGT_COTTAGE: u32 = 5;
+const TGT_TROPHY: u32 = 6;
 const TGT_STAR_BASE: u32 = 10;
 const TGT_FRIEND_BASE: u32 = 40;
 const TGT_FLY_BASE: u32 = 60;
+/// Shooting stars + meadow glow-pops cycle `BASE + (count % pool)` so quick
+/// taps in different spots all land.
+const TGT_SHOOT_BASE: u32 = 80;
+const TGT_GLOW_BASE: u32 = 90;
 /// How many twinkling stars dot the finale sky (tappable, errorless).
 const FINALE_STARS: usize = 12;
 /// Snoozing friend frogs in the meadow (tap → ribbit-hop).
 const FINALE_FRIENDS: usize = 2;
 /// Drifting fireflies (tap → flare + tiny sparkle).
 const FINALE_FLIES: usize = 6;
+/// Sky taps launch SHOOTING STARS: pool size + streak life.
+const SHOOTS_MAX: usize = 2;
+const SHOOT_S: f32 = 1.0;
+/// Meadow taps bloom a firefly-green glow-pop: pool size + life.
+const GLOWS_MAX: usize = 3;
+const GLOW_S: f32 = 0.7;
 
 /// Which hand the finger grabbed this press.
 #[derive(PartialEq, Clone, Copy)]
@@ -177,6 +189,19 @@ pub struct ClockScene {
     /// Per-firefly flare timer (seconds since tapped, or IDLE).
     fly_t: [f32; FINALE_FLIES],
     fly_taps: u32,
+    /// The cottage's knock timer (window blooms + smoke coughs) + tap count.
+    cottage_t: f32,
+    cottage_taps: u32,
+    /// The trophy star's supernova timer (swell + whirl + gold shell) + count.
+    trophy_t: f32,
+    trophy_taps: u32,
+    /// Shooting stars launched by open-sky taps: `(origin, rightward?, t)` —
+    /// each streaks down toward the meadow from where the finger landed.
+    shoots: [(Vec2, f32, f32); SHOOTS_MAX],
+    shoot_count: u32,
+    /// Firefly-green glow-pops bloomed by open-meadow taps: `(center, t)`.
+    glows: [(Vec2, f32); GLOWS_MAX],
+    glow_count: u32,
 }
 
 /// Parked timer value meaning "idle" (no animation in flight).
@@ -188,6 +213,10 @@ const FROG_STIR_S: f32 = 0.8;
 const MOON_WINK_S: f32 = 0.9;
 const FRIEND_HOP_S: f32 = 0.7;
 const FLY_FLARE_S: f32 = 0.7;
+/// How long the knocked cottage's window bloom + smoke cough lasts, and how
+/// long the tapped trophy's supernova runs.
+const COTTAGE_KNOCK_S: f32 = 0.9;
+const TROPHY_SUPER_S: f32 = 0.9;
 
 /// Step each in-flight animation timer by `dt`, parking it at [`IDLE`] once it
 /// runs past `dur` (so `>= dur` reads as "ready for the next tap").
@@ -260,6 +289,14 @@ impl ClockScene {
             friend_taps: 0,
             fly_t: [IDLE; FINALE_FLIES],
             fly_taps: 0,
+            cottage_t: IDLE,
+            cottage_taps: 0,
+            trophy_t: IDLE,
+            trophy_taps: 0,
+            shoots: [(vec2(0.0, 0.0), 1.0, IDLE); SHOOTS_MAX],
+            shoot_count: 0,
+            glows: [(vec2(0.0, 0.0), IDLE); GLOWS_MAX],
+            glow_count: 0,
         };
         sc.setup_event();
         sc
@@ -369,6 +406,14 @@ impl ClockScene {
         self.friend_taps = 0;
         self.fly_t = [IDLE; FINALE_FLIES];
         self.fly_taps = 0;
+        self.cottage_t = IDLE;
+        self.cottage_taps = 0;
+        self.trophy_t = IDLE;
+        self.trophy_taps = 0;
+        self.shoots = [(vec2(0.0, 0.0), 1.0, IDLE); SHOOTS_MAX];
+        self.shoot_count = 0;
+        self.glows = [(vec2(0.0, 0.0), IDLE); GLOWS_MAX];
+        self.glow_count = 0;
     }
 
     fn pump_rain(&mut self, dt: f32, w: f32) {
@@ -511,6 +556,33 @@ impl ClockScene {
     }
     pub(crate) fn fly_taps(&self) -> u32 {
         self.fly_taps
+    }
+    /// The trophy star's center (its supernova tap target).
+    pub(crate) fn finale_trophy_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        finale_layout(f).trophy
+    }
+    pub(crate) fn trophy_taps(&self) -> u32 {
+        self.trophy_taps
+    }
+    /// The cottage's center (its knock tap target — mid-wall).
+    pub(crate) fn finale_cottage_center(&self, f: &crate::layout::Frame) -> Vec2 {
+        let fl = finale_layout(f);
+        vec2(fl.house.x, fl.house.y - fl.house_s * 0.36)
+    }
+    pub(crate) fn cottage_taps(&self) -> u32 {
+        self.cottage_taps
+    }
+    pub(crate) fn shoot_count(&self) -> u32 {
+        self.shoot_count
+    }
+    pub(crate) fn glow_count(&self) -> u32 {
+        self.glow_count
+    }
+    /// A patch of open meadow (the glow-pop tap target), clear of the sleepers
+    /// + cottage.
+    pub(crate) fn finale_meadow_point(&self, f: &crate::layout::Frame) -> Vec2 {
+        let fl = finale_layout(f);
+        vec2(f.w * 0.08, (fl.ground_y + f.h) / 2.0)
     }
     pub(crate) fn replay_center(&self, f: &crate::layout::Frame) -> Vec2 {
         chrome::corner_buttons(f).0
@@ -764,6 +836,14 @@ impl ClockScene {
         advance(&mut self.fly_t, dt, FLY_FLARE_S);
         advance(std::slice::from_mut(&mut self.frog_t), dt, FROG_STIR_S);
         advance(std::slice::from_mut(&mut self.moon_t), dt, MOON_WINK_S);
+        advance(std::slice::from_mut(&mut self.cottage_t), dt, COTTAGE_KNOCK_S);
+        advance(std::slice::from_mut(&mut self.trophy_t), dt, TROPHY_SUPER_S);
+        for s in &mut self.shoots {
+            advance(std::slice::from_mut(&mut s.2), dt, SHOOT_S);
+        }
+        for g in &mut self.glows {
+            advance(std::slice::from_mut(&mut g.1), dt, GLOW_S);
+        }
         self.phase = Phase::Finale { t: t + dt };
 
         let pt = ctx.pointer;
@@ -848,6 +928,54 @@ impl ClockScene {
                 return Nav::Stay;
             }
         }
+        // The trophy star: a SUPERNOVA — it swells, its sparkles whirl, and a
+        // gold shell blooms (kept on a twinkle, not a fanfare: it's bedtime).
+        if input::hit_circle(pt.pos, fl.trophy.x, fl.trophy.y, fl.r * 1.7)
+            && self.trophy_t >= TROPHY_SUPER_S
+            && self.tap_debounce.accept(TGT_TROPHY, ctx.time)
+        {
+            self.trophy_t = 0.0;
+            self.trophy_taps += 1;
+            ctx.audio.twinkle();
+            self.confetti.burst(fl.trophy, 24, fl.r * 1.5);
+            return Nav::Stay;
+        }
+        // The cottage: a gentle KNOCK — ding-dong, the window blooms warm and
+        // the chimney coughs an extra curl of smoke.
+        if input::hit_rect(
+            pt.pos,
+            fl.house.x - fl.house_s * 0.66,
+            fl.house.y - fl.house_s * 1.26,
+            fl.house_s * 1.32,
+            fl.house_s * 1.26,
+        ) && self.cottage_t >= COTTAGE_KNOCK_S
+            && self.tap_debounce.accept(TGT_COTTAGE, ctx.time)
+        {
+            self.cottage_t = 0.0;
+            self.cottage_taps += 1;
+            ctx.audio.doorbell();
+            return Nav::Stay;
+        }
+        // Open meadow: a firefly-green glow-pop blooms under the finger.
+        if pt.pos.y > fl.ground_y {
+            let slot = self.glow_count as usize % GLOWS_MAX;
+            if self.tap_debounce.accept(TGT_GLOW_BASE + slot as u32, ctx.time) {
+                self.glows[slot] = (pt.pos, 0.0);
+                self.glow_count += 1;
+                ctx.audio.trace_tick(self.glow_count % fountouki_core::audio::TRACE_TICK_STEPS);
+            }
+            return Nav::Stay;
+        }
+        // Open night sky: a SHOOTING STAR streaks from the finger toward the
+        // meadow (leaning away from the nearer edge) — every tap on the night
+        // answers with a little wonder.
+        let slot = self.shoot_count as usize % SHOOTS_MAX;
+        if self.tap_debounce.accept(TGT_SHOOT_BASE + slot as u32, ctx.time) {
+            let rightward = if pt.pos.x < ctx.frame.w / 2.0 { 1.0 } else { -1.0 };
+            self.shoots[slot] = (pt.pos, rightward, 0.0);
+            self.shoot_count += 1;
+            ctx.audio.twinkle();
+        }
         Nav::Stay
     }
 
@@ -883,6 +1011,20 @@ impl ClockScene {
             self.draw_sleeper(ctx, fl.friends[i].0, fl.friends[i].1, t, self.friend_t[i], i + 1);
         }
         self.draw_sleeper(ctx, fl.frog, fl.frog_r, t, self.frog_t, 0);
+
+        // Shooting stars launched by sky taps, streaking toward the meadow.
+        for &(o, rightward, st) in &self.shoots {
+            if st < SHOOT_S {
+                let dir = vec2(rightward * 0.86, 0.5).normalize();
+                draw::shooting_star(o.x, o.y, dir, f.w * 0.22, f.vmin(0.012), st / SHOOT_S);
+            }
+        }
+        // Firefly-green glow-pops blooming where the meadow was touched.
+        for &(c, gt) in &self.glows {
+            if gt < GLOW_S {
+                draw::twinkle_pop(c.x, c.y, f.vmin(0.03), gt / GLOW_S, palette::hex(0xd8ff8a));
+            }
+        }
 
         self.confetti.draw();
         let (replay, home, br) = chrome::corner_buttons(f);
@@ -980,7 +1122,8 @@ impl ClockScene {
             vec2(c.x, base - wh - s * 0.5),
             roof,
         );
-        // Chimney + a lazy smoke curl.
+        // Chimney + a lazy smoke curl; a knock adds a quick cough of extra
+        // puffs rising off the chimney.
         let cx = c.x + ww * 0.30;
         draw_rectangle(cx - s * 0.06, base - wh - s * 0.34, s * 0.12, s * 0.30, roof);
         for k in 0..3 {
@@ -988,10 +1131,28 @@ impl ClockScene {
             let sx = cx + (t * 1.3 + k as f32 * 1.7).sin() * s * 0.05;
             draw::disc(sx, base - wh - s * 0.40 - a * s * 0.6, s * 0.05 * (1.0 + a), palette::hexa(0xcfd6e6, (1.0 - a) * 0.5));
         }
-        // The warm lit window — a soft glow + golden panes.
+        let knock = if self.cottage_t < COTTAGE_KNOCK_S {
+            1.0 - self.cottage_t / COTTAGE_KNOCK_S
+        } else {
+            0.0
+        };
+        if knock > 0.0 {
+            let p = 1.0 - knock;
+            for k in 0..2 {
+                let rise = p * s * (0.5 + 0.25 * k as f32);
+                draw::disc(
+                    cx + (k as f32 - 0.5) * s * 0.10,
+                    base - wh - s * 0.44 - rise,
+                    s * 0.08 * (1.0 + p),
+                    palette::hexa(0xe7ecf7, knock * 0.7),
+                );
+            }
+        }
+        // The warm lit window — a soft glow + golden panes; a knock blooms the
+        // glow wide, like someone padding to the door with a lamp.
         let wy = base - wh * 0.52;
-        let glow = 0.5 + 0.5 * anim::pulse(t, 0.7).max(0.0);
-        draw::disc(c.x, wy, s * 0.26 * glow.max(0.6), palette::hexa(0xffd98a, 0.22));
+        let glow = 0.5 + 0.5 * anim::pulse(t, 0.7).max(0.0) + knock * 0.9;
+        draw::disc(c.x, wy, s * 0.26 * glow.max(0.6), palette::hexa(0xffd98a, 0.22 + 0.16 * knock));
         let wsz = s * 0.22;
         draw_rectangle(c.x - wsz / 2.0, wy - wsz / 2.0, wsz, wsz, palette::hex(0xffd98a));
         draw_rectangle(c.x - wsz / 2.0, wy - 1.5, wsz, 3.0, palette::hexa(0x46506b, 0.8));
@@ -1004,9 +1165,21 @@ impl ClockScene {
     fn draw_trophy(&self, fl: &FinaleLayout, t: f32) {
         let pop = anim::back_out((t / STAR_POP_DUR).clamp(0.0, 1.0)).min(STAR_POP_CAP);
         let throb = 1.0 + 0.06 * anim::pulse(t, 0.9).max(0.0);
-        let r = fl.r * pop * throb;
+        // A tapped SUPERNOVA: swell on a half-sine, whirl the sparkles, and
+        // bloom a gold shell around the star.
+        let (swell, whirl) = if self.trophy_t < TROPHY_SUPER_S {
+            let p = self.trophy_t / TROPHY_SUPER_S;
+            (1.0 + 0.35 * (p * std::f32::consts::PI).sin(), 2.5 * anim::ease_out_cubic(p))
+        } else {
+            (1.0, 0.0)
+        };
+        let r = fl.r * pop * throb * swell;
+        if self.trophy_t < TROPHY_SUPER_S {
+            let p = self.trophy_t / TROPHY_SUPER_S;
+            draw::firework(fl.trophy.x, fl.trophy.y, fl.r * 2.2, p, palette::GOLD);
+        }
         for i in 0..8 {
-            let a = t * 0.6 + i as f32 * (TAU / 8.0);
+            let a = (t + whirl) * 0.6 + whirl + i as f32 * (TAU / 8.0);
             let far = if i % 2 == 0 { 1.5 } else { 1.9 };
             let breathe = 0.5 + 0.5 * (t * 2.4 + i as f32 * 0.8).sin();
             let sp = fl.trophy + vec2(a.cos(), a.sin()) * r * far;

@@ -262,8 +262,10 @@ pub fn hammer() -> Vec<f32> {
     mix(&notes)
 }
 
-/// Number of distinct [`trace_tick`] pitches (steps above this clamp).
-pub const TRACE_TICK_STEPS: u32 = 8;
+/// Number of distinct [`trace_tick`] pitches (steps above this clamp). Nine
+/// steps so the counting game's ticks 1..9 climb strictly within each decade
+/// (the tens land a fanfare instead) — the ladder never wraps mid-decade.
+pub const TRACE_TICK_STEPS: u32 = 9;
 
 /// `trace_tick(step)` — a tiny sparkle "tick" that climbs a C-major pentatonic
 /// ladder as the finger advances along a stroke. Much quieter than [`tap`] so
@@ -271,7 +273,8 @@ pub const TRACE_TICK_STEPS: u32 = 8;
 pub fn trace_tick(step: u32) -> Vec<f32> {
     // Pentatonic: every consecutive pair is consonant, so any tick cadence
     // sounds melodic rather than like an alarm.
-    const LADDER: [f32; 8] = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51];
+    const LADDER: [f32; 9] =
+        [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51, 1567.98];
     let freq = LADDER[(step.min(TRACE_TICK_STEPS - 1)) as usize];
     let notes = [Note { freq, start: 0.0, dur: 0.06, gain: 0.055, waveform: Waveform::Sine }];
     mix(&notes)

@@ -15,6 +15,7 @@
 //! Everything is re-exported flat so call sites stay `draw::frog(..)` etc.
 mod critters;
 mod frog;
+mod fx;
 mod glyphs;
 mod house;
 mod prim;
@@ -24,6 +25,7 @@ mod train;
 
 pub use critters::{critter, Critter, CritterPose};
 pub use frog::{frog, frog_hard_hat, frog_headphones, frog_party_hat, FrogPose};
+pub use fx::{firework, shooting_star, twinkle_pop};
 pub use house::{
     house, house_chimney_center, house_door_rect, house_height, house_part_anchor,
     house_window_centers, HousePose, HOUSE_PARTS,
@@ -38,9 +40,9 @@ pub use prim::{
 };
 pub use scenery::{
     cattail, cloud, dragonfly, garden_plant, grass_tuft, igloo, lily_pad, plant, pond, rainbow,
-    rainbow_ghost, sun, sun_rays, Plant, GARDEN_SPECIES,
+    rainbow_ghost, rainbow_hit, rainbow_shimmer, sun, sun_rays, Plant, GARDEN_SPECIES,
 };
 pub use train::{
-    bunting, checker_flag, engine_funnel_tip, engine_hit_rect, steam_puff, train_car_chassis,
-    train_engine, EnginePose,
+    bunting_wave, checker_flag, engine_funnel_tip, engine_hit_rect, steam_puff,
+    train_car_chassis, train_engine, EnginePose, BUNTING_WAVE_S,
 };
